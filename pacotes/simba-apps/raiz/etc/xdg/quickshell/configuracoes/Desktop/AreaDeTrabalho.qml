@@ -191,8 +191,16 @@ Scope {
 
   Component.onCompleted: listar()
 
+  // Ctrl + scroll, reported by a Hyprland bind (the desktop never sees Ctrl: the keyboard
+  // stays with the focused window). Acts only when the pointer is over a desktop showing icons.
+  function rodaCtrl(passo) {
+    var s = superficies.instances.filter(function(x) { return x.sobCursor && x.mostrarIcones })[0]
+    if (s) zoom(passo)
+  }
+
   // ── surfaces ─────────────────────────────────────────────────────────────
   Variants {
+    id: superficies
     model: Quickshell.screens
     delegate: Superficie {
       required property var modelData

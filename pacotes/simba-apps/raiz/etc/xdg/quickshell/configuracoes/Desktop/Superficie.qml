@@ -12,6 +12,7 @@ PanelWindow {
   id: sup
   property var area: null
   property bool mostrarIcones: false
+  readonly property bool sobCursor: sobre.hovered
   readonly property string nome: screen ? screen.name : ""
 
   anchors { top: true; bottom: true; left: true; right: true }
@@ -112,19 +113,9 @@ PanelWindow {
     anchors.fill: parent
     focus: true
 
-    // Ctrl + scroll = bigger / smaller icons (anywhere on the desktop, icons included).
-    // Touchpads send small deltas: accumulate to one step per wheel notch (120).
-    property real rodaAcumulada: 0
-    WheelHandler {
-      target: null
-      acceptedModifiers: Qt.ControlModifier
-      enabled: sup.mostrarIcones
-      onWheel: function(ev) {
-        raiz.rodaAcumulada += ev.angleDelta.y
-        while (raiz.rodaAcumulada >= 120) { raiz.rodaAcumulada -= 120; sup.area.zoom(1) }
-        while (raiz.rodaAcumulada <= -120) { raiz.rodaAcumulada += 120; sup.area.zoom(-1) }
-      }
-    }
+    // Pointer over this desktop (icons included; a window on top takes it away).
+    // Ctrl + scroll resizes the icons only while this is true (see AreaDeTrabalho.rodaCtrl).
+    HoverHandler { id: sobre }
 
     // Delete = lixeira · F2 = renomear · Enter = abrir · Ctrl+A/C/X/V · Esc = limpar seleção
     Keys.onPressed: function(e) {

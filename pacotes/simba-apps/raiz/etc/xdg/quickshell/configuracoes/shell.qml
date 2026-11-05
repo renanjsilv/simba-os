@@ -95,6 +95,7 @@ ShellRoot {
     function atualizar(): void { desktop.atualizar() }
     function espiar(ms: int): void { desktop.espiar(ms) }
     function areaZoom(passos: int): void { desktop.zoom(passos) }
+    function areaRoda(passo: int): void { desktop.rodaCtrl(passo) }
     function icone(nome: string): string { return Quickshell.iconPath(nome, true) }
     // Run a desktop-menu action by id (tests): atualizar, novaPasta, novoTexto, colar, …
     function areaAcao(id: string): void { desktop.acao(id) }

@@ -224,6 +224,33 @@ tela_tpm() {
   gum confirm --padding "0 0 0 $REC" --affirmative "$(t "Sim" "Yes")" --negative "$(t "Não" "No")" "$(t "Ativar?" "Enable?")" && USE_TPM=s || true
 }
 
+tela_login() {
+  AUTO_LOGIN=n
+  cabecalho "$(t "Entrada" "Sign-in")"; recuo
+  pergunta "$(t "Entrar sem senha ao ligar?" "Sign in without a password at startup?")" \
+    "$(t "Mais rápido, mas qualquer pessoa que ligar o computador entra na sua conta." "Faster, but anyone who turns the computer on gets into your account.")"
+  gum confirm --padding "0 0 0 $REC" --affirmative "$(t "Sim" "Yes")" --negative "$(t "Não" "No")" --default=false \
+    "$(t "Entrar automaticamente?" "Sign in automatically?")" && AUTO_LOGIN=s || true
+}
+
+# Vídeo deste computador: open = NVIDIA Turing ou mais nova (driver aberto), legado = Maxwell a
+# Volta (580xx), antiga = Kepler ou anterior (sem driver atual), vazio = sem NVIDIA. Mesma regra
+# do simba-hw-nvidia-gsp / simba-hw-nvidia-without-gsp do sistema.
+nv_familia() {
+  local d id f=""
+  for d in /sys/bus/pci/devices/*; do
+    [ "$(cat "$d/vendor" 2>/dev/null)" = 0x10de ] || continue
+    case $(cat "$d/class" 2>/dev/null) in 0x03*) ;; *) continue ;; esac
+    id=$(( $(cat "$d/device") ))
+    if [ $id -ge $((0x1e00)) ]; then f=open; elif [ $id -ge $((0x1340)) ]; then f=legado; else f=antiga; fi
+  done
+  echo "$f"
+}
+desc_video() {
+  lspci -mm 2>/dev/null | awk -F'"' '$2 ~ /VGA|3D|Display/ {sub(/ Corporation/, "", $4); print $4 " " $6}' |
+    sed 's/\[//; s/\]//' | sed ':a;N;$!ba;s/\n/ + /g'
+}
+
 tela_resumo() {
   cabecalho "$(t "Tudo pronto" "Ready to install")"; recuo
   local l
@@ -233,6 +260,8 @@ tela_resumo() {
     printf '%s\t%s\n' "$(t "Idioma" "Language")" "$( [ "$SYS_LANG" = en_US ] && echo English || echo "Português (Brasil)")"
     printf '%s\t%s\n' "$(t "Teclado" "Keyboard")" "$KEYMAP"
     printf '%s\t%s\n' "$(t "Disco" "Disk")" "$(printf '%s' "$DISK_DESC" | sed 's/  */ /g')"
+    printf '%s\t%s\n' "$(t "Vídeo" "Graphics")" "$(desc_video | cut -c1-60)"
+    printf '%s\t%s\n' "$(t "Entrada" "Sign-in")" "$( [ "$AUTO_LOGIN" = s ] && t "automática, sem senha" "automatic, no password" || t "com senha" "with password")"
   } | while IFS=$'\t' read -r k v; do printf '%*s\e[1;30m%-12s\e[0;37m%s\n' $REC '' "$k" "$v"; done
   printf '\n%*s\e[31m%s\e[0;37m\n\n' $REC '' "$(t "Todo o conteúdo do disco será apagado." "Everything on the disk will be erased.")"
   gum confirm --padding "0 0 0 $REC" --affirmative "$(t "Instalar" "Install")" --negative "$(t "Voltar" "Back")" --default=false "$(t "Instalar agora?" "Install now?")"
@@ -315,6 +344,7 @@ while :; do
   tela_computador
   tela_disco
   tela_tpm
+  tela_login
   tela_resumo && break
 done
 
@@ -515,6 +545,51 @@ if [ -f "$T/etc/vconsole.conf" ]; then
   [ "$XKB" = br ] || sed -i 's/^XKBMODEL=.*/XKBMODEL=pc105/' "$T/etc/vconsole.conf"
 fi
 
+# ---------------------------------------------------------------- hardware
+# O clone traz os drivers do computador de origem: ajusta ao computador onde está instalando.
+progresso 90 "$(t "Ajustando ao hardware" "Adapting to the hardware")"
+AVISO_HW=""
+tem_rede() { curl -fsI --max-time 6 https://archlinux.org >/dev/null 2>&1; }
+NV_FAM=$(nv_familia)
+NV_PKGS=$(arch-chroot "$T" pacman -Qq 2>/dev/null | grep -E '^(lib32-)?nvidia-(open|580xx|dkms|utils)|^(lib32-)?nvidia-utils$|^libva-nvidia-driver$' | tr '\n' ' ' || true)
+NV_INST=""
+case " $NV_PKGS " in *" nvidia-580xx-"*) NV_INST=legado ;; *" nvidia-open"*) NV_INST=open ;; esac
+echo "hardware: nvidia=${NV_FAM:-nenhuma} instalado=${NV_INST:-nenhum} pacotes=[$NV_PKGS]" >> "$LOG"
+if [ -z "$NV_FAM" ] && [ -n "$NV_PKGS" ]; then
+  # sem NVIDIA aqui: tira os drivers (e o carregamento cedo no boot)
+  x arch-chroot "$T" pacman -Rdd --noconfirm $NV_PKGS || echo "aviso: remover nvidia" >> "$LOG"
+  rm -f "$T/etc/mkinitcpio.conf.d/nvidia.conf" "$T/etc/modprobe.d/nvidia.conf"
+elif [ -n "$NV_FAM" ] && [ "$NV_FAM" != "$NV_INST" ]; then
+  if [ "$NV_FAM" = open ] && tem_rede; then
+    [ -n "$NV_PKGS" ] && x arch-chroot "$T" pacman -Rdd --noconfirm $NV_PKGS || true
+    x arch-chroot "$T" pacman -Sy --noconfirm --needed nvidia-open-dkms nvidia-utils lib32-nvidia-utils libva-nvidia-driver ||
+      AVISO_HW=$(t "Não deu para instalar o driver da placa NVIDIA. Depois, rode: sudo pacman -S nvidia-open-dkms nvidia-utils" "Couldn't install the NVIDIA driver. Later, run: sudo pacman -S nvidia-open-dkms nvidia-utils")
+    printf 'options nvidia_drm modeset=1\n' > "$T/etc/modprobe.d/nvidia.conf"
+    printf 'MODULES+=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)\n' > "$T/etc/mkinitcpio.conf.d/nvidia.conf"
+  elif [ "$NV_FAM" = antiga ]; then
+    AVISO_HW=$(t "Esta placa NVIDIA é antiga demais para os drivers atuais: o vídeo usa o driver livre (nouveau)." "This NVIDIA card is too old for current drivers: graphics use the free driver (nouveau).")
+  else
+    AVISO_HW=$(t "A placa NVIDIA precisa de outro driver. Conecte à internet e rode: simba-pkg-add nvidia-580xx-dkms nvidia-580xx-utils (ou veja wiki.archlinux.org/title/NVIDIA)" "The NVIDIA card needs a different driver. Connect to the internet and run: simba-pkg-add nvidia-580xx-dkms nvidia-580xx-utils (see wiki.archlinux.org/title/NVIDIA)")
+  fi
+fi
+# microcódigo do processador (o clone traz o da máquina de origem)
+case $(awk -F': ' '/^vendor_id/{print $2; exit}' /proc/cpuinfo) in
+  AuthenticAMD) UCODE=amd-ucode ;;
+  GenuineIntel) UCODE=intel-ucode ;;
+  *) UCODE="" ;;
+esac
+if [ -n "$UCODE" ] && ! arch-chroot "$T" pacman -Q "$UCODE" >/dev/null 2>&1; then
+  if tem_rede; then x arch-chroot "$T" pacman -Sy --noconfirm --needed "$UCODE" || true
+  else echo "aviso: sem $UCODE (sem internet)" >> "$LOG"; fi
+fi
+# entrada automática (SDDM)
+if [ "$AUTO_LOGIN" = s ]; then
+  mkdir -p "$T/etc/sddm.conf.d"
+  printf '[Autologin]\nUser=%s\nSession=simba.desktop\n' "$NEW_USER" > "$T/etc/sddm.conf.d/autologin.conf"
+else
+  rm -f "$T/etc/sddm.conf.d/autologin.conf"
+fi
+
 progresso 91 "$(t "Aplicando o idioma" "Setting the language")"
 if [ -x "$T/usr/bin/simba-idioma" ]; then
   x arch-chroot "$T" simba-idioma "$SYS_LANG" || echo "aviso: idioma" >> "$LOG"
@@ -556,6 +631,9 @@ pergunta "$(t "O $NOME_SISTEMA foi instalado" "$NOME_SISTEMA is installed")" \
   "$(t "Retire o pendrive. Ao ligar, entre com a sua senha." "Remove the USB drive. At startup, sign in with your password.")"
 if [ "$MODO" = distribuivel ]; then
   printf '%*s\e[1;30m%s\e[0;37m\n\n' $REC '' "$(t "Usuário: $NEW_USER" "User: $NEW_USER")"
+fi
+if [ -n "$AVISO_HW" ]; then
+  printf '%*s\e[33m%s\e[0;37m\n\n' $REC '' "$AVISO_HW"
 fi
 # O pendrive pode já ter sido retirado: reinicia/desliga pelo kernel (sysrq), sem ler
 # nada do sistema live. O disco instalado já foi desmontado acima.

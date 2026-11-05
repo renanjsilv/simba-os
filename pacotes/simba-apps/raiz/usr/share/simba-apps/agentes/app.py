@@ -408,10 +408,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.ativo_assistente_buf = None
         self.ativo_cleaner = None
 
+    def _on_input_text_changed(self, buf):
+        self.lbl_placeholder.set_visible(buf.get_char_count() == 0)
+
     def _on_key_pressed(self, _controller, keyval, _keycode, state):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
             if not (state & Gdk.ModifierType.SHIFT_MASK):
                 self._on_enviar()
+                return True
+        elif keyval == Gdk.KEY_Escape:
+            if self.proc and self.proc.poll() is None:
+                self._interromper()
                 return True
         elif keyval == Gdk.KEY_l and (state & Gdk.ModifierType.CONTROL_MASK):
             self._limpar_chat()
@@ -435,6 +442,10 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Se já existe um processo ativo e aguardando entrada do usuário:
         if self.proc and self.mestre_fd is not None and self.proc.poll() is None:
+            self.ativo_cleaner = TerminalCleaner()
+            self._adicionar_bolha_assistente(self.agente_atual or "auto")
+            self.btn_parar.set_visible(True)
+            self.btn_enviar.set_visible(True)
             try:
                 os.write(self.mestre_fd, (texto + "\n").encode("utf-8"))
             except OSError:
@@ -509,8 +520,8 @@ class MainWindow(Adw.ApplicationWindow):
             self._adicionar_sistema(f"{_t('Erro ao iniciar')} {info['nome']}: {e}")
             return
 
-        self.btn_enviar.set_visible(False)
         self.btn_parar.set_visible(True)
+        self.btn_enviar.set_visible(True)
 
         threading.Thread(target=self._loop_leitura, args=(mestre, agente, pedido, cfg), daemon=True).start()
 
@@ -694,6 +705,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.ativo_assistente_view = tv
         self.ativo_assistente_buf = tv_buf
+        self.ativo_cleaner = TerminalCleaner()
         self._scroll_para_fim()
 
     def _adicionar_aviso_handover(self, nome_antigo, nome_proximo):

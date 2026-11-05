@@ -2159,5 +2159,6 @@
  "Selecionar Pasta de Trabalho": "Select Working Folder",
  "Todos os agentes configurados estão sem limite no momento. Contexto salvo em:": "All configured agents are currently out of quota. Context saved to:",
  "acabou. O trabalho continua automaticamente.": "has ended. Work continues automatically.",
- "sem limite até": "no quota until"
+ "sem limite até": "no quota until",
+ "Escreva uma mensagem ou comando... (Enter envia, Shift+Enter quebra)": "Type a message or command... (Enter sends, Shift+Enter new line)"
 }

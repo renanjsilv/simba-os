@@ -739,7 +739,6 @@
  "Forçar encerramento": "Force quit",
  "Fundo do menu": "Menu background",
  "Fundo do menu Iniciar": "Start menu background",
- "Fundo transparente": "Transparent background",
  "Fuso horário": "Time zone",
  "Galeria": "Gallery",
  "Gerando a ISO": "Creating the ISO",
@@ -1113,7 +1112,6 @@
  "O menu vai aparecer na próxima inicialização": "The menu will show up on the next boot",
  "O mesmo do atalho Super+P.": "The same as the Super+P shortcut.",
  "O modo “sem espaços” do sistema está ligado e zera espaços, bordas e cantos por cima destes ajustes.": "The system's “no gaps” mode is on and zeroes gaps, borders and corners on top of these settings.",
- "O papel de parede aparece atrás da barra": "The wallpaper shows behind the bar",
  "O pendrive foi removido": "The USB drive was removed",
  "O processo parou inesperadamente (veja %1)": "The process stopped unexpectedly (see %1)",
  "O projeto não publica notas num lugar que dê para ler daqui. Versão %1 → %2.": "The project doesn't publish notes anywhere readable from here. Version %1 → %2.",
@@ -1767,7 +1765,6 @@
  "barra de tarefas taskbar dock apps fixar fixados programas icones": "taskbar dock apps pin pinned programs icons",
  "barra posicao topo base lateral": "bar position top bottom side",
  "barra topo esconder mostrar painel waybar": "top bar hide show panel waybar",
- "barra transparencia fundo": "bar transparency background",
  "bateria carga carregando tempo": "battery charge charging time",
  "bloqueio lock senha tempo inatividade": "lock password time idle timeout",
  "bluetooth ligar desligar": "bluetooth on off",
@@ -2064,5 +2061,11 @@
  "”, que não está instalado; usando o mais parecido)": "”, which isn't installed; using the closest one)",
  "↻ Atualizar": "↻ Refresh",
  "▶ Ouvir": "▶ Listen",
- "✓  Conectado como %1": "✓  Signed in as %1"
+ "✓  Conectado como %1": "✓  Signed in as %1",
+ "Transparência do fundo": "Background transparency",
+ "Quanto do papel de parede aparece atrás da barra · 0 % = sólida": "How much of the wallpaper shows behind the bar · 0 % = solid",
+ "Transparência da barra ajustada": "Bar transparency adjusted",
+ "Transparência da barra": "Bar transparency",
+ "Quanto do papel de parede aparece atrás da barra": "How much of the wallpaper shows behind the bar",
+ "barra transparencia transparente fundo opacidade nivel": "bar transparency transparent background opacity level"
 }

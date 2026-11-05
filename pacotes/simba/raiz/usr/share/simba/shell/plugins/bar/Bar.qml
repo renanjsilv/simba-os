@@ -52,6 +52,10 @@ Item {
   property var layoutConfig: fallbackBarConfig.layout
   property string centerAnchor: ""
   property bool requestedTransparent: false
+  // Background transparency, 0 (solid) … 1 (none). shell.json "bar.transparency" in percent;
+  // without it the old switch "bar.transparent" means 100 %. From 50 % on, the text adapts
+  // to the wallpaper (requestedTransparent), as in the fully transparent bar.
+  property real transparency: 0
   property bool useTransparentForeground: false
   property bool transparent: false
   property bool centerSectionHovered: false
@@ -596,7 +600,8 @@ Item {
     var config = Util.isPlainObject(barConfig) ? barConfig : fallbackBarConfig
 
     position = normalizePosition(config.position)
-    setRequestedTransparency(config.transparent === true)
+    transparency = transparencyFromConfig(config)
+    setRequestedTransparency(transparency >= 0.5)
     centerAnchor = Util.canonicalWidgetId(config.centerAnchor || "")
 
     // layoutEntries feeds plain JS arrays to the module Repeaters, and QML
@@ -858,12 +863,20 @@ Item {
     Util.execDetached(command)
   }
 
+  function transparencyFromConfig(config) {
+    var t = Number(config.transparency)
+    if (config.transparency !== undefined && config.transparency !== null && isFinite(t))
+      return Math.max(0, Math.min(100, t)) / 100
+    return config.transparent === true ? 1 : 0
+  }
+
   function toggleTransparency() {
     var nextTransparent = !(root.requestedTransparent === true)
     if (root.shell && typeof root.shell.mutateShellConfig === "function") {
       root.shell.mutateShellConfig(function(config) {
         if (!Util.isPlainObject(config.bar)) config.bar = {}
         config.bar.transparent = nextTransparent
+        config.bar.transparency = nextTransparent ? 100 : 0
       })
     } else {
       root.setRequestedTransparency(nextTransparent)
@@ -1277,7 +1290,7 @@ Item {
 
     implicitWidth: root.vertical ? root.barSize : 0
     implicitHeight: root.vertical ? 0 : root.barSize
-    color: root.transparent ? "transparent" : root.background
+    color: Qt.rgba(root.background.r, root.background.g, root.background.b, root.background.a * (1 - root.transparency))
     surfaceFormat.opaque: false
     WlrLayershell.namespace: "simba-bar"
     WlrLayershell.layer: WlrLayer.Top

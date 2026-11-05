@@ -218,6 +218,7 @@ barra() {
   simba-toggle-enabled bar-off 2>/dev/null && oculta=true
   jq -c -n --argjson s "$(jq -c . "$f")" --argjson c "$(simba-plugin-catalog 2>/dev/null || echo '[]')" --argjson o "$oculta" '{
     posicao: ($s.bar.position // "top"), transparente: ($s.bar.transparent // false), oculta: $o,
+    transparencia: (if ($s.bar.transparency | type) == "number" then $s.bar.transparency elif $s.bar.transparent == true then 100 else 0 end),
     layout: { left: [($s.bar.layout.left // [])[] | .id], center: [($s.bar.layout.center // [])[] | .id], right: [($s.bar.layout.right // [])[] | .id] },
     relogio: ([($s.bar.layout // {} | to_entries[] | .value[]) | select(.id == "simba.clock")][0].format // "HH:mm"),
     catalogo: [ $c[] | select(.kinds | index("bar-widget")) | { id, nome: (.barWidget.displayName // .name), categoria: (.barWidget.category // ""), multiplo: (.barWidget.allowMultiple // false) } ]

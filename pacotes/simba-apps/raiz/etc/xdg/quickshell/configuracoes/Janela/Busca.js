@@ -74,7 +74,7 @@ var itens = [
   // Barra
   ["barra", "barraMostrar", "Mostrar a barra", "", "barra topo esconder mostrar painel waybar"],
   ["barra", "barraPosicao", "Posição da barra", "Topo, base, esquerda ou direita", "barra posicao topo base lateral"],
-  ["barra", "barraTransparente", "Barra transparente", "", "barra transparencia fundo"],
+  ["barra", "barraTransparente", "Transparência da barra", "Quanto do papel de parede aparece atrás da barra", "barra transparencia transparente fundo opacidade nivel"],
   ["barra", "barraCentro", "Ícones do centro da barra", "Ocultar ou mostrar", "centro meio ocultar esconder icones indicadores clima teclado atualizacoes"],
   ["barra", "barraBandeja", "Seta de ícones ocultos", "Bandeja estilo Windows 11", "seta bandeja ocultos esconder icones tray overflow windows"],
   ["barra", "barraItens", "Itens da barra", "Mostrar, ocultar e reordenar widgets", "widgets itens relogio bateria rede bluetooth audio bandeja tray clima"],

@@ -2,7 +2,7 @@
 
 # simba:summary=Configure the bar and its widget layout
 # simba:group=bar
-# simba:args=use <id> | reset | defaults | position <top|bottom|left|right> | transparent <true|false|toggle> | put <id> [placement] | move <id> [placement] | set <id> <key> <value> [--json] [placement]
+# simba:args=use <id> | reset | defaults | position <top|bottom|left|right> | transparent <true|false|toggle> | transparency <0-100> | put <id> [placement] | move <id> [placement] | set <id> <key> <value> [--json] [placement]
 # simba:examples=simba bar use local.neon-bar | simba bar put simba.keyboard-layout --after simba.clock | simba bar move simba.clock --section center --index 0 | simba bar set simba.clock format HH:mm
 
 set -euo pipefail
@@ -17,7 +17,8 @@ Usage: simba bar <command> [args...]
   reset                                Return to the built-in Simba bar
   defaults                             Restore the default bar and service widgets
   position <top|bottom|left|right>     Bar position
-  transparent <true|false|toggle>      Bar transparency
+  transparent <true|false|toggle>      Bar transparency (100 % / 0 %)
+  transparency <0-100>                 Background transparency in percent
   put <id> [placement]                 Put a widget on the bar, leaving one
                                        that is already there where it is
   move <id> [placement]                Move a widget within or between sections
@@ -210,12 +211,21 @@ cmd_transparent() {
   (( $# == 1 )) || fail "transparent takes a single value"
   [[ $transparent =~ ^(true|false|toggle)$ ]] || fail "transparent must be true, false, or toggle"
   if [[ $transparent == "toggle" ]]; then
-    commit "$NORMALIZE | .bar.transparent = (.bar.transparent != true)"
+    commit "$NORMALIZE | .bar.transparent = (.bar.transparent != true) | .bar.transparency = (if .bar.transparent then 100 else 0 end)"
     echo "Bar transparency toggled"
   else
-    commit "$NORMALIZE | .bar.transparent = \$transparent" --argjson transparent "$transparent"
+    commit "$NORMALIZE | .bar.transparent = \$transparent | .bar.transparency = (if \$transparent then 100 else 0 end)" --argjson transparent "$transparent"
     echo "Bar transparency set to $transparent"
   fi
+}
+
+cmd_transparency() {
+  local percent="${1:-}"
+  [[ -n $percent ]] || fail "transparency is required"
+  (( $# == 1 )) || fail "transparency takes a single value"
+  [[ $percent =~ ^[0-9]+$ ]] && (( percent <= 100 )) || fail "transparency must be 0-100"
+  commit "$NORMALIZE | .bar.transparency = \$p | .bar.transparent = (\$p >= 50)" --argjson p "$percent"
+  echo "Bar transparency set to $percent%"
 }
 
 bar_widget_default_section() {
@@ -384,6 +394,9 @@ case "$command" in
     ;;
   transparent)
     cmd_transparent "$@"
+    ;;
+  transparency)
+    cmd_transparency "$@"
     ;;
   put)
     cmd_put "$@"

@@ -13,6 +13,9 @@ Pagina {
 
   // ── estado ───────────────────────────────────────────────────────────────
   property var b: null          // ajudante barra (layout, catálogo, oculta, transparente…)
+  // transparência mostrada na mini barra: a do arrasto enquanto o controle se move
+  property real transparenciaArrasto: -1
+  readonly property real transparencia: transparenciaArrasto >= 0 ? transparenciaArrasto : (b ? b.transparencia : 0)
   property var t: null          // barra-tarefas estado
   property var icones: ({})     // desktop-id → arquivo (modo colorido)
   property bool ocupado: false
@@ -130,8 +133,8 @@ Pagina {
     property real escala: 1
     property bool vert: false
     readonly property int grossura: Math.round(pg.alturaBarra * escala)
-    readonly property color frente: pg.b && pg.b.transparente ? "#ffffff" : Tema.texto
-    color: pg.b && pg.b.transparente ? Qt.rgba(0, 0, 0, 0) : Tema.fundo
+    readonly property color frente: pg.transparencia >= 50 ? "#ffffff" : Tema.texto
+    color: Qt.rgba(Tema.fundo.r, Tema.fundo.g, Tema.fundo.b, 1 - pg.transparencia / 100)
     Behavior on color { ColorAnimation { duration: Tema.medio } }
 
     Grid {
@@ -402,9 +405,18 @@ Pagina {
     }
     Linha {
       chave: "barraTransparente"; glifo: Icones.opacity
-      titulo: I18n.t("Fundo transparente")
-      descricao: I18n.t("O papel de parede aparece atrás da barra")
-      Interruptor { ligado: pg.b ? pg.b.transparente : false; onAlternado: function(on) { pg.cmd(["simba-bar", "transparent", on ? "true" : "false"], on ? I18n.t("Barra transparente") : I18n.t("Barra sólida")) } }
+      titulo: I18n.t("Transparência do fundo")
+      descricao: I18n.t("Quanto do papel de parede aparece atrás da barra · 0 % = sólida")
+      Deslizante {
+        width: 240; de: 0; ate: 100; passo: 5; sufixo: " %"
+        valor: pg.b ? pg.b.transparencia : 0
+        onMovido: function(v) { pg.transparenciaArrasto = v }
+        onSolto: function(v) {
+          pg.transparenciaArrasto = -1
+          pg.cmd(["simba-bar", "transparency", String(Math.round(v))],
+                 v <= 0 ? I18n.t("Barra sólida") : (v >= 100 ? I18n.t("Barra transparente") : I18n.t("Transparência da barra ajustada")))
+        }
+      }
     }
     Linha {
       chave: "barraCentro"; glifo: Icones.eyeOutline

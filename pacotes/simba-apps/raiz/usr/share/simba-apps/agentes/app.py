@@ -38,80 +38,148 @@ import motor as M  # noqa: E402
 APP_ID = "com.simba.Agentes"
 HOME = Path.home()
 
-ANSI_CSI = re.compile(r"\x1b\[([0-9;?]*)([a-zA-Z])")
-ANSI_OSC = re.compile(r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
-ANSI_OTHER = re.compile(r"\x1b[()][0-9A-B]|\x1b[=>78]")
 
+# ── Parser Dinâmico de Eventos e Ferramentas ──────────────────────────────────
+class AgentStreamParser:
+    """Interpreta streams JSON (NDJSON) ou texto puro dos agentes de IA.
 
-class TerminalCleaner:
-    """Processa saídas de terminal VT100/ANSI, tratando spinners, cursores e rewrites."""
-    def __init__(self):
-        self._lock = threading.Lock()
-        self.linhas = []
-        self.atual = ""
-        self.resto = ""
+    Separa chamadas de ferramentas e spinners (direcionando para a pílula de status dinâmico)
+    do texto real da resposta que preenche a conversa.
+    """
 
-    def feed(self, texto: str):
-        texto = self.resto + texto
-        self.resto = ""
+    def __init__(self, on_status, on_text, on_done):
+        self.on_status = on_status
+        self.on_text = on_text
+        self.on_done = on_done
+        self.buffer = ""
+        self.actions = []
+        self.last_response = ""
+        self.has_text = False
 
-        # Preserva sequência de escape incompleta que tenha sido cortada no final do buffer
-        m = re.search(r"\x1b(\[[0-9;?]*[ -/]?)?$", texto)
+    def feed(self, chunk: str):
+        self.buffer += chunk
+        lines = self.buffer.split("\n")
+        self.buffer = lines.pop()
+
+        for line in lines:
+            line_s = line.strip()
+            if not line_s:
+                continue
+
+            # Tenta decodificar evento JSON
+            if line_s.startswith("{") and line_s.endswith("}"):
+                try:
+                    data = json.loads(line_s)
+                    self._handle_json(data)
+                    continue
+                except json.JSONDecodeError:
+                    pass
+
+            # Fallback para agentes que produzem texto puro / logs
+            self._handle_plain_text(line_s)
+
+    def _handle_json(self, data: dict):
+        event = data.get("event")
+
+        # Formato Antigravity CLI
+        if event == "step_update":
+            su = data.get("step_update", {})
+            st = su.get("step_type")
+            state = su.get("state")
+            if st == "tool":
+                tname = su.get("tool_name", "ferramenta")
+                tinfo = su.get("tool_info", {})
+                params = tinfo.get("parameters", {})
+                desc = self._format_tool(tname, params)
+                if state == "ACTIVE":
+                    self.on_status(desc)
+                elif state == "DONE":
+                    if desc not in self.actions:
+                        self.actions.append(desc)
+                    self.on_status(_t("✦ Pensando na resposta..."))
+            elif st == "agent_response":
+                delta = su.get("text_delta")
+                if delta:
+                    self.has_text = True
+                    self.on_text(delta)
+        elif event == "result":
+            res = data.get("result", {})
+            resp = res.get("response", "")
+            self.last_response = resp
+            self.on_done(resp)
+
+        # Formato Claude Code / stream-json
+        elif "type" in data:
+            t = data.get("type")
+            if t == "tool_use":
+                name = data.get("name", "ferramenta")
+                inp = data.get("input", {})
+                cmd = inp.get("command") or inp.get("path") or ""
+                desc = f"Executando: {cmd[:40]}" if cmd else f"Executando {name}"
+                if desc not in self.actions:
+                    self.actions.append(desc)
+                self.on_status(f"⚡ {desc}...")
+            elif t == "content_block_delta":
+                delta = data.get("delta", {}).get("text", "")
+                if delta:
+                    self.has_text = True
+                    self.on_text(delta)
+            elif t == "assistant":
+                msg = data.get("message", {})
+                for c in msg.get("content", []):
+                    if c.get("type") == "text":
+                        txt = c.get("text", "")
+                        self.has_text = True
+                        self.on_text(txt)
+            elif t == "result":
+                self.last_response = data.get("result", "")
+                self.on_done(self.last_response)
+
+    def _format_tool(self, tool_name: str, params: dict) -> str:
+        if tool_name == "run_command":
+            cmd = params.get("CommandLine", "")
+            return f"⚡ {_t('Executando:')} {cmd[:42]}..."
+        elif tool_name in ("read_file", "view_file"):
+            p = Path(params.get("Path", "")).name or params.get("Path", "")
+            return f"⚡ {_t('Lendo:')} {p}..."
+        elif tool_name in ("write_to_file", "replace_file_content", "edit_file"):
+            p = Path(params.get("Path", "")).name or params.get("Path", "")
+            return f"⚡ {_t('Editando:')} {p}..."
+        elif tool_name == "search_web":
+            q = params.get("query", "")
+            return f"⚡ {_t('Pesquisando na web:')} {q[:32]}..."
+        elif tool_name == "list_dir":
+            p = Path(params.get("Path", "")).name or params.get("Path", "")
+            return f"⚡ {_t('Listando:')} {p or _t('arquivos')}..."
+        return f"⚡ {tool_name}..."
+
+    def _handle_plain_text(self, line: str):
+        # Limpa caracteres de spinner braille
+        clean = re.sub(r"[\u2800-\u28FF]+", "", line).strip()
+        if not clean:
+            return
+
+        # Redireciona mensagens de comando para status
+        m = re.match(r"^(?:Running command|Reading file|Editing file|Searching)\s*:?\s*(.*)", clean, re.I)
         if m:
-            self.resto = m.group(0)
-            texto = texto[:m.start()]
+            self.on_status(f"⚡ {clean[:50]}...")
+            return
 
-        # Se terminar com \r, aguarda próximo chunk para checar se é \r\n
-        if texto.endswith("\r"):
-            self.resto = "\r" + self.resto
-            texto = texto[:-1]
+        # Descarta banners e indicadores de expansão de terminal
+        if re.search(r"(?:Antigravity CLI|ctrl\+o to expand|\bcommands? \(\+\d+)", clean, re.I):
+            self.on_status(_t("⚡ Executando ações..."))
+            return
 
-        # Converte newlines padrão de PTY/terminal (\r\n) para \n comum
-        texto = texto.replace("\r\n", "\n")
-        texto = ANSI_OSC.sub("", texto)
-        texto = ANSI_OTHER.sub("", texto)
+        self.has_text = True
+        self.on_text(clean + "\n")
 
-        with self._lock:
-            i = 0
-            n = len(texto)
-            while i < n:
-                if texto[i:i+2] == "\x1b[":
-                    m = ANSI_CSI.match(texto, i)
-                    if m:
-                        args, cmd = m.group(1), m.group(2)
-                        if cmd == "K":
-                            self.atual = ""
-                        elif cmd == "A":
-                            count = int(args) if args.isdigit() else 1
-                            for _ in range(count):
-                                if self.linhas:
-                                    self.atual = self.linhas.pop()
-                        elif cmd == "D":
-                            count = int(args) if args.isdigit() else 1
-                            self.atual = self.atual[:-count]
-                        elif cmd == "G":
-                            self.atual = ""
-                        i = m.end()
-                        continue
-                ch = texto[i]
-                if ch == "\r":
-                    self.atual = ""
-                elif ch == "\n":
-                    self.linhas.append(self.atual)
-                    self.atual = ""
-                elif ch == "\b":
-                    self.atual = self.atual[:-1]
-                else:
-                    self.atual += ch
-                i += 1
-
-    def get_text(self) -> str:
-        with self._lock:
-            res = self.linhas + ([self.atual] if self.atual else [])
-            return "\n".join(res)
+    def finish(self):
+        if self.buffer.strip():
+            self._handle_plain_text(self.buffer.strip())
+        self.on_done(self.last_response)
 
 
-def definir_tamanho_pty(fd, linhas=40, colunas=100):
+def definir_tamanho_pty(fd, linhas=40, colunas=120):
     try:
         ws = struct.pack("HHHH", linhas, colunas, 0, 0)
         fcntl.ioctl(fd, termios.TIOCSWINSZ, ws)
@@ -119,69 +187,111 @@ def definir_tamanho_pty(fd, linhas=40, colunas=100):
         pass
 
 
+# ── Design Moderno de Chat (UX/UI Especialista) ─────────────────────────────
 CSS = """
 window.background, .chat-window, .chat-bg, .chat-scroll {
   background-color: @window_bg_color;
+}
+
+/* Bolhas de mensagem do usuário (Alinhadas à direita com destaque visual) */
+.msg-user-box {
+  margin: 4px 14px 4px 80px;
 }
 .msg-user {
   background-color: @accent_bg_color;
   color: @accent_fg_color;
   border-radius: 18px 18px 4px 18px;
-  padding: 10px 16px;
-  margin-left: 80px;
-  box-shadow: 0 1px 3px alpha(#000, 0.12);
+  padding: 12px 18px;
+  box-shadow: 0 1px 3px alpha(#000, 0.15);
 }
 .msg-user label {
   color: @accent_fg_color;
-  font-size: 14px;
-  line-height: 1.4;
-}
-.msg-assistant {
-  background-color: alpha(@window_fg_color, 0.05);
-  border: 1px solid alpha(@window_fg_color, 0.10);
-  border-radius: 18px 18px 18px 4px;
-  padding: 14px 18px;
-  margin-right: 64px;
-}
-.msg-assistant-header {
-  font-size: 13px;
-  font-weight: 700;
-  opacity: 0.9;
-}
-.msg-body {
-  background-color: transparent;
-  font-size: 14px;
+  font-size: 14.5px;
   line-height: 1.45;
 }
+
+/* Cartão de resposta da IA (Ocupa 100% da largura útil sem cortes laterais) */
+.msg-assistant-card {
+  background-color: alpha(@window_fg_color, 0.04);
+  border: 1px solid alpha(@window_fg_color, 0.09);
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin: 6px 14px;
+}
+.msg-assistant-header {
+  font-size: 13.5px;
+  font-weight: 700;
+  opacity: 0.95;
+}
+.msg-assistant-model {
+  font-size: 11px;
+  opacity: 0.70;
+  background-color: alpha(@window_fg_color, 0.08);
+  border-radius: 10px;
+  padding: 2px 8px;
+  margin-left: 6px;
+}
+
+/* Indicador dinâmico de status da IA (Pílula interativa para ações e ferramentas) */
+.status-pill {
+  background-color: alpha(@accent_color, 0.12);
+  border: 1px solid alpha(@accent_color, 0.28);
+  color: @accent_color;
+  border-radius: 12px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  margin: 6px 0 10px 0;
+}
+.status-pill.done {
+  background-color: alpha(@window_fg_color, 0.04);
+  border-color: alpha(@window_fg_color, 0.08);
+  color: alpha(@window_fg_color, 0.65);
+  font-weight: 500;
+}
+
+/* Corpo do texto da resposta */
+.msg-body {
+  background-color: transparent;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+
+/* Barra de ação inferior da resposta */
+.msg-action-bar {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid alpha(@window_fg_color, 0.06);
+}
+.btn-copiar {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 8px;
+}
+
+/* Cartão de Entrada Flutuante */
+.chat-input-card {
+  background-color: alpha(@window_fg_color, 0.05);
+  border: 1.5px solid alpha(@window_fg_color, 0.12);
+  border-radius: 18px;
+  padding: 6px 12px;
+  box-shadow: 0 2px 8px alpha(#000, 0.10);
+}
+.chat-input-card:focus-within {
+  border-color: @accent_color;
+  box-shadow: 0 0 0 1px @accent_color;
+}
+
+/* Handover Banner */
 .msg-handover {
   background-color: alpha(@warning_color, 0.15);
   border: 1px solid alpha(@warning_color, 0.40);
   color: @warning_color;
   border-radius: 20px;
   padding: 8px 20px;
-  margin: 10px 0;
+  margin: 10px 14px;
   font-weight: 600;
   font-size: 13px;
-}
-.chat-input-card {
-  background-color: alpha(@window_fg_color, 0.05);
-  border: 1px solid alpha(@window_fg_color, 0.14);
-  border-radius: 24px;
-  padding: 4px 8px 4px 10px;
-}
-.chat-input-card:focus-within {
-  border-color: @accent_bg_color;
-  box-shadow: 0 0 0 1px @accent_bg_color;
-}
-.btn-copiar {
-  font-size: 12px;
-  padding: 3px 10px;
-  min-height: 28px;
-  margin-top: 4px;
-}
-.dir-pill {
-  font-size: 12px;
-  opacity: 0.7;
 }
 """
 
@@ -189,9 +299,8 @@ window.background, .chat-window, .chat-bg, .chat-scroll {
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title=_t("Agentes de IA"))
-        self.set_default_size(860, 680)
-        self.set_size_request(480, 500)
-        self.add_css_class("chat-window")
+        self.set_default_size(880, 700)
+        self.set_size_request(520, 500)
         self.add_css_class("chat-bg")
 
         # Estado da sessão
@@ -204,11 +313,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.anterior_passagem = None
         self.historico_tela = bytearray()
         self.inicio_agente = 0.0
+        self.cauda_buffer = ""
+        self.ignorar_limite_ate = 0.0
+
+        # Elementos da bolha ativa
         self.ativo_assistente_view = None
         self.ativo_assistente_buf = None
-        self.ativo_cleaner = None
-        self.atualizacao_pendente = False
-        self.ignorar_limite_ate = 0.0
+        self.ativo_status_box = None
+        self.ativo_status_icon = None
+        self.ativo_status_lbl = None
+        self.ativo_parser = None
 
         self._construir_ui()
         self._carregar_agentes()
@@ -255,11 +369,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.scroller.set_hexpand(True)
         self.scroller.add_css_class("chat-scroll")
 
-        self.box_mensagens = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
-        self.box_mensagens.set_margin_start(20)
-        self.box_mensagens.set_margin_end(20)
-        self.box_mensagens.set_margin_top(20)
-        self.box_mensagens.set_margin_bottom(20)
+        self.box_mensagens = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        self.box_mensagens.set_margin_top(14)
+        self.box_mensagens.set_margin_bottom(14)
         self.scroller.set_child(self.box_mensagens)
 
         # Banner de Boas-Vindas
@@ -267,37 +379,36 @@ class MainWindow(Adw.ApplicationWindow):
         self.status_page.set_icon_name("simba-agente")
         self.status_page.set_title(_t("Agentes de IA"))
         self.status_page.set_description(
-            _t("Controle e alterne entre todos os agentes em uma única tela.\n"
-               "Se o limite de um acabar, o trabalho continua automaticamente no próximo com todo o contexto.")
+            _t("Converse e delegue tarefas aos agentes com transparência total.\n"
+               "Se a cota de um se esgotar, o próximo assume automaticamente com todo o contexto.")
         )
         self.box_mensagens.append(self.status_page)
 
         # Barra Inferior de Entrada
         box_inferior = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box_inferior.set_margin_start(20)
-        box_inferior.set_margin_end(20)
-        box_inferior.set_margin_bottom(16)
-        box_inferior.set_margin_top(6)
+        box_inferior.set_margin_start(14)
+        box_inferior.set_margin_end(14)
+        box_inferior.set_margin_bottom(14)
+        box_inferior.set_margin_top(4)
 
-        # Card de Entrada
+        # Card de Entrada Flutuante
         card_input = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         card_input.add_css_class("chat-input-card")
 
         scroll_txt = Gtk.ScrolledWindow()
         scroll_txt.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll_txt.set_propagate_natural_height(True)
-        scroll_txt.set_min_content_height(36)
+        scroll_txt.set_min_content_height(38)
         scroll_txt.set_max_content_height(130)
         scroll_txt.set_hexpand(True)
-        scroll_txt.set_valign(Gtk.Align.CENTER)
 
         self.text_input = Gtk.TextView()
         self.text_input.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.text_input.set_accepts_tab(False)
-        self.text_input.set_top_margin(6)
-        self.text_input.set_bottom_margin(6)
-        self.text_input.set_left_margin(8)
-        self.text_input.set_right_margin(8)
+        self.text_input.set_top_margin(4)
+        self.text_input.set_bottom_margin(4)
+        self.text_input.set_left_margin(4)
+        self.text_input.set_right_margin(4)
         self.text_input_buf = self.text_input.get_buffer()
         scroll_txt.set_child(self.text_input)
 
@@ -306,10 +417,12 @@ class MainWindow(Adw.ApplicationWindow):
         overlay_input.set_hexpand(True)
         overlay_input.set_child(scroll_txt)
 
-        self.lbl_placeholder = Gtk.Label(label=_t("Escreva uma mensagem ou comando... (Enter envia, Shift+Enter quebra)"))
+        self.lbl_placeholder = Gtk.Label(
+            label=_t("Pergunte algo ou dê uma tarefa aos agentes... (Enter envia, Shift+Enter pula linha)")
+        )
         self.lbl_placeholder.set_halign(Gtk.Align.START)
         self.lbl_placeholder.set_valign(Gtk.Align.CENTER)
-        self.lbl_placeholder.set_margin_start(12)
+        self.lbl_placeholder.set_margin_start(8)
         self.lbl_placeholder.add_css_class("dim-label")
         self.lbl_placeholder.set_can_target(False)
         overlay_input.add_overlay(self.lbl_placeholder)
@@ -345,6 +458,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Layout principal
         box_principal = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box_principal.add_css_class("chat-bg")
         box_principal.append(self.scroller)
         box_principal.append(box_inferior)
         toolbar_view.set_content(box_principal)
@@ -405,8 +519,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.status_page.set_icon_name("simba-agente")
         self.status_page.set_title(_t("Agentes de IA"))
         self.status_page.set_description(
-            _t("Controle e alterne entre todos os agentes em uma única tela.\n"
-               "Se o limite de um acabar, o trabalho continua automaticamente no próximo com todo o contexto.")
+            _t("Converse e delegue tarefas aos agentes com transparência total.\n"
+               "Se a cota de um se esgotar, o próximo assume automaticamente com todo o contexto.")
         )
         self.box_mensagens.append(self.status_page)
         self.usados.clear()
@@ -415,10 +529,14 @@ class MainWindow(Adw.ApplicationWindow):
         self.agente_atual = None
         self.ativo_assistente_view = None
         self.ativo_assistente_buf = None
-        self.ativo_cleaner = None
+        self.ativo_status_box = None
+        self.ativo_status_icon = None
+        self.ativo_status_lbl = None
+        self.ativo_parser = None
 
     def _on_input_text_changed(self, buf):
-        self.lbl_placeholder.set_visible(buf.get_char_count() == 0)
+        if hasattr(self, "lbl_placeholder"):
+            self.lbl_placeholder.set_visible(buf.get_char_count() == 0)
 
     def _on_key_pressed(self, _controller, keyval, _keycode, state):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -449,19 +567,15 @@ class MainWindow(Adw.ApplicationWindow):
         # Adiciona bolha do usuário
         self._adicionar_bolha_usuario(texto)
 
-        # Se já existe um processo ativo e aguardando entrada do usuário:
+        # Se já existe um processo ativo e aguardando entrada do usuário via PTY:
         if self.proc and self.mestre_fd is not None and self.proc.poll() is None:
-            self.ativo_cleaner = TerminalCleaner()
-            self._adicionar_bolha_assistente(self.agente_atual or "auto")
-            self.btn_parar.set_visible(True)
-            self.btn_enviar.set_visible(True)
             try:
                 os.write(self.mestre_fd, (texto + "\n").encode("utf-8"))
             except OSError:
                 pass
             return
 
-        # Caso contrário, inicia nova execução
+        # Inicia nova execução da IA
         self._iniciar_execucao(texto)
 
     def _iniciar_execucao(self, pedido, agente_forcado=None):
@@ -485,13 +599,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.usados.add(agente)
         self.inicio_agente = time.time()
         self.historico_tela.clear()
+        self.cauda_buffer = ""
         self.ignorar_limite_ate = time.time() + 2.0
-        self.ativo_cleaner = TerminalCleaner()
 
-        # Cria a bolha de resposta do agente
+        # Cria a bolha de resposta da IA em largura completa
         self._adicionar_bolha_assistente(agente)
 
-        # Prepara comando (modo print/turnos com histórico)
+        # Prepara comando (modo print/turnos com histórico de sessão)
         info = M.AGENTES[agente]
         cmd = list(info["cmd"])
         continuar = (agente in self.conversas_iniciadas) and ("continue" in info)
@@ -505,14 +619,14 @@ class MainWindow(Adw.ApplicationWindow):
 
         # PTY
         mestre, escravo = pty.openpty()
-        definir_tamanho_pty(escravo, 40, 100)
+        definir_tamanho_pty(escravo, 40, 120)
         self.mestre_fd = mestre
 
         env = dict(os.environ)
         env["AGENTES_ATUAL"] = agente
         env["PYTHONUNBUFFERED"] = "1"
         env["TERM"] = "xterm-256color"
-        env["COLUMNS"] = "100"
+        env["COLUMNS"] = "120"
         env["LINES"] = "40"
 
         try:
@@ -539,9 +653,16 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _loop_leitura(self, mestre, agente, pedido, cfg):
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        parser = AgentStreamParser(
+            on_status=lambda s: GLib.idle_add(self._atualizar_status_ativo, s),
+            on_text=lambda t: GLib.idle_add(self._anexar_texto_ativo, t),
+            on_done=lambda d: GLib.idle_add(self._concluir_status_ativo, d),
+        )
+        self.ativo_parser = parser
+
         while self.proc and self.proc.poll() is None:
             try:
-                r, _, _ = select.select([mestre], [], [], 0.15)
+                r, _, _ = select.select([mestre], [], [], 0.1)
             except (InterruptedError, ValueError):
                 break
             if mestre in r:
@@ -557,37 +678,56 @@ class MainWindow(Adw.ApplicationWindow):
                     del self.historico_tela[:100000]
 
                 texto = decoder.decode(dados)
-                if self.ativo_cleaner:
-                    self.ativo_cleaner.feed(texto)
-                    self._agendar_atualizacao_texto()
+                parser.feed(texto)
 
                 # Detecção de limite de uso
                 if cfg.get("trocaAutomatica", True) and time.time() >= self.ignorar_limite_ate:
-                    if self.ativo_cleaner:
-                        texto_recente = self.ativo_cleaner.get_text()[-1200:]
-                        if M.detectar_limite(texto_recente):
-                            GLib.idle_add(self._executar_troca_transparente, agente, cfg)
-                            return
+                    ultimos = (self.cauda_buffer + texto)[-1200:]
+                    self.cauda_buffer = ultimos
+                    if M.detectar_limite(ultimos):
+                        GLib.idle_add(self._executar_troca_transparente, agente, cfg)
+                        return
 
         try:
             os.close(mestre)
         except OSError:
             pass
 
+        parser.finish()
         GLib.idle_add(self._finalizar_resposta)
 
-    def _agendar_atualizacao_texto(self):
-        if not self.atualizacao_pendente:
-            self.atualizacao_pendente = True
-            GLib.idle_add(self._aplicar_atualizacao_texto)
+    def _atualizar_status_ativo(self, status_texto):
+        if self.ativo_status_box and self.ativo_status_lbl:
+            if status_texto:
+                self.ativo_status_box.set_visible(True)
+                self.ativo_status_box.remove_css_class("done")
+                self.ativo_status_icon.set_from_icon_name("system-run-symbolic")
+                self.ativo_status_lbl.set_text(status_texto)
+            else:
+                self.ativo_status_box.set_visible(False)
+            self._scroll_para_fim()
 
-    def _aplicar_atualizacao_texto(self):
-        self.atualizacao_pendente = False
-        if self.ativo_assistente_buf and self.ativo_cleaner:
-            txt = self.ativo_cleaner.get_text()
-            if txt.strip():
-                self.ativo_assistente_buf.set_text(txt)
-                self._scroll_para_fim()
+    def _anexar_texto_ativo(self, texto):
+        if self.ativo_assistente_buf:
+            end = self.ativo_assistente_buf.get_end_iter()
+            self.ativo_assistente_buf.insert(end, texto)
+            self._scroll_para_fim()
+
+    def _concluir_status_ativo(self, _resultado=None):
+        if self.ativo_status_box and self.ativo_status_lbl:
+            if self.ativo_parser and self.ativo_parser.actions:
+                qtd = len(self.ativo_parser.actions)
+                sufixo = _t("ações executadas") if qtd > 1 else _t("ação executada")
+                resumo = ", ".join(self.ativo_parser.actions[:3])
+                if len(self.ativo_parser.actions) > 3:
+                    resumo += "..."
+                self.ativo_status_box.add_css_class("done")
+                self.ativo_status_icon.set_from_icon_name("emblem-ok-symbolic")
+                self.ativo_status_lbl.set_text(f"✓ {qtd} {sufixo} ({resumo})")
+                self.ativo_status_box.set_visible(True)
+            else:
+                self.ativo_status_box.set_visible(False)
+            self._scroll_para_fim()
 
     def _executar_troca_transparente(self, agente_antigo, cfg):
         M.encerrar(self.proc.pid)
@@ -647,21 +787,22 @@ class MainWindow(Adw.ApplicationWindow):
         self._finalizar_resposta()
 
     def _finalizar_resposta(self):
-        if self.ativo_assistente_buf and self.ativo_cleaner:
-            txt = self.ativo_cleaner.get_text()
-            if txt.strip():
-                self.ativo_assistente_buf.set_text(txt)
+        self._concluir_status_ativo()
+        if self.ativo_assistente_buf and self.ativo_assistente_buf.get_char_count() == 0:
+            if self.ativo_parser and self.ativo_parser.last_response:
+                self.ativo_assistente_buf.set_text(self.ativo_parser.last_response)
             else:
-                self.ativo_assistente_buf.set_text(_t("(Concluído sem texto)"))
-            self._scroll_para_fim()
+                self.ativo_assistente_buf.set_text(_t("(Concluído sem texto adicional)"))
         self.btn_parar.set_visible(False)
         self.btn_enviar.set_visible(True)
         self.text_input.grab_focus()
+        self._scroll_para_fim()
 
-    # ── Construtores de Bolhas no Chat ───────────────────────────────────────
+    # ── Construtores de Mensagens e Cards ────────────────────────────────────
     def _adicionar_bolha_usuario(self, texto):
         box_linha = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         box_linha.set_halign(Gtk.Align.END)
+        box_linha.add_css_class("msg-user-box")
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         card.add_css_class("msg-user")
@@ -675,20 +816,27 @@ class MainWindow(Adw.ApplicationWindow):
         self._scroll_para_fim()
 
     def _adicionar_bolha_assistente(self, agente):
-        nome = M.AGENTES.get(agente, {}).get("nome", agente)
+        info = M.AGENTES.get(agente, {})
+        nome = info.get("nome", agente)
+        modelo = info.get("modelo", "")
 
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        card.add_css_class("msg-assistant")
+        # Cartão da IA ocupa 100% da largura útil da janela
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        card.add_css_class("msg-assistant-card")
         card.set_hexpand(True)
-        card.set_margin_end(64)
 
-        # Cabeçalho da mensagem
+        # Cabeçalho da IA
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         img_icone = Gtk.Image.new_from_icon_name("simba-agente")
         lbl_nome = Gtk.Label(label=nome)
         lbl_nome.add_css_class("msg-assistant-header")
         header_row.append(img_icone)
         header_row.append(lbl_nome)
+
+        if modelo:
+            lbl_mod = Gtk.Label(label=modelo)
+            lbl_mod.add_css_class("msg-assistant-model")
+            header_row.append(lbl_mod)
 
         hora_str = datetime.now().strftime("%H:%M")
         lbl_hora = Gtk.Label(label=hora_str)
@@ -700,7 +848,17 @@ class MainWindow(Adw.ApplicationWindow):
 
         card.append(header_row)
 
-        # TextView para a resposta com seleção nativa e context menu de copiar
+        # Pílula Dinâmica de Status / Ações
+        pill_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        pill_box.add_css_class("status-pill")
+        pill_box.set_halign(Gtk.Align.START)
+        pill_ico = Gtk.Image.new_from_icon_name("system-run-symbolic")
+        pill_lbl = Gtk.Label(label=_t("✦ Pensando na resposta..."))
+        pill_box.append(pill_ico)
+        pill_box.append(pill_lbl)
+        card.append(pill_box)
+
+        # Corpo da resposta (Gtk.TextView expansivo)
         tv = Gtk.TextView()
         tv.set_editable(False)
         tv.set_cursor_visible(False)
@@ -708,23 +866,27 @@ class MainWindow(Adw.ApplicationWindow):
         tv.set_hexpand(True)
         tv.add_css_class("msg-body")
         tv_buf = tv.get_buffer()
-        tv_buf.set_text(_t("Pensando..."))
-
+        tv_buf.set_text("")
         card.append(tv)
 
-        # Botão inferior para copiar a resposta inteira
+        # Barra inferior de ações
+        act_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        act_row.add_css_class("msg-action-bar")
         btn_copiar = Gtk.Button(icon_name="edit-copy-symbolic", label=_t("Copiar resposta"))
         btn_copiar.add_css_class("flat")
         btn_copiar.add_css_class("btn-copiar")
         btn_copiar.set_halign(Gtk.Align.START)
         btn_copiar.connect("clicked", lambda b: self._copiar_buffer(tv_buf, b))
-        card.append(btn_copiar)
+        act_row.append(btn_copiar)
+        card.append(act_row)
 
         self.box_mensagens.append(card)
 
         self.ativo_assistente_view = tv
         self.ativo_assistente_buf = tv_buf
-        self.ativo_cleaner = TerminalCleaner()
+        self.ativo_status_box = pill_box
+        self.ativo_status_icon = pill_ico
+        self.ativo_status_lbl = pill_lbl
         self._scroll_para_fim()
 
     def _adicionar_aviso_handover(self, nome_antigo, nome_proximo):

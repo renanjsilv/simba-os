@@ -58,7 +58,7 @@ AGENTES = {
                  "login": ["codex", "login"], "conta": [".codex/auth.json"]},
     # Antigravity CLI (Google), substituto do Gemini CLI (desativado em jun/2026); login pela conta Google
     "agy":      {"nome": "Antigravity", "cmd": ["agy", "--dangerously-skip-permissions"],
-                 "prompt": ["--prompt-interactive", "{p}"], "login": ["agy"], "conta": [],
+                 "prompt": ["-p", "{p}"], "login": ["agy"], "conta": [],
                  # o token não fica num arquivo conhecido: `agy models` falha ("Please sign in") sem login
                  "verifica": ["agy", "models"], "env": "GEMINI_API_KEY"},
     "opencode": {"nome": "OpenCode", "cmd": ["opencode", "--auto"], "prompt": ["--prompt", "{p}"],

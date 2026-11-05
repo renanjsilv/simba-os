@@ -1,5 +1,6 @@
 [Desktop Entry]
 Name=Image Viewer
+Name[pt_BR]=Visualizador de Imagens
 Exec=imv %F
 Icon=imv
 Type=Application

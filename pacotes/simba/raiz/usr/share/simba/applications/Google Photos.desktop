@@ -1,6 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Name=Google Photos
+Name[pt_BR]=Google Fotos
 Exec=simba-launch-webapp https://photos.google.com/
 Terminal=false
 Type=Application

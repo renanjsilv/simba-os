@@ -1,6 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Media Player
+Name[pt_BR]=Reprodutor de Mídia
 Name[ar]=مشغل وسائط mpv
 Name[ca]=Reproductor multimèdia mpv
 Name[cs]=mpv přehrávač
@@ -14,6 +15,7 @@ Name[tr]=mpv Ortam Oynatıcı
 Name[zh_CN]=mpv 媒体播放器
 Name[zh_TW]=mpv 媒體播放器
 GenericName=Multimedia player
+GenericName[pt_BR]=Reprodutor multimídia
 GenericName[ar]=مُشَغِّل وسائط متعددة
 GenericName[cs]=Multimediální přehrávač
 GenericName[da]=Multimedieafspiller
@@ -25,6 +27,7 @@ GenericName[tr]=Çoklu ortam oynatıcı
 GenericName[zh_CN]=多媒体播放器
 GenericName[zh_TW]=多媒體播放器
 Comment=Play movies and songs
+Comment[pt_BR]=Reproduza filmes e músicas
 Comment[ar]=شَغِّل الأفلام والأغاني
 Comment[ca]=Reproduïu vídeos i cançons
 Comment[cs]=Přehrává filmy a hudbu

@@ -1,7 +1,9 @@
 [Desktop Entry]
 Version=1.0
 Name=Browser
+Name[pt_BR]=Navegador
 Comment=Open links in the running default browser and focus it
+Comment[pt_BR]=Abre links no navegador padrão já aberto e o traz para a frente
 Exec=simba-launch-browser %U
 Terminal=false
 Type=Application

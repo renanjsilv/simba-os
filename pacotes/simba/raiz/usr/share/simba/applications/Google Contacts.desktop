@@ -1,6 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Name=Google Contacts
+Name[pt_BR]=Google Contatos
 Exec=simba-launch-webapp https://contacts.google.com/
 Terminal=false
 Type=Application

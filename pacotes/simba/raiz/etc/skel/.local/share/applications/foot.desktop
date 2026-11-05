@@ -8,6 +8,7 @@ Categories=System;TerminalEmulator;
 Name=Foot
 GenericName=Terminal
 Comment=A fast, lightweight and minimalistic Wayland terminal emulator
+Comment[pt_BR]=Emulador de terminal Wayland rápido, leve e minimalista
 StartupNotify=true
 StartupWMClass=foot
 Actions=New;
@@ -18,4 +19,5 @@ X-TerminalArgDir=--working-directory=
 
 [Desktop Action New]
 Name=New Terminal
+Name[pt_BR]=Novo Terminal
 Exec=foot

@@ -1,9 +1,11 @@
 post_install() {
   gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
   update-desktop-database -q /usr/share/applications 2>/dev/null || true
+  /usr/bin/simba-nomes-apps /usr/share/applications >/dev/null 2>&1 || true
   echo ":: Simba OS apps instalados. Em cada usuário, rode uma vez:  simba-apps-usuario"
 }
 post_upgrade() {
   gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
   update-desktop-database -q /usr/share/applications 2>/dev/null || true
+  /usr/bin/simba-nomes-apps /usr/share/applications >/dev/null 2>&1 || true
 }

@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/share/applications/*.desktop
+
+[Action]
+Description = Dando nome em português aos atalhos dos apps...
+When = PostTransaction
+Exec = /usr/bin/simba-nomes-apps /usr/share/applications

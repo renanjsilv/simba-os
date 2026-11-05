@@ -108,6 +108,9 @@ for f in "$HOME"/.config/hypr/*.lua "$HOME"/.config/simba/extensions/*.jsonc "$H
   fi
 done
 
+echo "== nomes dos atalhos no idioma da pessoa"
+if [[ $VER == --ver ]]; then simba-nomes-apps --ver; else simba-nomes-apps; fi
+
 echo
 if [[ $VER == --ver ]]; then echo "(só mostrando)"; else
   echo "Pronto: $movidos item(ns) guardado(s) em ${B/#$HOME/\~}. Saia e entre de novo na sessão."

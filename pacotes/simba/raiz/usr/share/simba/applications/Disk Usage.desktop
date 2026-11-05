@@ -1,6 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Name=Disk Usage
+Name[pt_BR]=Uso do Disco
 Exec=xdg-terminal-exec --app-id=TUI.float -e bash -c "dua i /"
 Terminal=false
 Type=Application

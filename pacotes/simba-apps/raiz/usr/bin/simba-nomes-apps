@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""simba-nomes-apps — dá nome no idioma da pessoa aos atalhos (.desktop) que só vêm em inglês.
+
+    simba-nomes-apps [PASTA...]        (padrão: ~/.local/share/applications)
+    simba-nomes-apps --ver [PASTA...]  só mostra o que mudaria
+
+Acrescenta Name[xx]= / GenericName[xx]= / Comment[xx]= logo abaixo da chave em inglês, sem
+mexer no resto. O menu usa a chave do idioma da sessão; em inglês continua o nome original.
+Nunca sobrescreve uma tradução que o arquivo já tenha. Pode rodar quantas vezes quiser.
+
+Roda sozinha (gancho do pacman) em /usr/share/applications depois de cada atualização,
+porque os pacotes reescrevem os próprios atalhos. Idioma novo = nova entrada em NOMES.
+Nomes de marca (WhatsApp, Discord, Google Maps…) ficam como estão.
+"""
+import os
+import sys
+
+# idioma → { texto em inglês → tradução }  (vale para Name, GenericName e Comment)
+NOMES = {
+    "pt_BR": {
+        # aplicativos web e atalhos do Simba
+        "Google Contacts": "Google Contatos",
+        "Google Messages": "Google Mensagens",
+        "Google Photos": "Google Fotos",
+        "Disk Usage": "Uso do Disco",
+        "Image Viewer": "Visualizador de Imagens",
+        "Media Player": "Reprodutor de Mídia",
+        "Multimedia player": "Reprodutor multimídia",
+        "Play movies and songs": "Reproduza filmes e músicas",
+        "New Terminal": "Novo Terminal",
+        "A fast, lightweight and minimalistic Wayland terminal emulator":
+            "Emulador de terminal Wayland rápido, leve e minimalista",
+        "Browser": "Navegador",
+        "Open links in the running default browser and focus it":
+            "Abre links no navegador padrão já aberto e o traz para a frente",
+        # atalhos de outros pacotes que não trazem pt_BR
+        "Fcitx 5 Configuration": "Configuração do Fcitx 5",
+        "Foot Server": "Servidor do Foot",
+        "Foot Client": "Cliente do Foot",
+        "Hardware Locality lstopo": "Topologia do Hardware (lstopo)",
+        "Qt V4L2 video capture utility": "Captura de Vídeo V4L2",
+        "Voxtype Configuration": "Configurações do Voxtype",
+        "Limine-snapper-restore": "Restaurar Snapshot (Limine)",
+    },
+}
+CHAVES = ("Name", "GenericName", "Comment")
+
+
+def traduzir(texto, idioma, tabela):
+    """Devolve o texto novo do arquivo (ou o mesmo, se não houver o que fazer)."""
+    linhas = texto.split("\n")
+    # chaves já traduzidas, por seção
+    secao, ja = None, set()
+    for l in linhas:
+        if l.startswith("["):
+            secao = l.strip()
+        elif "=" in l:
+            ja.add((secao, l.split("=", 1)[0].strip()))
+    saida, secao = [], None
+    for l in linhas:
+        saida.append(l)
+        if l.startswith("["):
+            secao = l.strip()
+            continue
+        if "=" not in l:
+            continue
+        chave, valor = l.split("=", 1)
+        chave = chave.strip()
+        if chave in CHAVES and valor in tabela:
+            loc = f"{chave}[{idioma}]"
+            if (secao, loc) not in ja:
+                saida.append(f"{loc}={tabela[valor]}")
+                ja.add((secao, loc))
+    return "\n".join(saida)
+
+
+def main():
+    args = sys.argv[1:]
+    ver = "--ver" in args
+    pastas = [a for a in args if a != "--ver"] or [os.path.expanduser("~/.local/share/applications")]
+    mudou = 0
+    for pasta in pastas:
+        if not os.path.isdir(pasta):
+            continue
+        for nome in sorted(os.listdir(pasta)):
+            caminho = os.path.join(pasta, nome)
+            if not nome.endswith(".desktop") or os.path.islink(caminho) or not os.path.isfile(caminho):
+                continue
+            try:
+                with open(caminho, encoding="utf-8") as f:
+                    texto = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+            novo = texto
+            for idioma, tabela in NOMES.items():
+                novo = traduzir(novo, idioma, tabela)
+            if novo == texto:
+                continue
+            mudou += 1
+            print(f"  {caminho}")
+            if not ver:
+                st = os.stat(caminho)
+                tmp = caminho + ".simba-nomes"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(novo)
+                os.chmod(tmp, st.st_mode & 0o7777)
+                os.replace(tmp, caminho)
+    if mudou:
+        print(f"{mudou} atalho(s) {'a traduzir' if ver else 'traduzido(s)'}.")
+
+
+if __name__ == "__main__":
+    main()

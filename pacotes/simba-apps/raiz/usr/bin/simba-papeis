@@ -31,6 +31,8 @@ while read -r t; do
   i=0
   for p in $lista; do
     [ -f "$SRC/$p.jpg" ] || continue
+    # excluídos pela pessoa em Configurações › Personalização
+    grep -qxF -- "$p" "$DST/.ocultos" 2>/dev/null && continue
     ln -sfn "$SRC/$p.jpg" "$d/$(printf '%02d' $i)-$p.jpg"; i=$((i + 1))
   done
 done < <(temas "${1:-}")

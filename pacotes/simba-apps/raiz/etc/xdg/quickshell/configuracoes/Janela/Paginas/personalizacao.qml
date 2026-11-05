@@ -165,23 +165,111 @@ Pagina {
     return filtro === "todos" || (filtro === "escuros" ? t.modo !== "light" : t.modo === "light")
   })
 
-  // ── hero: a live miniature of the desktop ────────────────────────────────
+  // ── grades responsivas: colunas pela largura, nunca pelo número de itens ──
+  readonly property int vao: 12
+  function colunas(larg, minimo, gap) { return Math.max(1, Math.floor((larg + gap) / (minimo + gap))) }
+  function largura(larg, minimo, gap) { var c = colunas(larg, minimo, gap); return Math.floor((larg - (c - 1) * gap) / c) }
+
+  // ── remoções (tema da pessoa, papel de parede) ──
+  property var confirmarRemoverTema: null
+  property var confirmarRemoverFundo: null
+  function removerTema(t) {
+    Sistema.json([Sistema.bin + "/loja-temas", "remover", t.slug], function(v, code) {
+      if (code === 0) Navegacao.confirmar(I18n.t("Tema removido: ") + t.nome, Icones.deleteOutline)
+      else Navegacao.confirmar(v && v.erro ? v.erro : I18n.t("Não foi possível remover"), Icones.alert)
+      pg.carregar()
+      if (pg.lojaAberta) pg.carregarLoja(false)
+    })
+  }
+  function removerFundo(f) {
+    Sistema.rodar([Sistema.bin + "/fundos", "remover", f.caminho], function(o, code, err) {
+      if (code === 0) Navegacao.confirmar(o.trim() || I18n.t("Papel de parede excluído"), Icones.deleteOutline)
+      else Navegacao.confirmar((err || "").trim() || I18n.t("Não foi possível excluir"), Icones.alert)
+      pg.carregarFundos()
+    })
+  }
+
+  // ── loja: temas da comunidade (bin/loja-temas) ──
+  property bool lojaAberta: false
+  property var loja: null                  // { temas: [...] }
+  property string lojaErro: ""
+  property bool lojaCarregando: false
+  property string lojaBusca: ""
+  property string lojaFiltro: "todos"
+  property int lojaLimite: 24
+  property var lojaPrevias: ({})            // repo → caminho local ("" = sem prévia)
+  property string instalandoLoja: ""
+  readonly property var lojaFiltrados: {
+    if (!loja) return []
+    var b = lojaBusca.trim().toLowerCase()
+    return loja.temas.filter(function(t) {
+      if (lojaFiltro === "escuros" && t.modo === "light") return false
+      if (lojaFiltro === "claros" && t.modo !== "light") return false
+      return !b || t.nome.toLowerCase().indexOf(b) >= 0 || t.autor.toLowerCase().indexOf(b) >= 0
+    })
+  }
+  readonly property var lojaVisiveis: lojaFiltrados.slice(0, lojaLimite)
+  onLojaVisiveisChanged: pedirPrevias()
+  function carregarLoja(renovar) {
+    lojaCarregando = true
+    lojaErro = ""
+    Sistema.json([Sistema.bin + "/loja-temas", "catalogo"].concat(renovar ? ["--renovar"] : []), function(v, code) {
+      pg.lojaCarregando = false
+      if (v && v.temas) pg.loja = v
+      else pg.lojaErro = v && v.erro ? v.erro : I18n.t("Não foi possível carregar a lista de temas")
+    })
+  }
+  function pedirPrevias() {
+    var faltam = lojaVisiveis.filter(function(t) { return !(t.repo in pg.lojaPrevias) })
+    if (!faltam.length) return
+    var m = Object.assign({}, lojaPrevias)
+    faltam.forEach(function(t) { m[t.repo] = null })     // pedido em andamento
+    lojaPrevias = m
+    Sistema.json([Sistema.bin + "/loja-temas", "previas"].concat(faltam.map(function(t) { return t.repo + "@" + t.ramo })), function(v) {
+      var n = Object.assign({}, pg.lojaPrevias)
+      faltam.forEach(function(t) { n[t.repo] = v && (t.repo in v) ? v[t.repo] : "" })
+      pg.lojaPrevias = n
+    })
+  }
+  function instalarDaLoja(t) {
+    if (instalandoLoja) return
+    if (t.instalado) { if (t.instalado !== Tema.nome) aplicarTema(t.instalado, t.nome); return }
+    instalandoLoja = t.repo
+    Sistema.json([Sistema.bin + "/loja-temas", "instalar", t.repo], function(v, code) {
+      pg.instalandoLoja = ""
+      if (code === 0 && v && v.slug) {
+        pg.carregar()
+        pg.carregarLoja(false)
+        pg.aplicarTema(v.slug, t.nome)
+      } else Navegacao.confirmar(v && v.erro ? v.erro : I18n.t("Não foi possível instalar"), Icones.alert)
+    })
+  }
+
+  // ── topo: miniatura viva da área de trabalho ─────────────────────────────
   Rectangle {
+    id: hero
+    readonly property bool estreito: width < 640
     Layout.fillWidth: true
-    Layout.preferredHeight: 236
+    Layout.preferredHeight: heroGrade.implicitHeight + 32
     radius: Tema.raioGrande
     color: Tema.superficie
     border.width: 1
     border.color: Tema.linha
 
-    RowLayout {
-      anchors.fill: parent
-      anchors.margins: 18
-      spacing: 22
+    GridLayout {
+      id: heroGrade
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.margins: 16
+      columns: hero.estreito ? 1 : 2
+      columnSpacing: 22
+      rowSpacing: 14
 
       Item {
-        Layout.preferredWidth: 352
-        Layout.fillHeight: true
+        Layout.fillWidth: hero.estreito
+        Layout.preferredWidth: hero.estreito ? -1 : Math.min(340, hero.width * 0.4)
+        Layout.preferredHeight: hero.estreito ? Math.round(width * 0.5) : 196
         Rectangle {
           anchors.fill: parent
           radius: Tema.raio + 2
@@ -193,7 +281,7 @@ Pagina {
             anchors.fill: parent
             source: pg.fundos.atual ? "file://" + pg.fundos.atual : ""
             fillMode: Image.PreserveAspectCrop
-            sourceSize.width: 520
+            sourceSize.width: 640
             asynchronous: true
             opacity: status === Image.Ready ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 500 } }
@@ -243,9 +331,10 @@ Pagina {
           Layout.fillWidth: true
           elide: Text.ElideRight
         }
-        Texto { text: (Tema.escuro ? I18n.t("Escuro") : I18n.t("Claro")) + " · " + Tema.fonte; color: Tema.texto2 }
-        Row {
-          Layout.topMargin: 8
+        Texto { text: (Tema.escuro ? I18n.t("Escuro") : I18n.t("Claro")) + " · " + Tema.fonte; color: Tema.texto2; Layout.fillWidth: true; elide: Text.ElideRight }
+        Flow {
+          Layout.topMargin: 6
+          Layout.fillWidth: true
           spacing: 6
           Repeater {
             model: ["background", "foreground", "accent", "red", "green", "yellow", "blue", "magenta", "cyan"]
@@ -263,7 +352,7 @@ Pagina {
             }
           }
         }
-        Item { Layout.fillHeight: true }
+        Item { Layout.fillHeight: true; Layout.minimumHeight: 8 }
         Flow {
           Layout.fillWidth: true
           spacing: 8
@@ -271,46 +360,49 @@ Pagina {
             glifo: Icones.wallpaper; texto: I18n.t("Próximo papel de parede"); tipo: "primario"
             onClicado: Sistema.rodar(["simba-theme-bg-next"], function() { pg.carregarFundos() })
           }
-          Botao { glifo: Icones.folderOpen; texto: I18n.t("Escolher…"); onClicado: pg.escolherImagem() }
+          Botao { glifo: Icones.folderOpen; texto: I18n.t("Escolher imagem…"); onClicado: pg.escolherImagem() }
         }
       }
     }
   }
 
-  // ── themes ───────────────────────────────────────────────────────────────
-  RowLayout {
+  // ── temas instalados ─────────────────────────────────────────────────────
+  Secao {
+    titulo: I18n.t("Tema")
+    detalhe: pg.temas.length + I18n.t(" temas instalados. Muda cores do shell, terminais, navegador, editor e bordas.")
+  }
+  Ancora { chave: "tema" }
+  Flow {
     Layout.fillWidth: true
-    Layout.topMargin: 18
-    Secao {
-      titulo: I18n.t("Tema")
-      detalhe: pg.temas.length + I18n.t(" temas instalados. Muda cores do shell, terminais, navegador, editor e bordas.")
-      Layout.topMargin: 0
-    }
+    spacing: 8
     Segmentado {
-      Layout.alignment: Qt.AlignBottom
       opcoes: [{ valor: "todos", rotulo: I18n.t("Todos") }, { valor: "escuros", rotulo: I18n.t("Escuros"), glifo: Icones.weatherNight }, { valor: "claros", rotulo: I18n.t("Claros"), glifo: Icones.whiteBalanceSunny }]
       atual: pg.filtro
       onEscolhido: function(v) { pg.filtro = v }
     }
+    Botao {
+      glifo: Icones.storefrontOutline
+      texto: pg.lojaAberta ? I18n.t("Fechar a loja") : I18n.t("Mais temas…")
+      tipo: pg.lojaAberta ? "normal" : "primario"
+      onClicado: { pg.lojaAberta = !pg.lojaAberta; if (pg.lojaAberta && !pg.loja) pg.carregarLoja(false) }
+    }
   }
 
-  Ancora { chave: "tema" }
-
-  GridLayout {
+  Flow {
+    id: gradeTemas
     Layout.fillWidth: true
-    columns: Math.max(2, Math.floor(width / 196))
-    columnSpacing: 10
-    rowSpacing: 10
+    Layout.topMargin: 4
+    spacing: pg.vao
+    readonly property int larguraItem: pg.largura(width, 200, pg.vao)
     Repeater {
       model: pg.temasFiltrados
       delegate: Item {
         id: cart
         required property var modelData
-        required property int index
         readonly property bool atual: modelData.slug === Tema.nome
         readonly property bool aplicando: pg.aplicandoTema === modelData.slug
-        Layout.fillWidth: true
-        Layout.preferredHeight: width * 0.6 + 44
+        width: gradeTemas.larguraItem
+        height: Math.round((width - 10) * 0.625) + 46
         scale: ma.pressed ? 0.97 : (ma.containsMouse ? 1.015 : 1)
         z: ma.containsMouse ? 2 : 1
         Behavior on scale { NumberAnimation { duration: Tema.medio; easing.type: Easing.OutBack } }
@@ -327,12 +419,12 @@ Pagina {
           Item {
             x: 5; y: 5
             width: parent.width - 10
-            height: parent.height - 44
+            height: parent.height - 46
             Image {
               id: img
               anchors.fill: parent
               source: cart.modelData.preview ? "file://" + cart.modelData.preview : ""
-              sourceSize.width: 360
+              sourceSize.width: 480
               fillMode: Image.PreserveAspectCrop
               asynchronous: true
               visible: false
@@ -366,7 +458,7 @@ Pagina {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.margins: 10
-            anchors.bottomMargin: 8
+            anchors.bottomMargin: 9
             height: 26
             spacing: 6
             Texto {
@@ -398,14 +490,266 @@ Pagina {
           cursorShape: Qt.PointingHandCursor
           onClicked: if (!cart.atual) pg.aplicarTema(cart.modelData.slug, cart.modelData.nome)
         }
+        // lixeira: só temas que a pessoa instalou, e não o que está em uso
+        Rectangle {
+          visible: cart.modelData.usuario && !cart.atual && (ma.containsMouse || lixo.containsMouse)
+          anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 11
+          width: 28; height: 28; radius: Tema.raio > 0 ? 14 : 0
+          color: lixo.containsMouse ? Tema.perigo : Tema.alfa(Tema.janela, 0.85)
+          Glifo { anchors.centerIn: parent; g: Icones.deleteOutline; tamanho: 15; color: lixo.containsMouse ? "#ffffff" : Tema.texto }
+          MouseArea { id: lixo; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pg.confirmarRemoverTema = cart.modelData }
+        }
+      }
+    }
+  }
+  Cartao {
+    visible: !!pg.confirmarRemoverTema
+    Linha {
+      glifo: Icones.deleteOutline
+      titulo: pg.confirmarRemoverTema ? I18n.t("Remover o tema “") + pg.confirmarRemoverTema.nome + "”?" : ""
+      descricao: I18n.t("Apaga a pasta do tema em ~/.config/simba/themes. Dá para instalar de novo pela loja.")
+      Botao { texto: I18n.t("Cancelar"); tipo: "fantasma"; onClicado: pg.confirmarRemoverTema = null }
+      Botao { texto: I18n.t("Remover"); tipo: "perigo"; onClicado: { var t = pg.confirmarRemoverTema; pg.confirmarRemoverTema = null; pg.removerTema(t) } }
+    }
+  }
+
+  // ── loja de temas da comunidade ──────────────────────────────────────────
+  Rectangle {
+    id: lojaCaixa
+    visible: pg.lojaAberta
+    Layout.fillWidth: true
+    Layout.topMargin: 10
+    Layout.preferredHeight: lojaCol.implicitHeight + 32
+    radius: Tema.raioGrande
+    color: Tema.superficie
+    border.width: 1
+    border.color: Tema.linha
+
+    ColumnLayout {
+      id: lojaCol
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      anchors.margins: 16
+      spacing: 12
+
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: 12
+        Glifo { g: Icones.storefrontOutline; tamanho: 26; color: Tema.realce; Layout.alignment: Qt.AlignTop }
+        ColumnLayout {
+          Layout.fillWidth: true
+          spacing: 2
+          Texto { text: I18n.t("Temas da comunidade"); font.pixelSize: Tema.tSubtitulo; font.weight: Font.DemiBold }
+          Texto {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            color: Tema.texto3
+            font.pixelSize: Tema.tLegenda + 1
+            text: (pg.loja ? pg.loja.temas.length + I18n.t(" temas feitos por outras pessoas e publicados no GitHub. ") : "")
+                  + I18n.t("Clique para instalar e aplicar; o tema fica em ~/.config/simba/themes.")
+          }
+        }
+        Botao {
+          compacto: true; tipo: "fantasma"; glifo: Icones.refresh
+          Layout.alignment: Qt.AlignTop
+          habilitado: !pg.lojaCarregando
+          onClicado: pg.carregarLoja(true)
+        }
+      }
+
+      Flow {
+        Layout.fillWidth: true
+        spacing: 8
+        Campo {
+          width: Math.min(320, lojaCol.width)
+          glifo: Icones.magnify
+          dica: I18n.t("Buscar por nome ou autor")
+          onTextChanged: { pg.lojaBusca = text; pg.lojaLimite = 24 }
+        }
+        Segmentado {
+          opcoes: [{ valor: "todos", rotulo: I18n.t("Todos") }, { valor: "escuros", rotulo: I18n.t("Escuros"), glifo: Icones.weatherNight }, { valor: "claros", rotulo: I18n.t("Claros"), glifo: Icones.whiteBalanceSunny }]
+          atual: pg.lojaFiltro
+          onEscolhido: function(v) { pg.lojaFiltro = v; pg.lojaLimite = 24 }
+        }
+      }
+
+      Texto {
+        visible: pg.lojaCarregando || pg.lojaErro !== "" || (!!pg.loja && pg.lojaFiltrados.length === 0)
+        Layout.fillWidth: true
+        Layout.topMargin: 8
+        Layout.bottomMargin: 8
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        color: pg.lojaErro ? Tema.perigo : Tema.texto3
+        text: pg.lojaCarregando ? I18n.t("Procurando temas no GitHub… (a primeira vez leva uns 15 segundos)")
+              : pg.lojaErro ? pg.lojaErro : I18n.t("Nenhum tema encontrado")
+      }
+
+      Flow {
+        id: gradeLoja
+        visible: !pg.lojaCarregando
+        Layout.fillWidth: true
+        spacing: pg.vao
+        readonly property int larguraItem: pg.largura(width, 200, pg.vao)
+        Repeater {
+          model: pg.lojaVisiveis
+          delegate: Item {
+            id: lt
+            required property var modelData
+            readonly property string previa: pg.lojaPrevias[modelData.repo] || ""
+            readonly property bool instalando: pg.instalandoLoja === modelData.repo
+            readonly property bool emUso: !!modelData.instalado && modelData.instalado === Tema.nome
+            width: gradeLoja.larguraItem
+            height: Math.round((width - 10) * 0.625) + 62
+            scale: ml.pressed ? 0.97 : (ml.containsMouse ? 1.015 : 1)
+            z: ml.containsMouse ? 2 : 1
+            Behavior on scale { NumberAnimation { duration: Tema.medio; easing.type: Easing.OutBack } }
+
+            Rectangle {
+              id: lcaixa
+              anchors.fill: parent
+              radius: Tema.raioGrande
+              color: Tema.superficieAlta
+              border.width: lt.emUso ? 2 : 1
+              border.color: lt.emUso ? Tema.realce : (ml.containsMouse ? Tema.linhaForte : Tema.linha)
+
+              Item {
+                id: lprev
+                x: 5; y: 5
+                width: parent.width - 10
+                height: parent.height - 62
+                Image {
+                  id: limg
+                  anchors.fill: parent
+                  source: lt.previa ? "file://" + lt.previa : ""
+                  sourceSize.width: 480
+                  fillMode: Image.PreserveAspectCrop
+                  asynchronous: true
+                  visible: false
+                }
+                Rectangle { id: lmasc; anchors.fill: parent; radius: Math.max(0, Tema.raioGrande - 4); visible: false; layer.enabled: true }
+                // sem prévia: um desenho com as cores do tema
+                Rectangle {
+                  anchors.fill: parent
+                  radius: Math.max(0, Tema.raioGrande - 4)
+                  color: lt.modelData.cores.background || "#000"
+                  visible: limg.status !== Image.Ready
+                  clip: true
+                  Column {
+                    x: 12; y: 12; spacing: 6
+                    visible: pg.lojaPrevias[lt.modelData.repo] === ""
+                    Repeater {
+                      model: ["accent", "foreground", "green", "blue", "yellow", "red", "magenta"]
+                      Rectangle {
+                        required property string modelData
+                        required property int index
+                        width: [70, 110, 50, 90, 40, 80, 60][index] * lprev.width / 240; height: 5; radius: 2.5
+                        color: lt.modelData.cores[modelData] || lt.modelData.cores.foreground || "#888"
+                      }
+                    }
+                  }
+                  Texto {
+                    anchors.centerIn: parent
+                    visible: pg.lojaPrevias[lt.modelData.repo] === null || pg.lojaPrevias[lt.modelData.repo] === undefined
+                    text: I18n.t("Carregando prévia…")
+                    color: lt.modelData.cores.foreground || Tema.texto3
+                    opacity: 0.6
+                    font.pixelSize: Tema.tLegenda
+                  }
+                }
+                MultiEffect {
+                  anchors.fill: parent
+                  source: limg
+                  maskEnabled: true
+                  maskSource: lmasc
+                  opacity: limg.status === Image.Ready ? 1 : 0
+                  Behavior on opacity { NumberAnimation { duration: 400 } }
+                }
+                Rectangle {
+                  anchors.fill: parent
+                  radius: Math.max(0, Tema.raioGrande - 4)
+                  color: Tema.alfa(Tema.janela, 0.75)
+                  visible: lt.instalando
+                  Texto { anchors.centerIn: parent; text: I18n.t("Instalando…"); font.weight: Font.DemiBold }
+                }
+                // selo "instalado"
+                Rectangle {
+                  visible: !!lt.modelData.instalado && !lt.instalando
+                  anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 6
+                  width: selo.implicitWidth + 16; height: 22; radius: Tema.raio > 0 ? 11 : 0
+                  color: Tema.realce
+                  Texto { id: selo; anchors.centerIn: parent; text: lt.emUso ? I18n.t("Em uso") : I18n.t("Instalado"); color: Tema.sobreRealce; font.pixelSize: Tema.tLegenda; font.weight: Font.DemiBold }
+                }
+              }
+
+              ColumnLayout {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.margins: 10
+                anchors.bottomMargin: 8
+                spacing: 1
+                RowLayout {
+                  Layout.fillWidth: true
+                  spacing: 6
+                  Texto { text: lt.modelData.nome; font.weight: Font.Medium; elide: Text.ElideRight; Layout.fillWidth: true }
+                  Row {
+                    spacing: -4
+                    Repeater {
+                      model: ["background", "accent", "red", "green", "blue"]
+                      Rectangle {
+                        required property string modelData
+                        width: 14; height: 14; radius: Tema.raio > 0 ? 7 : 0
+                        color: lt.modelData.cores[modelData] || "transparent"
+                        border.width: 1
+                        border.color: Tema.superficieAlta
+                      }
+                    }
+                  }
+                }
+                RowLayout {
+                  Layout.fillWidth: true
+                  spacing: 4
+                  Texto { text: I18n.t("por ") + lt.modelData.autor; color: Tema.texto3; font.pixelSize: Tema.tLegenda; elide: Text.ElideRight; Layout.fillWidth: true }
+                  Glifo { g: Icones.starOutline; tamanho: 12; color: Tema.texto3 }
+                  Texto { text: lt.modelData.estrelas; color: Tema.texto3; font.pixelSize: Tema.tLegenda }
+                }
+              }
+            }
+            MouseArea {
+              id: ml
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: pg.instalarDaLoja(lt.modelData)
+            }
+            // abrir a página do repositório
+            Rectangle {
+              visible: ml.containsMouse || gh.containsMouse
+              anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 11
+              width: 28; height: 28; radius: Tema.raio > 0 ? 14 : 0
+              color: gh.containsMouse ? Tema.realce : Tema.alfa(Tema.janela, 0.85)
+              Glifo { anchors.centerIn: parent; g: Icones.github; tamanho: 15; color: gh.containsMouse ? Tema.sobreRealce : Tema.texto }
+              MouseArea { id: gh; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: Sistema.solto(["xdg-open", "https://github.com/" + lt.modelData.repo]) }
+            }
+          }
+        }
+      }
+
+      Botao {
+        visible: !pg.lojaCarregando && pg.lojaFiltrados.length > pg.lojaLimite
+        Layout.alignment: Qt.AlignHCenter
+        texto: I18n.t("Mostrar mais (") + (pg.lojaFiltrados.length - pg.lojaLimite) + I18n.t(" restantes)")
+        onClicado: pg.lojaLimite += 24
       }
     }
   }
 
-  // ── wallpapers ───────────────────────────────────────────────────────────
+  // ── papéis de parede ─────────────────────────────────────────────────────
   Secao {
     titulo: I18n.t("Papel de parede")
-    detalhe: I18n.t("Clique numa imagem para usá-la. Os do tema mudam junto quando você troca de tema.")
+    detalhe: I18n.t("Clique numa imagem para usá-la; passe o mouse para excluir. Os do tema mudam junto quando você troca de tema.")
   }
   Ancora { chave: "papel" }
 
@@ -418,32 +762,35 @@ Pagina {
       spacing: 8
       Texto { text: grupo.modelData.titulo; color: Tema.texto2; font.pixelSize: Tema.tLegenda + 1; Layout.topMargin: 4 }
       Flow {
+        id: gradeFundos
         Layout.fillWidth: true
         spacing: 8
+        readonly property int larguraItem: pg.largura(width, 150, 8)
         Repeater {
           model: grupo.modelData.itens
           delegate: Item {
             id: fundo
             required property var modelData
             readonly property bool atual: modelData.real === pg.fundos.atual || modelData.caminho === pg.fundos.atual
-            width: 150; height: 94
+            width: gradeFundos.larguraItem
+            height: Math.round(width * 0.625)
             scale: mf.pressed ? 0.96 : (mf.containsMouse ? 1.04 : 1)
             z: mf.containsMouse ? 2 : 1
             Behavior on scale { NumberAnimation { duration: Tema.medio; easing.type: Easing.OutBack } }
             Image {
-              id: fi
+              id: fImg
               anchors.fill: parent
               anchors.margins: 3
               source: "file://" + fundo.modelData.caminho
-              sourceSize.width: 300
+              sourceSize.width: 360
               fillMode: Image.PreserveAspectCrop
               asynchronous: true
               visible: false
             }
-            Rectangle { id: fm; anchors.fill: fi; radius: Tema.raio; visible: false; layer.enabled: true }
+            Rectangle { id: fm; anchors.fill: fImg; radius: Tema.raio; visible: false; layer.enabled: true }
             MultiEffect {
-              anchors.fill: fi; source: fi; maskEnabled: true; maskSource: fm
-              opacity: fi.status === Image.Ready ? 1 : 0
+              anchors.fill: fImg; source: fImg; maskEnabled: true; maskSource: fm
+              opacity: fImg.status === Image.Ready ? 1 : 0
               Behavior on opacity { NumberAnimation { duration: 350 } }
             }
             Rectangle {
@@ -461,9 +808,30 @@ Pagina {
               Glifo { anchors.centerIn: parent; g: pg.aplicandoFundo === fundo.modelData.caminho ? Icones.timer : Icones.check; tamanho: 13; color: Tema.sobreRealce }
             }
             MouseArea { id: mf; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: if (!fundo.atual) pg.aplicarFundo(fundo.modelData.caminho) }
+            Rectangle {
+              visible: fundo.modelData.removivel && !fundo.atual && (mf.containsMouse || lixoF.containsMouse)
+              anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 8
+              width: 26; height: 26; radius: Tema.raio > 0 ? 13 : 0
+              color: lixoF.containsMouse ? Tema.perigo : Tema.alfa(Tema.janela, 0.85)
+              Glifo { anchors.centerIn: parent; g: Icones.deleteOutline; tamanho: 14; color: lixoF.containsMouse ? "#ffffff" : Tema.texto }
+              MouseArea { id: lixoF; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pg.confirmarRemoverFundo = fundo.modelData }
+            }
           }
         }
       }
+    }
+  }
+  Cartao {
+    visible: !!pg.confirmarRemoverFundo
+    Linha {
+      glifo: Icones.deleteOutline
+      titulo: I18n.t("Excluir este papel de parede?")
+      descricao: !pg.confirmarRemoverFundo ? ""
+                 : /\/usr\/share\/backgrounds\/simba\/|\/simba\/sistema\/papeis\//.test(pg.confirmarRemoverFundo.real)
+                 ? I18n.t("É um papel do Simba: some de todos os temas e não volta quando o tema muda.")
+                 : I18n.t("A imagem vai para a lixeira (dá para recuperar).")
+      Botao { texto: I18n.t("Cancelar"); tipo: "fantasma"; onClicado: pg.confirmarRemoverFundo = null }
+      Botao { texto: I18n.t("Excluir"); tipo: "perigo"; onClicado: { var f = pg.confirmarRemoverFundo; pg.confirmarRemoverFundo = null; pg.removerFundo(f) } }
     }
   }
 

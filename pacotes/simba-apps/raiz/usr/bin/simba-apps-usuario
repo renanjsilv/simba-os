@@ -88,17 +88,22 @@ link "$HOME/.config/simba/plugins/renan.lock" /usr/share/simba-apps/bloqueio
 
 echo "== atalhos e autostart apontando para os caminhos novos"
 NOSSOS='agentes|atalho-area|barra-tarefas|boas-vindas|brave-nativo|configuracoes|conta|conta-boas-vindas|draco|explorador|gerenciador-tarefas|simba-[a-z-]+|tema-boot|transcrever'
-for f in "$HOME"/.config/hypr/*.lua "$HOME"/.config/simba/extensions/*.jsonc; do
+for f in "$HOME"/.config/hypr/*.lua "$HOME"/.config/simba/extensions/*.jsonc "$HOME"/.config/simba/hooks/*.d/*.sh; do
   [[ -f $f ]] || continue
   novo=$(sed -E \
     -e "s#os\.getenv\(\"HOME\"\) \.\. \"/\.local/bin/($NOSSOS)#\"/usr/bin/\1#g" \
     -e "s#(~|\\\$HOME|$HOME)/\.local/bin/($NOSSOS)\b#/usr/bin/\2#g" \
+    -e "s#(\\\$HOME|$HOME)/\.config/quickshell/(configuracoes|barra-tarefas|draco|draco-config|botoes-janela)/bin/#/etc/xdg/quickshell/\2/bin/#g" \
     -e "s#os\.getenv\(\"HOME\"\) \.\. \"/\.local/share/janelas-nativo/janelas-nativo#\"/usr/share/simba-apps/janelas-nativo/janelas-nativo#g" \
     -e "s#\"$HOME/\.local/share/draco/venv/bin/python $HOME/\.local/share/draco/tts\.py serve\"#\"draco servidor-voz\"#g" \
     "$f")
   if [[ $novo != "$(cat "$f")" ]]; then
     echo "  ajustado: ${f/#$HOME/\~}"
-    if [[ $VER != --ver ]]; then cp -a "$f" "$f.bak-simba-apps"; printf '%s\n' "$novo" >"$f"; fi
+    if [[ $VER != --ver ]]; then
+      # cópia fora da pasta: o simba-hook roda todo arquivo de hooks/*.d
+      mkdir -p "$B/caminhos/$(dirname "${f#"$HOME"/}")"; cp -a "$f" "$B/caminhos/${f#"$HOME"/}"
+      printf '%s\n' "$novo" >"$f"
+    fi
   fi
 done
 

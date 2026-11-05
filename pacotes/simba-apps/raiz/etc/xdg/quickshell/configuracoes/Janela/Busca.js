@@ -5,7 +5,7 @@
 // view and pulses when a result is opened.
 var itens = [
   // Personalização
-  ["personalizacao", "tema", "Tema", "Cores do sistema inteiro: claro, escuro, paleta", "aparencia cor cores modo escuro claro dark light preto branco paleta skin estilo"],
+  ["personalizacao", "tema", "Tema", "Cores do sistema inteiro: claro, escuro, paleta", "aparencia cor cores modo escuro claro dark light preto branco paleta skin estilo loja baixar instalar mais temas comunidade github remover"],
   ["personalizacao", "papel", "Papel de parede", "Imagem de fundo da área de trabalho", "fundo wallpaper plano imagem foto background tela"],
   ["personalizacao", "papelProximo", "Próximo papel de parede", "Troca para o próximo fundo do tema", "wallpaper fundo seguinte trocar"],
   ["personalizacao", "papelEscolher", "Escolher imagem para o fundo", "Usar qualquer imagem do computador", "wallpaper arquivo foto procurar"],

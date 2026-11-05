@@ -1,0 +1,45 @@
+#!/bin/bash
+# fundos: ações nos papéis de parede da página Personalização.
+#
+#   fundos remover <caminho>
+#     · papel do Simba (link para /usr/share/backgrounds/simba): some de todos os
+#       temas e entra em ~/.config/simba/backgrounds/.ocultos, que o simba-papeis
+#       respeita (não volta quando o tema muda)
+#     · imagem da pessoa: vai para a lixeira (dá para recuperar)
+#   fundos restaurar      mostra de novo os papéis do Simba ocultados
+set -u
+DST="$HOME/.config/simba/backgrounds"
+OCULTOS="$DST/.ocultos"
+
+remover() {
+  local p="$1" real atual stem
+  [[ -e $p || -L $p ]] || { echo "Arquivo não encontrado" >&2; exit 1; }
+  real=$(realpath -- "$p")
+  atual=$(realpath -- "$HOME/.local/state/simba/current/background" 2>/dev/null)
+  if [[ $real == "$atual" ]]; then
+    echo "Esse é o papel de parede em uso; troque antes de excluir" >&2; exit 1
+  fi
+  case $real in
+    /usr/share/backgrounds/simba/* | "$HOME"/.local/share/simba/sistema/papeis/*)
+      stem=$(basename -- "$real"); stem=${stem%.*}
+      mkdir -p "$DST"
+      grep -qxF -- "$stem" "$OCULTOS" 2>/dev/null || echo "$stem" >> "$OCULTOS"
+      find "$DST" -mindepth 2 -maxdepth 2 -type l -lname "*/$stem.*" -delete
+      echo "Oculto em todos os temas"
+      ;;
+    "$HOME"/*)
+      if [[ -L $p ]]; then rm -f -- "$p"; echo "Removido"
+      else gio trash -- "$p" && echo "Enviado para a lixeira"
+      fi
+      ;;
+    *)
+      echo "Esse papel de parede vem do tema e não pode ser excluído" >&2; exit 1
+      ;;
+  esac
+}
+
+case "${1:-}" in
+  remover) [[ -n ${2:-} ]] && remover "$2" ;;
+  restaurar) rm -f "$OCULTOS"; simba-papeis; echo "Papéis do Simba restaurados" ;;
+  *) echo "uso: fundos remover <caminho> | fundos restaurar" >&2; exit 2 ;;
+esac

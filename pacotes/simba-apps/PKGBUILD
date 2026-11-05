@@ -2,7 +2,7 @@
 # Tarefas, Transcrever, Boas-vindas, Gerar ISO, Conta (backup no Drive), módulos da barra, tela de
 # bloqueio, sistema de idiomas (catálogos), atualização ("Atualizar tudo") e utilitários.
 pkgname=simba-apps
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="Simba OS: apps e ferramentas próprios (Configurações, Explorador, Gerenciador de Tarefas…)"
 arch=('any')

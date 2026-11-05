@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+# loja-temas: temas da comunidade para a página Personalização. Imprime JSON.
+#
+#   loja-temas catalogo [--renovar]     lista (cache de 12 h em ~/.cache/simba/loja-temas)
+#   loja-temas previas <repo@ramo>...   {repo: caminho local da prévia | ""}
+#   loja-temas instalar <dono/repo>     clona em ~/.config/simba/themes/<nome>; imprime {slug}
+#   loja-temas remover <slug>           apaga um tema da pessoa (não o atual)
+#
+# Os temas vêm do GitHub: repositórios de temas no formato que o Simba usa
+# (colors.toml ou alacritty.toml na raiz). A comunidade publica esses temas com
+# o nome do projeto de origem, por isso a busca usa esse termo; nada dele chega
+# ao sistema além do repositório clonado na pasta de temas.
+import concurrent.futures as cf
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+
+HOME = os.path.expanduser("~")
+CACHE = os.path.join(HOME, ".cache/simba/loja-temas")
+PREVIAS = os.path.join(CACHE, "previas")
+TEMAS = os.path.join(HOME, ".config/simba/themes")
+ATUAL = os.path.join(HOME, ".local/state/simba/current/theme.name")
+VALIDADE = 12 * 3600
+BUSCA = "omarchy theme in:name"
+PAGINAS = 3
+REPO_OK = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+RAMO_OK = re.compile(r"^[A-Za-z0-9_./-]+$")
+FORA = re.compile(r"(hook|waybar|switcher|manager|generator|creator|collection|installer|picker|tool|menu|^themes?$|-themes$)", re.I)
+
+
+def falhar(msg):
+    print(json.dumps({"erro": msg}))
+    sys.exit(1)
+
+
+def baixar(url, limite=15, cabecalhos=None):
+    req = urllib.request.Request(url, headers={"User-Agent": "simba-configuracoes", **(cabecalhos or {})})
+    with urllib.request.urlopen(req, timeout=limite) as r:
+        return r.read()
+
+
+def token():
+    t = os.environ.get("GITHUB_TOKEN", "")
+    if t:
+        return t
+    try:
+        return subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def nome_bonito(repo):
+    n = repo.split("/")[1].lower()
+    n = re.sub(r"^omarchy[-_]", "", n)
+    n = re.sub(r"[-_]theme$", "", n)
+    n = re.sub(r"^theme[-_]", "", n)
+    n = re.sub(r"[-_]omarchy$", "", n)
+    return n
+
+
+def slug_de(repo):
+    s = re.sub(r"[^a-z0-9._+-]", "-", nome_bonito(repo)).strip("-.")
+    return s or "tema"
+
+
+def titulo(slug):
+    return " ".join(p[:1].upper() + p[1:] for p in re.split(r"[-_]+", slug) if p)
+
+
+def ler_cores(texto):
+    cores = {}
+    for linha in texto.splitlines():
+        m = re.match(r'\s*([A-Za-z0-9_]+)\s*=\s*"?(#[0-9A-Fa-f]{6})', linha)
+        if m and m.group(1) not in cores:
+            cores[m.group(1)] = m.group(2)
+    # alacritty.toml: [colors.primary] background / [colors.normal] red...
+    return cores
+
+
+def claro(cor):
+    try:
+        h = cor.lstrip("#")
+        r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5
+    except (ValueError, AttributeError):
+        return False
+
+
+def instalados():
+    """{dono/repo (minúsculo): slug} dos temas clonados pela loja ou pelo terminal."""
+    achados = {}
+    if not os.path.isdir(TEMAS):
+        return achados
+    for slug in os.listdir(TEMAS):
+        cfg = os.path.join(TEMAS, slug, ".git/config")
+        try:
+            texto = open(cfg).read()
+        except OSError:
+            continue
+        m = re.search(r"url\s*=\s*\S*github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?\s*$", texto, re.M)
+        if m:
+            achados[m.group(1).lower()] = slug
+    return achados
+
+
+def examinar(item):
+    repo, ramo = item["full_name"], item["default_branch"]
+    base = f"https://raw.githubusercontent.com/{repo}/{ramo}/"
+    for arq in ("colors.toml", "alacritty.toml"):
+        try:
+            texto = baixar(base + arq, 10).decode("utf-8", "replace")
+        except Exception:
+            continue
+        cores = ler_cores(texto)
+        if "background" not in cores:
+            continue
+        slug = slug_de(repo)
+        return {
+            "repo": repo, "ramo": ramo, "slug": slug, "nome": titulo(slug),
+            "autor": repo.split("/")[0], "estrelas": item.get("stargazers_count", 0),
+            "atualizado": (item.get("pushed_at") or "")[:10],
+            "modo": "light" if claro(cores.get("background")) else "dark",
+            "cores": {k: cores[k] for k in ("background", "foreground", "accent", "red", "green", "yellow", "blue", "magenta", "cyan") if k in cores},
+        }
+    return None
+
+
+def montar():
+    tk = token()
+    cab = {"Accept": "application/vnd.github+json"}
+    if tk:
+        cab["Authorization"] = "Bearer " + tk
+    itens, vistos = [], set()
+    q = urllib.request.quote(BUSCA)
+    for p in range(1, PAGINAS + 1):
+        try:
+            dados = json.loads(baixar(f"https://api.github.com/search/repositories?q={q}&sort=stars&order=desc&per_page=100&page={p}", 20, cab))
+        except Exception as e:
+            if not itens:
+                falhar("Não foi possível falar com o GitHub (" + str(e) + ")")
+            break
+        for it in dados.get("items", []):
+            nome = it["name"]
+            if it.get("archived") or it.get("fork") or it["full_name"] in vistos:
+                continue
+            if "theme" not in nome.lower() or FORA.search(nome):
+                continue
+            vistos.add(it["full_name"])
+            itens.append(it)
+        if len(dados.get("items", [])) < 100:
+            break
+    with cf.ThreadPoolExecutor(24) as ex:
+        temas = [t for t in ex.map(examinar, itens) if t]
+    # nomes repetidos (forks renomeados, versões): fica o com mais estrelas
+    unicos = {}
+    for t in sorted(temas, key=lambda t: -t["estrelas"]):
+        unicos.setdefault(t["slug"], t)
+    return {"gerado": int(time.time()), "temas": list(unicos.values())}
+
+
+def catalogo(renovar):
+    os.makedirs(CACHE, exist_ok=True)
+    arq = os.path.join(CACHE, "catalogo.json")
+    dados = None
+    if not renovar and os.path.exists(arq) and time.time() - os.path.getmtime(arq) < VALIDADE:
+        try:
+            dados = json.load(open(arq))
+        except (OSError, ValueError):
+            dados = None
+    if dados is None:
+        dados = montar()
+        tmp = arq + ".tmp"
+        json.dump(dados, open(tmp, "w"))
+        os.replace(tmp, arq)
+    inst = instalados()
+    locais = set(os.listdir(TEMAS)) if os.path.isdir(TEMAS) else set()
+    locais |= set(os.listdir("/usr/share/simba/themes")) if os.path.isdir("/usr/share/simba/themes") else set()
+    for t in dados["temas"]:
+        t["instalado"] = inst.get(t["repo"].lower(), "")
+        t["nomeOcupado"] = not t["instalado"] and t["slug"] in locais
+    print(json.dumps(dados))
+
+
+def previa(par):
+    repo, _, ramo = par.partition("@")
+    if not REPO_OK.match(repo) or not RAMO_OK.match(ramo or "x"):
+        return repo, ""
+    ramo = ramo or "main"
+    destino = os.path.join(PREVIAS, repo.replace("/", "__") + ".jpg")
+    nada = destino + ".nada"
+    if os.path.exists(destino):
+        return repo, destino
+    if os.path.exists(nada) and time.time() - os.path.getmtime(nada) < 7 * 86400:
+        return repo, ""
+    for arq in ("preview.png", "preview.jpg", "screenshot.png", "preview.webp", "screenshots/preview.png"):
+        try:
+            dados = baixar(f"https://raw.githubusercontent.com/{repo}/{ramo}/{arq}", 20)
+        except Exception:
+            continue
+        bruto = destino + ".bruto"
+        open(bruto, "wb").write(dados)
+        ok = subprocess.run(["magick", bruto + "[0]", "-resize", "520x>", "-quality", "86", destino],
+                            capture_output=True).returncode == 0
+        os.remove(bruto)
+        if ok:
+            return repo, destino
+    open(nada, "w").close()
+    return repo, ""
+
+
+def previas(pares):
+    os.makedirs(PREVIAS, exist_ok=True)
+    with cf.ThreadPoolExecutor(12) as ex:
+        print(json.dumps(dict(ex.map(previa, pares))))
+
+
+def instalar(repo):
+    if not REPO_OK.match(repo):
+        falhar("Repositório inválido")
+    os.makedirs(TEMAS, exist_ok=True)
+    ja = instalados().get(repo.lower())
+    if ja:
+        subprocess.run(["git", "-C", os.path.join(TEMAS, ja), "pull", "--ff-only", "-q"], capture_output=True)
+        print(json.dumps({"slug": ja}))
+        return
+    slug = slug_de(repo)
+    base, n = slug, 2
+    while os.path.exists(os.path.join(TEMAS, slug)) or os.path.exists("/usr/share/simba/themes/" + slug):
+        slug, n = f"{base}-{n}", n + 1
+    destino = os.path.join(TEMAS, slug)
+    r = subprocess.run(["git", "clone", "-q", "--depth", "1", "--", f"https://github.com/{repo}.git", destino],
+                       capture_output=True, text=True, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    if r.returncode != 0:
+        shutil.rmtree(destino, ignore_errors=True)
+        falhar("Falha ao baixar: " + (r.stderr.strip().splitlines() or ["?"])[-1])
+    if not any(os.path.isfile(os.path.join(destino, a)) for a in ("colors.toml", "alacritty.toml")):
+        shutil.rmtree(destino, ignore_errors=True)
+        falhar("O repositório não tem um tema reconhecível")
+    # papéis de parede do Simba também para o tema novo
+    subprocess.run(["simba-papeis", slug], capture_output=True)
+    print(json.dumps({"slug": slug}))
+
+
+def remover(slug):
+    if not re.match(r"^[a-z0-9_][a-z0-9._+-]*$", slug):
+        falhar("Nome inválido")
+    try:
+        if open(ATUAL).read().strip() == slug:
+            falhar("Esse é o tema em uso; troque de tema antes")
+    except OSError:
+        pass
+    caminho = os.path.join(TEMAS, slug)
+    if not os.path.isdir(caminho) or os.path.islink(caminho):
+        falhar("Só temas instalados por você podem ser removidos")
+    shutil.rmtree(caminho)
+    # pasta de papéis do tema: sai só se tiver apenas os links do Simba
+    fundos = os.path.join(HOME, ".config/simba/backgrounds", slug)
+    if os.path.isdir(fundos) and all(os.path.islink(os.path.join(fundos, f)) for f in os.listdir(fundos)):
+        shutil.rmtree(fundos)
+    print(json.dumps({"ok": True}))
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    cmd, resto = (a[0], a[1:]) if a else ("", [])
+    if cmd == "catalogo":
+        catalogo("--renovar" in resto)
+    elif cmd == "previas":
+        previas(resto)
+    elif cmd == "instalar" and resto:
+        instalar(resto[0])
+    elif cmd == "remover" and resto:
+        remover(resto[0])
+    else:
+        sys.exit("uso: loja-temas catalogo|previas|instalar|remover")

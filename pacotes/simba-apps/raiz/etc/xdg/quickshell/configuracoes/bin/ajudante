@@ -105,7 +105,8 @@ def add(titulo, pasta, origem):
     for f in sorted(os.listdir(pasta)):
         p = os.path.join(pasta, f)
         if os.path.isfile(p) and img.search(f):
-            itens.append({"caminho": p, "real": os.path.realpath(p), "nome": os.path.splitext(f)[0]})
+            itens.append({"caminho": p, "real": os.path.realpath(p), "nome": os.path.splitext(f)[0],
+                          "removivel": origem != "tema"})
     if itens:
         grupos.append({"titulo": titulo, "pasta": pasta, "origem": origem, "itens": itens})
 add("Do tema", os.path.join(cur, "theme/backgrounds"), "tema")

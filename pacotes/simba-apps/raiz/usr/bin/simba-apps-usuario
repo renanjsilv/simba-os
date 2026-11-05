@@ -88,7 +88,7 @@ link "$HOME/.config/simba/plugins/renan.lock" /usr/share/simba-apps/bloqueio
 
 echo "== atalhos e autostart apontando para os caminhos novos"
 NOSSOS='agentes|atalho-area|barra-tarefas|boas-vindas|brave-nativo|configuracoes|conta|conta-boas-vindas|draco|explorador|gerenciador-tarefas|simba-[a-z-]+|tema-boot|transcrever'
-for f in "$HOME"/.config/hypr/*.lua "$HOME"/.config/simba/extensions/*.jsonc "$HOME"/.config/simba/hooks/*.d/*.sh "$HOME"/.config/*-flags.conf; do
+for f in "$HOME"/.config/hypr/*.lua "$HOME"/.config/simba/extensions/*.jsonc "$HOME"/.config/simba/hooks/*.d/*.sh "$HOME"/.config/*-flags.conf "$HOME"/.local/share/applications/*.desktop; do
   [[ -f $f ]] || continue
   novo=$(sed -E \
     -e "s#os\.getenv\(\"HOME\"\) \.\. \"/\.local/bin/($NOSSOS)#\"/usr/bin/\1#g" \

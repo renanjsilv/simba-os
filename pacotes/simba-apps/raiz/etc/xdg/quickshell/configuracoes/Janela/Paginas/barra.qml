@@ -66,7 +66,7 @@ Pagina {
     })
   }
   function tarefas(args, msg) { cmd(["barra-tarefas"].concat(args), msg) }
-  function app(id) { return DesktopEntries.byId(id) }
+  function app(id) { var _ = DesktopEntries.applications.values; return DesktopEntries.byId(id) }   // reavalia quando o Quickshell relê os atalhos
   function glifoApp(id) { var d = app(id); return TI.glifo(id, "", d ? d.name : "", d ? d.categories : []) }
 
   readonly property bool tarefasAtiva: t ? t.ativa : false

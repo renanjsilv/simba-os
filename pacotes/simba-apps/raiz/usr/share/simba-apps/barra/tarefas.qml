@@ -161,7 +161,8 @@ Item {
     return itens
   }
 
-  function entrada(id) { return id.indexOf("classe:") === 0 ? null : DesktopEntries.byId(id) }
+  // lê a lista para reavaliar quando o Quickshell relê os atalhos (troca o objeto dos duplicados)
+  function entrada(id) { var _ = DesktopEntries.applications.values; return id.indexOf("classe:") === 0 ? null : DesktopEntries.byId(id) }
   function nomeDe(item) {
     var d = entrada(item.id)
     if (d && d.name) return d.name

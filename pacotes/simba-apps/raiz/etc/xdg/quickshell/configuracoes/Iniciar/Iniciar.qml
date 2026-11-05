@@ -63,7 +63,7 @@ Scope {
     "foot", "WhatsApp", "spotify", "steam", "localsend", "org.gnome.TextEditor", "org.gnome.Calculator"]
   readonly property var fixados: {
     var l = Preferencias.obter("iniciar.fixados", fixadosPadrao) || []
-    var _ = DesktopEntries.applications.values.length
+    var _ = DesktopEntries.applications.values
     return l.filter(function(id) { return !!DesktopEntries.byId(id) })
   }
   function definirFixados(l) { Preferencias.definir("iniciar.fixados", l) }
@@ -78,7 +78,12 @@ Scope {
     l.sort(function(a, b) { return a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }) })
     return l
   }
-  function app(id) { return DesktopEntries.byId(id) }
+  // Lê a lista de apps para que quem chama (os blocos fixados) volte a procurar quando o
+  // Quickshell relê os atalhos: ele troca o objeto de um app com .desktop duplicado (pasta
+  // pessoal + sistema: Brave, Foot…) e o antigo some — o bloco ficava engrenagem sem nome.
+  // `aberturas` refaz a procura a cada abertura do menu, mesmo que a troca não avise.
+  property int aberturas: 0
+  function app(id) { var _ = DesktopEntries.applications.values, __ = aberturas; return DesktopEntries.byId(id) }
 
   function iconeApp(e) { return e ? caminhoIcone(e.icon) : caminhoIcone("") }
   function caminhoIcone(n) {
@@ -229,6 +234,7 @@ Scope {
     telaNome = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     Hyprland.refreshMonitors()
     texto = ""; pagina = "inicio"; contexto = null; energiaAberta = false
+    aberturas++
     aberto = true
     Sistema.json([Sistema.bin + "/iniciar", "recentes", "12"], function(v) { if (v) { m.recentes = v; m.buscarIcones() } })
     buscarIcones()

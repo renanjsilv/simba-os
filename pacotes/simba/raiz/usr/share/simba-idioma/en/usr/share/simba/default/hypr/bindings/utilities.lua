@@ -93,7 +93,7 @@ o.bind("SUPER + CTRL + ALT + T", "Show time", "simba-notification-time")
 o.bind("SUPER + CTRL + ALT + B", "Show battery remaining", "simba-notification-battery")
 o.bind("SUPER + CTRL + ALT + W", "Toggle weather", "simba-notification-weather")
 
-o.bind("SUPER + SHIFT + CTRL + A", "Agent", "simba-agent --pick")
+o.bind("SUPER + SHIFT + CTRL + A", "AI Agents", "simba-agentes")
 o.bind("SUPER + CTRL + A", "Audio", "simba-shell shell toggle simba.audio")
 o.bind("SUPER + CTRL + B", "Bluetooth", "simba-shell shell toggle simba.bluetooth")
 o.bind("SUPER + CTRL + D", "Display", "simba-shell shell toggle simba.monitor")

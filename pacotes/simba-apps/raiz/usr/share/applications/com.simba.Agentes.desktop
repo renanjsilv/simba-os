@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Agentes de IA
+Name[en]=AI Agents
+Comment=Interface unificada de chat com os agentes de IA
+Comment[en]=Unified chat interface for AI agents
+Exec=simba-agentes %U
+Icon=simba-agente
+Categories=Utility;Development;
+StartupNotify=true
+StartupWMClass=com.simba.Agentes

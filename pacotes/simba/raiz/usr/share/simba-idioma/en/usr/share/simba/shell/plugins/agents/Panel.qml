@@ -61,7 +61,7 @@ Panel {
   }
 
   function launchAgent() {
-    if (root.bar) root.bar.run("simba-agent --pick")
+    if (root.bar) root.bar.run("simba-agentes")
     root.close()
   }
 

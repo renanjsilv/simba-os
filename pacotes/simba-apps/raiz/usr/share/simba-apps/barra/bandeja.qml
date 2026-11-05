@@ -128,8 +128,8 @@ Item {
 
   // ── ícones do Simba ocultos ───────────────────────────────────────────
   readonly property var widgets: ({
-    // Abre Configurações › Agentes de IA (cascata: quando um agente esgota, /usr/bin/agentes passa ao próximo)
-    "simba.agents":          { nome: I18n.t("Agentes de IA"),     glifo: "\u{F06A9}", cmd: ["configuracoes", "agentes"] },
+    // Abre a interface de chat dos Agentes de IA
+    "simba.agents":          { nome: I18n.t("Agentes de IA"),     glifo: "\u{F06A9}", cmd: ["simba-agentes"] },
     "simba.bluetooth":       { nome: I18n.t("Bluetooth"),         glifo: "\u{F00AF}", cmd: ["configuracoes", "bluetooth"] },
     "simba.network":         { nome: I18n.t("Rede"),              glifo: "\u{F05A9}", cmd: ["configuracoes", "rede"] },
     "simba.audio":           { nome: I18n.t("Som"),               glifo: "\u{F057E}", cmd: ["configuracoes", "som"] },

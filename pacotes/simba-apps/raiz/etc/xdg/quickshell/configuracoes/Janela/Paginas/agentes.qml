@@ -75,7 +75,7 @@ Pagina {
       glifo: Icones.robot
       titulo: I18n.t("Abrir o agente")
       descricao: I18n.t("Super+Shift+Ctrl+A ou “Agentes de IA” na barra · começa pelo primeiro ligado que ainda tem limite")
-      Botao { texto: I18n.t("Abrir"); tipo: "primario"; onClicado: Sistema.solto([pg.bin, "abrir"]) }
+      Botao { texto: I18n.t("Abrir"); tipo: "primario"; onClicado: Sistema.solto(["simba-agentes"]) }
     }
   }
 

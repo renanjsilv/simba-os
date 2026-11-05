@@ -683,6 +683,11 @@ def main():
     if a[0] == "--prompt" and len(a) > 1:
         return sessao(" ".join(a[1:]))
     if a[0] == "abrir":
+        if shutil.which("simba-agentes"):
+            os.execvp("simba-agentes", ["simba-agentes"])
+        local_app = Path(__file__).resolve().parent.parent / "share" / "simba-apps" / "agentes" / "app.py"
+        if local_app.exists():
+            os.execvp("python3", ["python3", str(local_app)])
         os.execvp("simba-launch-tui", ["simba-launch-tui", "--app-id=org.simba.agent", str(Path(__file__).resolve())])
     c = ler_config()
     if a[0] == "estado":

@@ -1,0 +1,12 @@
+# Modo "Distribuível": ferramentas do mise que NÃO vão instaladas na ISO (uma por linha).
+# Saem a instalação, os atalhos (shims) e a linha no ~/.config/mise/config.toml do modelo;
+# quem quiser instala depois com: mise use -g <ferramenta>
+# Fica só o Claude Code (o Draco usa ele) e o que não é IA (node, gh, uv).
+codex
+copilot
+crush
+cursor-agent
+gemini
+grok
+opencode
+pi

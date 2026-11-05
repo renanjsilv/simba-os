@@ -35,3 +35,7 @@ usr/share/doc/*
 usr/share/gtk-doc/*
 var/lib/plocate/*
 var/cache/simba-craft/*
+
+# símbolos de depuração e restos do sistema antigo
+usr/lib/debug/*
+var/lib/omarchy

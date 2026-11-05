@@ -19,3 +19,28 @@
 .local/share/draco/wake-train/fala-pt
 .local/share/draco/wake-train/clips-cache.npz
 .local/share/draco/wake-train/cache
+
+# Ferramentas de desenvolvimento e cópias de trabalho de quem gerou a ISO
+go
+simba-os
+node_modules
+.npm
+.cargo/registry
+.gemini
+.codex
+.local/share/simba/independencia
+.local/share/simba/rollback-*
+.local/share/simba/idioma-correcoes
+# cache de pacotes dos apps Craft (já instalados no sistema)
+.local/share/simba/craft-cache
+# Claude Code: vai o do mise (o Draco usa ele); a instalação nativa duplicada fica fora
+.local/share/claude
+.local/bin/claude
+# Draco: vai o que ele precisa para funcionar sem baixar nada (venv, modelo de ativação
+# treinado, voz padrão em português e em inglês); o resto ele baixa se precisar
+.local/share/draco/wake-train
+.local/share/draco/models/whisper
+.local/share/draco/models/*.npz.*
+.local/share/draco/voices/pt_BR-cadu-*
+.local/share/draco/voices/pt_BR-edresson-*
+.local/share/draco/voices/pt_BR-jeff-*

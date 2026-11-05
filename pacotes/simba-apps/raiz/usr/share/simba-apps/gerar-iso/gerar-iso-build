@@ -145,6 +145,14 @@ if [ -d "$SNAP_ROOT/var/lib/flatpak/repo" ]; then
   if [ ${#drivers[@]} -gt 0 ]; then
     fpc uninstall -y --noninteractive "${drivers[@]}" >/dev/null 2>&1 || warn "não deu para tirar ${drivers[*]} da cópia"
   fi
+  # Distribuível: apps que não vão para outras pessoas (distribuivel-flatpak-remover.txt)
+  if [ "$MODO" = distribuivel ] && [ -f "$SRC/distribuivel-flatpak-remover.txt" ]; then
+    mapfile -t tirar < <(grep -vE '^\s*(#|$)' "$SRC/distribuivel-flatpak-remover.txt" | tr -d ' \t')
+    for a in "${tirar[@]}"; do
+      fpc info "$a" >/dev/null 2>&1 || continue
+      fpc uninstall -y --noninteractive "$a" >/dev/null 2>&1 && info "Fora da ISO: $a" || warn "não deu para tirar $a da cópia"
+    done
+  fi
   fpc uninstall -y --noninteractive --unused >/dev/null 2>&1 || true
   rm -rf "$FPX"
   info "Loja na ISO: $(du -sh "$SNAP_ROOT/var/lib/flatpak" | cut -f1)"
@@ -162,6 +170,7 @@ listas_home=("$SRC/excluir-home.txt")
 [ "$MODO" = distribuivel ] && listas_home+=("$SRC/excluir-distribuivel.txt")
 
 : > "$WORK/excl-home"
+: > "$WORK/pseudo-home"
 for d in "$SNAP_HOME"/*/; do
   u=$(basename "$d")
   # Distribuível: só a pasta de quem gerou (vira o modelo do usuário novo)
@@ -182,6 +191,27 @@ for d in "$SNAP_HOME"/*/; do
       echo "$u/${v#"$d"}" >> "$WORK/excl-home"
     done
   done
+  # Distribuível: ferramentas do mise que não vão (distribuivel-mise-remover.txt) — saem a
+  # instalação, os atalhos e a linha no config.toml (senão o mise reclama que faltam)
+  if [ "$MODO" = distribuivel ] && [ -f "$SRC/distribuivel-mise-remover.txt" ]; then
+    mise_tirar=$(grep -vE '^\s*(#|$)' "$SRC/distribuivel-mise-remover.txt" | tr -d ' \t' | tr '\n' ' ')
+    for f in $mise_tirar; do
+      printf '%s\n' "$u/.local/share/mise/installs/$f" "$u/.local/share/mise/shims/$f*" >> "$WORK/excl-home"
+    done
+    cfg="$d.config/mise/config.toml"
+    if [ -f "$cfg" ]; then
+      awk -v tirar="$mise_tirar" '
+        BEGIN { n = split(tirar, a, " "); for (i = 1; i <= n; i++) fora[a[i]] = 1 }
+        /^[[:space:]]*\[/ { secao = $0; gsub(/[[:space:]]/, "", secao) }
+        {
+          if (secao == "[tools]" && $0 ~ /=/) { k = $0; sub(/=.*/, "", k); gsub(/[[:space:]"]/, "", k); if (k in fora) next }
+          print
+        }' "$cfg" > "$WORK/mise-$u.toml"
+      echo "$u/.config/mise/config.toml" >> "$WORK/excl-home"
+      printf '%s f 644 %s %s cat %s\n' "$u/.config/mise/config.toml" "$(stat -c %u "$cfg")" "$(stat -c %g "$cfg")" \
+        "$WORK/mise-$u.toml" >> "$WORK/pseudo-home"
+    fi
+  fi
   # ~/.cache inteiro, exceto o runtime fixado do Hydra (umu)
   for c in "$d".cache/* "$d".cache/.[!.]*; do
     [ -e "$c" ] || continue
@@ -222,7 +252,9 @@ PSEUDO=()
 mksquashfs "$SNAP_ROOT" "$WORK/system.sqfs" "${SQ_OPTS[@]}" -ef "$WORK/excl-system" "${PSEUDO[@]}"
 etapa pessoal "Compactando as pastas pessoais"
 msg "Compactando as configurações das pastas pessoais (home.sqfs)"
-mksquashfs "$SNAP_HOME" "$WORK/home.sqfs" "${SQ_OPTS[@]}" -ef "$WORK/excl-home"
+PSEUDO_HOME=()
+[ -s "$WORK/pseudo-home" ] && PSEUDO_HOME=(-pf "$WORK/pseudo-home")
+mksquashfs "$SNAP_HOME" "$WORK/home.sqfs" "${SQ_OPTS[@]}" -ef "$WORK/excl-home" "${PSEUDO_HOME[@]}"
 
 btrfs subvolume delete "$SNAP_ROOT" "$SNAP_HOME" >/dev/null
 umount "$TOP"

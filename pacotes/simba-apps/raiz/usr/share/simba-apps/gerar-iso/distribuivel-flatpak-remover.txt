@@ -1,0 +1,3 @@
+# Modo "Distribuível": apps Flatpak desinstalados da CÓPIA usada na ISO (o sistema em uso
+# não muda). Os runtimes que só eles usavam saem junto (--unused).
+com.stremio.Stremio

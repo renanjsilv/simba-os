@@ -1,0 +1,61 @@
+#!/bin/bash
+# migrar-esta-maquina — troca as versões soltas dos componentes do Simba OS (pasta pessoal,
+# /usr/local, /etc) pelos pacotes deste repositório. Feito para o computador onde o Simba
+# nasceu; rodar como usuário (pede a senha do sudo). Nada é apagado: o que sai vai para
+# /var/lib/simba/migracao-pacotes-<data> (sistema) e ~/.local/share/simba-migracao/<data> (usuário).
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+ok()    { printf '\e[32m✓ %s\e[0m\n' "$*"; }
+passo() { printf '\n\e[1;36m━━ %s\e[0m\n' "$*"; }
+
+sudo -v || exit 1
+( while sudo -n true 2>/dev/null; do sleep 50; done ) & MANTER=$!
+trap 'kill $MANTER 2>/dev/null' EXIT
+
+passo "1/6  Construindo os pacotes"
+rm -f "$R"/dist/simba-{,apps-,draco-}[0-9]*.pkg.tar.zst
+"$R/ferramentas/construir" simba simba-apps simba-draco >/dev/null
+PKGS=$(ls "$R"/dist/simba-[0-9]*.pkg.tar.zst "$R"/dist/simba-apps-[0-9]*.pkg.tar.zst "$R"/dist/simba-draco-[0-9]*.pkg.tar.zst)
+ok "$(echo "$PKGS" | xargs -n1 basename | tr '\n' ' ')"
+
+passo "2/6  Ponto de restauração"
+sudo snapper -c root create -c number -d "antes dos pacotes simba-apps/simba-draco" && ok "criado"
+
+passo "3/6  Tirando do caminho as cópias soltas do sistema"
+B="/var/lib/simba/migracao-pacotes-$(date +%Y%m%d-%H%M%S)"
+sudo mkdir -p "$B"
+guardar() { for f in "$@"; do [[ -e $f || -L $f ]] || continue; sudo mkdir -p "$B$(dirname "$f")"; sudo mv "$f" "$B$f"; echo "  guardado: $f"; done; }
+guardar /usr/local/bin/simba-{craft-atualizar,idioma,loja,marca,sistema} /usr/local/share/simba-idioma
+guardar /etc/pacman.d/hooks/99-simba-limine.hook /etc/pacman.d/hooks/zz-simba-marca.hook
+UNIDADES=(simba-menu-volta.service simba-craft-atualizar.service simba-craft-atualizar.timer
+          simba-flatpak-atualizar.service simba-flatpak-atualizar.timer)
+ATIVAS=()
+for u in "${UNIDADES[@]}"; do
+  [[ -f /etc/systemd/system/$u ]] || continue
+  systemctl is-enabled "$u" >/dev/null 2>&1 && ATIVAS+=("$u")
+  sudo systemctl disable "$u" >/dev/null 2>&1 || true
+  guardar "/etc/systemd/system/$u"
+done
+guardar /etc/systemd/system/anydesk.service.d/hyprland-bridge.conf /etc/systemd/system/anydesk.service.d/simba-ordem.conf
+
+passo "4/6  Instalando os pacotes"
+sudo pacman -U --noconfirm --needed \
+  --overwrite /etc/mkinitcpio.conf.d/zz-tpm2-unlock.conf \
+  --overwrite /etc/mkinitcpio.conf.d/simba_resume.conf \
+  --overwrite /etc/sddm.conf.d/99-simba-login.conf \
+  $PKGS
+sudo systemctl daemon-reload
+for u in "${ATIVAS[@]}"; do sudo systemctl enable "$u" >/dev/null 2>&1 && echo "  reativado: $u"; done
+ok "instalados"
+
+passo "5/6  Seu usuário passa a usar os apps do sistema"
+/usr/bin/simba-apps-usuario
+
+passo "6/6  Conferência"
+for c in configuracoes explorador simba-atualizar draco simba-sistema simba-idioma; do
+  printf '  %-18s %s\n' "$c" "$(command -v "$c")"
+done
+pacman -Q simba simba-apps simba-draco
+echo
+echo "Pronto. Saia da sessão e entre de novo (ou reinicie) para tudo recarregar dos pacotes."
+echo "Se algo der errado: Configurações › Restauração do sistema › ponto \"antes dos pacotes simba-apps/simba-draco\"."

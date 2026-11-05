@@ -1,0 +1,11 @@
+[Unit]
+Description=Simba OS: atualização diária da suíte Craft
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1d
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

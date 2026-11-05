@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Task Manager
+Name[pt_BR]=Gerenciador de Tarefas
+GenericName=System monitor
+GenericName[pt_BR]=Monitor do sistema
+Comment=See processes, performance, services and startup apps (Ctrl+Shift+Esc)
+Comment[pt_BR]=Veja processos, desempenho, serviços e apps de inicialização (Ctrl+Shift+Esc)
+Exec=gerenciador-tarefas %u
+Icon=com.renan.GerenciadorTarefas
+Terminal=false
+Categories=System;Monitor;
+Keywords=tasks;processes;memory;ram;cpu;services;task manager;performance;
+Keywords[pt_BR]=tarefas;processos;memória;ram;cpu;serviços;task manager;desempenho;
+StartupNotify=true
+StartupWMClass=com.renan.GerenciadorTarefas

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# simba:summary=Open a config file in the user's editor and surface a toast
+# simba:args=<path>
+# simba:examples=simba launch config-editor ~/.config/hypr/hyprland.lua
+
+path="${1-}"
+
+if [[ -z $path ]]; then
+  echo "Usage: simba-launch-config-editor <path>" >&2
+  exit 1
+fi
+
+simba-notification-send -u low "Editing config file" "$path"
+exec simba-launch-editor "$path"

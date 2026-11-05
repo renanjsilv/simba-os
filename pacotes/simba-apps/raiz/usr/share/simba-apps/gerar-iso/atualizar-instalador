@@ -1,0 +1,22 @@
+#!/bin/bash
+# atualizar-instalador <iso> <nova-iso> — copia a ISO trocando o instalador (/clone/instalar-clone)
+# e o pacote da marca (/clone/marca) pelas versões atuais. Não precisa de root.
+set -euo pipefail
+SRC="$(dirname "$(readlink -f "$0")")"
+in=${1:?iso} out=${2:?nova iso}
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+xorriso -osirrox on -indev "$in" -extract /clone/clone.env "$tmp/clone.env" >/dev/null 2>&1
+NOME=$(. "$tmp/clone.env"; echo "${NOME_SISTEMA:-Simba OS}")
+"$SRC/marca/gerar-pacote" "$NOME" "$(cat "$SRC/marca/estilo" 2>/dev/null || echo caricatura)" "$tmp/marca" >/dev/null
+if [ -f "$SRC/marca/gato-pixel.txt" ]; then
+  "$SRC/marca/logo-terminal" "$SRC/marca/gato-pixel.txt" 0 "$tmp/marca/logo.ans"
+else
+  "$SRC/marca/logo-terminal" "$tmp/marca/logo.png" 40 "$tmp/marca/logo.ans"
+fi
+install -m755 "$SRC/marca/aplicar" "$tmp/marca/aplicar"
+rm -f "$tmp/marca/nome.png"
+VOLID=$(xorriso -indev "$in" -pvd_info 2>/dev/null | awk -F': ' '/^Volume Id/ {print $2}')
+xorriso -indev "$in" -outdev "$out" -volid "$VOLID" -compliance iso_9660_level=3 \
+  -rm_r /clone/marca -- -map "$tmp/marca" /clone/marca \
+  -map "$SRC/instalar-clone" /clone/instalar-clone -boot_image any replay 2>&1 | grep -E "^xorriso : (FAILURE|SORRY)" || true
+echo "$out"

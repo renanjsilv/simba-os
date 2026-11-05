@@ -1,0 +1,23 @@
+# segredos — nunca no Git
+*.key
+**/chaves/
+config.env
+*.token
+*credentials*
+.env
+# gerados
+dist/
+**/__pycache__/
+*.pyc
+*.pkg.tar.zst
+*.pkg.tar.zst.sig
+pacotes/*/src/
+pacotes/*/pkg/
+*.bak*
+*.log
+# dados pesados do Draco (baixados/preparados na primeira execução)
+**/venv/
+**/voices/
+**/wake-train/
+**/recordings/
+pacotes/simba/raiz/etc/skel/.local/share/nvim/lazy/

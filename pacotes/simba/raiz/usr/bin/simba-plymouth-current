@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# simba:summary=Show which theme is styling the Plymouth boot screen
+# simba:examples=simba plymouth current
+
+# simba-plymouth-set installs the theme's unlock.png as a byte-for-byte
+# copy of logo.png, so matching it back identifies the current theme.
+installed_logo=/usr/share/plymouth/themes/simba/logo.png
+
+if cmp -s "$SIMBA_PATH/default/plymouth/logo.png" "$installed_logo"; then
+  echo default
+  exit
+fi
+
+simba-plymouth-list | while read -r name; do
+  if cmp -s "$(simba-theme-dir "$name")/unlock.png" "$installed_logo"; then
+    echo "$name"
+    exit
+  fi
+done

@@ -1,0 +1,37 @@
+#!/bin/bash
+# simba-sistema — ações de administrador das Configurações do Simba OS.
+# Chamado pelas Configurações; pede a senha (pkexec) quando não é root.
+#   simba-sistema firewall liga|desliga
+#   simba-sistema pontos-automaticos liga|desliga   ponto de restauração diário (snapper timeline)
+#   simba-sistema menu-restauracao                  mostra o menu de inicialização (com os pontos
+#                                                   de restauração) só na próxima vez que ligar
+#   simba-sistema menu-volta                        desfaz o anterior (roda sozinho no boot)
+set -euo pipefail
+[ "$(id -u)" = 0 ] || exec pkexec "$(readlink -f "$0")" "$@"
+CONF=/boot/limine.conf
+MARCA_BOOT=/boot/simba-menu-uma-vez       # guarda o timeout original (fica na ESP: vale também no snapshot)
+MARCA_VER=/var/lib/simba/menu-uma-vez     # cópia legível pelas Configurações
+mkdir -p /var/lib/simba
+case "${1:-}:${2:-}" in
+  firewall:liga) ufw --force enable >/dev/null; systemctl enable ufw >/dev/null 2>&1 ;;
+  firewall:desliga) ufw disable >/dev/null ;;
+  pontos-automaticos:liga)
+    snapper -c root set-config TIMELINE_CREATE=yes
+    systemctl enable --now snapper-timeline.timer >/dev/null 2>&1 ;;
+  pontos-automaticos:desliga)
+    snapper -c root set-config TIMELINE_CREATE=no
+    systemctl disable --now snapper-timeline.timer >/dev/null 2>&1 ;;
+  menu-restauracao:)
+    if [ ! -f "$MARCA_BOOT" ]; then
+      sed -n 's/^timeout:[[:space:]]*//p' "$CONF" | head -1 >"$MARCA_BOOT"
+    fi
+    if grep -q '^timeout:' "$CONF"; then sed -i 's/^timeout:.*/timeout: 30/' "$CONF"; else sed -i '1i timeout: 30' "$CONF"; fi
+    touch "$MARCA_VER" ;;
+  menu-volta:)
+    rm -f "$MARCA_VER"
+    [ -f "$MARCA_BOOT" ] || exit 0
+    v=$(tr -dc '0-9' <"$MARCA_BOOT"); v=${v:-0}
+    sed -i "s/^timeout:.*/timeout: $v/" "$CONF"
+    rm -f "$MARCA_BOOT" ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

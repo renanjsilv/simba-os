@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# simba:summary=Open Voxtype AI model setup
+
+set -e
+
+simba-launch-floating-terminal-with-presentation "voxtype setup model"
+simba-restart-shell

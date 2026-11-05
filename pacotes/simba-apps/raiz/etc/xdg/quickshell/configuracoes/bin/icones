@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""Temas de ícones (Configurações › Personalização › Ícones).
+
+    icones catalogo         JSON: famílias, instaladas ou não, cores, prévia e o tema ativo
+    icones aplicar [json]   aplica o tema escolhido nas preferências (ou no JSON dado; também no hook theme-set)
+    icones instalar <id>    instala a família (oficial: pkexec pacman; AUR: terminal com yay)
+    icones cadeia [tema]    pastas de ícones na ordem de busca (barra de tarefas)
+    icones resolver <nome>… JSON: nome → arquivo no tema ativo
+
+Preferências em ~/.config/configuracoes/preferencias.json, chave "icones":
+    {"tema": "simba" | "fluent" | "tela" | ..., "cor": "auto" | "blue" | ..., "modo": "auto" | "claro" | "escuro"}
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import temaicones as ti  # noqa: E402
+
+VERSAO = Path.home() / ".local/state/configuracoes/icones-versao"
+# Ícones da prévia (nomes comuns a todos os temas)
+PREVIA = ["user-home", "folder-documents", "utilities-terminal", "web-browser", "preferences-system",
+          "accessories-text-editor", "multimedia-video-player", "accessories-calculator"]
+
+
+# o tema Simba tem ícone próprio para cada app instalado: mostra apps de verdade
+PREVIA_SIMBA = ["com.renan.Explorador", "brave-desktop", "simba-loja", "com.renan.Configuracoes", "steam",
+                "spotify-client", "whatsapp", "foot"]
+
+
+def catalogo():
+    oc = ti.simba_cores()
+    inst = ti.instalados()
+    ativo = ti.tema_atual()
+    p = ti.prefs()
+    out = []
+    for f in ti.CATALOGO:
+        cor = ti.cor_do_acento(f, oc["acento"])
+        var = ti.nome_variante(f, cor, oc["escuro"])
+        instalado = var is not None and (var in inst or ti.existe(var))
+        lista = PREVIA_SIMBA if f["id"] == "simba" else PREVIA
+        prev = ti.resolver(lista, var) if instalado else {}
+        out.append({
+            "id": f["id"], "nome": f["nome"], "desc": f["desc"], "pacote": f["pacote"], "fonte": f["fonte"],
+            "instalado": instalado, "cores": f["cores"], "corAuto": cor, "variante": var or "",
+            "previa": [prev[n] for n in lista if n in prev][:8],
+            "modos": bool(f["escuro"] or f["claro"]),
+        })
+    t_simba = ti.escolher({"tema": "simba"})
+    prev = ti.resolver(PREVIA, t_simba)
+    return {"doTema": {"variante": t_simba, "previa": [prev[n] for n in PREVIA if n in prev][:8]},
+            "ativo": ativo, "escuro": oc["escuro"], "prefs": {"tema": p.get("tema", "simba"), "cor": p.get("cor", "auto"),
+            "modo": p.get("modo", "auto")}, "familias": out,
+            "simba": (ti.SIMBA / "icons.theme").read_text().strip() if (ti.SIMBA / "icons.theme").exists() else ""}
+
+
+def aplicar(escolha=None):
+    t = ti.escolher(escolha)
+    subprocess.run(["gsettings", "set", "org.gnome.desktop.interface", "icon-theme", t], capture_output=True)
+    # GTK 3 fora do GNOME também lê o settings.ini
+    for v in ("gtk-3.0", "gtk-4.0"):
+        ini = Path.home() / ".config" / v / "settings.ini"
+        if ini.exists():
+            linhas = [l for l in ini.read_text().splitlines() if not l.startswith("gtk-icon-theme-name")]
+            i = next((k for k, l in enumerate(linhas) if l.strip() == "[Settings]"), None)
+            if i is not None:
+                linhas.insert(i + 1, f"gtk-icon-theme-name={t}")
+                ini.write_text("\n".join(linhas) + "\n")
+    # Avisa a barra de tarefas e o menu Iniciar (observam este arquivo)
+    VERSAO.parent.mkdir(parents=True, exist_ok=True)
+    VERSAO.write_text(f"{t} {time.time()}\n")
+    print(t)
+
+
+def instalar(fid):
+    f = ti.POR_ID.get(fid)
+    if not f:
+        return 2
+    if f["fonte"] == "oficial":
+        r = subprocess.run(["pkexec", "pacman", "-S", "--needed", "--noconfirm", f["pacote"]])
+        return r.returncode
+    # AUR: precisa de compilação e da senha no terminal
+    cmd = f'echo "Instalando {f["nome"]} ({f["pacote"]}) do AUR…"; yay -S --needed {f["pacote"]}; ' \
+          f'echo; read -n1 -rsp "Pronto. Tecle algo para fechar."'
+    subprocess.Popen(["xdg-terminal-exec", "--title=Instalar ícones", "bash", "-c", cmd],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return 0
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    if a[0] == "catalogo":
+        print(json.dumps(catalogo(), ensure_ascii=False))
+    elif a[0] == "aplicar":
+        aplicar(json.loads(a[1]) if len(a) > 1 else None)
+    elif a[0] == "instalar" and len(a) > 1:
+        return instalar(a[1])
+    elif a[0] == "cadeia":
+        for t in ti.cadeia(a[1] if len(a) > 1 else ti.tema_atual()):
+            for b in ti.BASES:
+                if (b / t).is_dir():
+                    print(b / t)
+    elif a[0] == "resolver":
+        print(json.dumps(ti.resolver(a[1:]), ensure_ascii=False))
+    else:
+        print(__doc__, file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

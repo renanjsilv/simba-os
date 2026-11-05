@@ -1,0 +1,23 @@
+[Desktop Entry]
+Type=Application
+Name=File Explorer
+Name[pt_BR]=Explorador de Arquivos
+GenericName=File manager
+GenericName[pt_BR]=Gerenciador de arquivos
+Comment=Browse your folders, drives and clouds
+Comment[pt_BR]=Navegue pelas suas pastas, discos e nuvens
+Exec=explorador %U
+Icon=com.renan.Explorador
+Terminal=false
+Categories=System;Utility;Core;GTK;FileManager;
+MimeType=inode/directory;application/x-gnome-saved-search;
+Keywords=files;folders;explorer;file manager;nautilus;windows;
+Keywords[pt_BR]=arquivos;pastas;explorador;gerenciador;nautilus;windows;
+StartupNotify=true
+StartupWMClass=com.renan.Explorador
+Actions=nova-janela;
+
+[Desktop Action nova-janela]
+Name=New window
+Name[pt_BR]=Nova janela
+Exec=explorador

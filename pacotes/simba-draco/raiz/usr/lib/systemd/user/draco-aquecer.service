@@ -1,0 +1,17 @@
+[Unit]
+Description=Draco: deixa o Claude Code pronto na memória (1ª resposta rápida depois do boot)
+PartOf=graphical-session.target
+After=graphical-session.target draco-wake.service
+
+[Service]
+Type=oneshot
+# espera o login assentar e lê o binário do Claude para o cache de disco, sem
+# disputar o disco com o resto (ionice idle); o --version aquece o runtime
+ExecStartPre=/usr/bin/sleep 25
+ExecStart=/usr/bin/bash -c 'c=$(readlink -f "$HOME/.local/share/mise/installs/claude/latest/claude"); [ -x "$c" ] || exit 0; cat "$c" >/dev/null; "$c" --version >/dev/null 2>&1; true'
+Nice=15
+IOSchedulingClass=idle
+CPUWeight=20
+
+[Install]
+WantedBy=graphical-session.target

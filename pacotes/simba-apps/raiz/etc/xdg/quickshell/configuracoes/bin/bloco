@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Write the "Configurações" managed block of a config file.
+
+    bloco <arquivo> [--comentario "--"]   < novo conteúdo do bloco
+
+The block sits between two marker lines and is the only part of the file the
+Settings app ever touches; everything the user wrote stays byte-for-byte. An
+empty stdin removes the block. The first time the app edits a file a
+timestamped backup (<arquivo>.bak.<epoch>) is kept next to it. The write is
+atomic (temp file + rename) so Hyprland's auto-reload never reads half a file.
+"""
+import os
+import sys
+import time
+
+INICIO = "{c} >>> Configurações: gerado pelo app Configurações (Super+Espaço › Configurações). Edite pelo app. >>>"
+FIM = "{c} <<< Configurações <<<"
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print(__doc__, file=sys.stderr)
+        return 2
+    caminho = os.path.expanduser(args[0])
+    comentario = "--"
+    if "--comentario" in args:
+        comentario = args[args.index("--comentario") + 1]
+    inicio = INICIO.format(c=comentario)
+    fim = FIM.format(c=comentario)
+    novo = sys.stdin.read().strip("\n")
+
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            texto = f.read()
+    except FileNotFoundError:
+        texto = ""
+
+    linhas = texto.split("\n")
+    marcadores = [i for i, l in enumerate(linhas) if l.startswith(comentario + " >>> Configurações") or l == fim]
+    tinha_bloco = False
+    if len(marcadores) >= 2:
+        a = next(i for i in marcadores if linhas[i].startswith(comentario + " >>> Configurações"))
+        b = next((i for i in marcadores if linhas[i] == fim and i > a), None)
+        if b is not None:
+            tinha_bloco = True
+            antes = linhas[:a]
+            depois = linhas[b + 1:]
+    if not tinha_bloco:
+        antes = linhas
+        depois = []
+        while antes and antes[-1] == "":
+            antes.pop()
+
+    while antes and antes[-1] == "":
+        antes.pop()
+    partes = antes[:]
+    if novo:
+        partes += ["", inicio] + novo.split("\n") + [fim]
+    resto = depois[:]
+    while resto and resto[0] == "":
+        resto.pop(0)
+    if resto:
+        partes += [""] + resto
+    resultado = "\n".join(partes).rstrip("\n") + "\n"
+
+    if resultado == (texto if texto.endswith("\n") else texto + "\n"):
+        return 0
+
+    if texto and not tinha_bloco:
+        with open(f"{caminho}.bak.{int(time.time())}", "w", encoding="utf-8") as f:
+            f.write(texto)
+
+    tmp = f"{caminho}.configuracoes.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(resultado)
+    os.replace(tmp, caminho)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

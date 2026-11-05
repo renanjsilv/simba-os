@@ -1,0 +1,42 @@
+# Senhas, chaves e logins: fora, exceto em "Com arquivos pessoais" + "Incluir senhas e logins".
+.ssh
+.gnupg
+.pki
+.netrc
+.git-credentials
+.docker/config.json
+.config/gh
+.local/share/keyrings
+.local/share/pki
+.anydesk
+.codex/auth.json
+.codex/installation_id
+.local/share/opencode/auth.json
+
+# Conta Google (backup no Drive): token do rclone e estado do login
+.config/rclone
+.config/conta
+.local/state/conta
+.local/share/conta/antes-da-restauracao
+.local/share/conta/brave-pendente
+
+# Navegadores e apps com sessão/login
+.mozilla
+.config/BraveSoftware
+.config/chromium
+.config/google-chrome
+.config/google-chrome-beta
+.config/google-chrome-unstable
+.config/microsoft-edge
+.config/microsoft-edge-dev
+.config/spotify
+.config/spotifast
+.local/share/spotifast
+.config/hydralauncher
+.local/share/Steam
+.steam
+.var
+
+# Draco: chaves de API
+.config/draco/chaves
+.local/share/draco/groq.key

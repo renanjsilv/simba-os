@@ -1,0 +1,295 @@
+#!/bin/bash
+# tela: display modes (Super+P) and revertible display changes for the
+# Configurações app.
+#
+#   tela estado                 JSON: {interna, externas, modo, monitores}
+#   tela modo <m> [segundos]    m = notebook | duplicar | estender | segunda
+#                               applies the mode, persists it, and arms an
+#                               auto-revert (default 15 s) until `tela manter`
+#   tela snapshot               remember the current display config (before the
+#                               settings app rewrites monitors.lua)
+#   tela pendente [segundos]    arm the auto-revert for the change just made
+#   tela manter                 keep the change (disarms the revert)
+#   tela reverter               restore what `snapshot` saved, right now
+#   tela lembrar                remember the current mode for each connected external
+#                               screen (keyed by make|model|serial, not the connector)
+#   tela conectado <saída>      a screen was plugged in: apply its remembered mode
+#                               (JSON {acao: aplicado|igual|novo|ignorado, nome, modo})
+#   tela memoria                the remembered screens (~/.config/configuracoes/monitores.json)
+#   tela esquecer <id>          forget one
+#   tela seguranca              never leave the laptop panel off without an external
+#                               screen; drop stale per-connector toggles after unplug
+#
+# Persistence reuses Simba's own monitor toggles, so the bar's monitor panel
+# and Simba's clamshell/hotplug recovery keep working with these modes:
+#   ~/.local/state/simba/toggles/hypr/internal-monitor-mirror.lua   Duplicar
+#   ~/.local/state/simba/toggles/hypr/internal-monitor-disable.lua  Somente segunda tela
+# plus one of ours, in the same directory (loaded the same way):
+#   ~/.local/state/simba/toggles/hypr/configuracoes-external-monitor-disable.lua
+#                                                                     Somente tela do notebook
+# Estender = none of the three.
+
+set -u
+
+TOGGLES="$HOME/.local/state/simba/toggles/hypr"
+MIRROR="$TOGGLES/internal-monitor-mirror.lua"
+INTERNAL_OFF="$TOGGLES/internal-monitor-disable.lua"
+EXTERNAL_OFF="$TOGGLES/configuracoes-external-monitor-disable.lua"
+MONITORS_LUA="$HOME/.config/hypr/monitors.lua"
+RUN="${XDG_RUNTIME_DIR:-/tmp}/configuracoes"
+SNAP="$RUN/tela-snapshot"
+PENDING="$RUN/tela-pendente"
+LOCK="$RUN/tela.lock"
+TRACKED=("$MIRROR" "$INTERNAL_OFF" "$EXTERNAL_OFF" "$MONITORS_LUA")
+MEM="$HOME/.config/configuracoes/monitores.json"
+ULTIMO="$RUN/ultimo-modo"
+
+mkdir -p "$RUN" "$TOGGLES"
+
+notify() { simba-notification-send -g 󰍹 "$@" >/dev/null 2>&1 || true; }
+
+monitors_json() { hyprctl monitors all -j 2>/dev/null || echo '[]'; }
+
+# The built-in panel, or (desktop PCs) the left-most output.
+internal_name() {
+  local all="$1" name
+  name=$(jq -r '[.[] | select(.name | test("^(eDP|LVDS|DSI)-"))][0].name // empty' <<<"$all")
+  [[ -z $name ]] && name=$(jq -r 'sort_by(.x) | .[0].name // empty' <<<"$all")
+  printf '%s' "$name"
+}
+
+safe_name() { [[ $1 =~ ^[A-Za-z0-9._-]+$ ]]; }
+
+estado() {
+  local all internal
+  all=$(monitors_json)
+  internal=$(internal_name "$all")
+  jq -c --arg i "$internal" '
+    . as $m
+    | [ $m[] | select(.name != $i) ] as $ext
+    | ([ $m[] | select(.name == $i) ][0]) as $int
+    | {
+        interna: $i,
+        externas: [ $ext[].name ],
+        modo: (
+          if ($ext | length) == 0 then "unico"
+          elif ([ $m[] | select((.mirrorOf // "none") != "none") ] | length) > 0 then "duplicar"
+          elif ($int != null and $int.disabled == true) then "segunda"
+          elif ([ $ext[] | select(.disabled != true) ] | length) == 0 then "notebook"
+          else "estender" end),
+        monitores: [ $m[] | { name, description, make, model, width, height, refreshRate, x, y, scale, transform,
+                              disabled, mirrorOf, availableModes, focused } ]
+      }' <<<"$all"
+}
+
+snapshot() {
+  [[ -f $PENDING && -d $SNAP ]] && return 0 # a revertible change is already open: keep the original
+  rm -rf "$SNAP"
+  mkdir -p "$SNAP"
+  local f i=0
+  for f in "${TRACKED[@]}"; do
+    if [[ -f $f ]]; then cp -p "$f" "$SNAP/$i"; else : >"$SNAP/$i.ausente"; fi
+    i=$((i + 1))
+  done
+}
+
+restore() {
+  [[ -d $SNAP ]] || return 1
+  local f i=0
+  for f in "${TRACKED[@]}"; do
+    if [[ -f $SNAP/$i ]]; then
+      local dest
+      dest=$(realpath -m -- "$f") # write through symlinks, keep the link itself
+      cp -p "$SNAP/$i" "$dest.configuracoes.tmp" && mv -f "$dest.configuracoes.tmp" "$dest"
+    elif [[ -f $SNAP/$i.ausente ]]; then
+      rm -f "$f"
+    fi
+    i=$((i + 1))
+  done
+  hyprctl reload >/dev/null 2>&1
+  return 0
+}
+
+arm() {
+  local secs="${1:-15}" token
+  token="$(date +%s%N)"
+  echo "$token" >"$PENDING"
+  # Survives the UI: if nobody confirms, the change undoes itself.
+  setsid -f bash -c "sleep $((secs + 1)); exec \"$0\" reverter --token $token" >/dev/null 2>&1 </dev/null 9>&-
+}
+
+manter() {
+  rm -f "$PENDING"
+  rm -rf "$SNAP"
+}
+
+reverter() {
+  local token=""
+  [[ ${1:-} == --token ]] && token="${2:-}"
+  if [[ -n $token ]]; then
+    [[ -f $PENDING && $(cat "$PENDING") == "$token" ]] || return 0
+  fi
+  [[ -d $SNAP ]] || { rm -f "$PENDING"; return 0; }
+  restore
+  rm -f "$PENDING"
+  rm -rf "$SNAP"
+  [[ -n $token ]] && notify "Configurações de exibição revertidas"
+  return 0
+}
+
+write_mode() {
+  local mode="$1" all internal ext e
+  all=$(monitors_json)
+  internal=$(internal_name "$all")
+  mapfile -t ext < <(jq -r --arg i "$internal" '.[] | select(.name != $i) | .name' <<<"$all")
+
+  if [[ -z $internal ]]; then echo "sem monitores" >&2; return 1; fi
+  safe_name "$internal" || { echo "nome de monitor inseguro" >&2; return 1; }
+  for e in "${ext[@]}"; do safe_name "$e" || { echo "nome de monitor inseguro" >&2; return 1; }; done
+  if (( ${#ext[@]} == 0 )) && [[ $mode != estender && $mode != notebook ]]; then
+    echo "apenas uma tela conectada" >&2
+    return 1
+  fi
+
+  rm -f "$MIRROR" "$INTERNAL_OFF" "$EXTERNAL_OFF"
+  case "$mode" in
+    estender) ;;
+    duplicar)
+      # Same rule Simba's `simba hyprland monitor internal mirror on` writes.
+      for e in "${ext[@]}"; do
+        printf 'hl.monitor({ output = "%s", mode = "preferred", position = "auto", scale = 1, mirror = "%s" })\n' "$e" "$internal"
+      done >"$MIRROR"
+      ;;
+    segunda)
+      # Same rule as `simba hyprland monitor internal off`.
+      printf 'hl.monitor({ output = "%s", disabled = true })\n' "$internal" >"$INTERNAL_OFF"
+      ;;
+    notebook)
+      {
+        echo "-- Somente tela do notebook (Super+P, app Configurações)."
+        for e in "${ext[@]}"; do printf 'hl.monitor({ output = "%s", disabled = true })\n' "$e"; done
+      } >"$EXTERNAL_OFF"
+      ;;
+    *) echo "modo desconhecido: $mode" >&2; return 1 ;;
+  esac
+  date +%s >"$ULTIMO"
+  hyprctl reload >/dev/null 2>&1
+  # Wake panels that were powered down by dpms while disabled.
+  hyprctl dispatch 'hl.dsp.dpms({ action = "enable" })' >/dev/null 2>&1 || true
+}
+
+modo() {
+  local mode="${1:-}" secs="${2:-15}"
+  snapshot
+  write_mode "$mode" || { manter; return 1; }
+  arm "$secs"
+  echo ok
+}
+
+
+# ── per-monitor memory ───────────────────────────────────────────────────────
+mem_ler() { [[ -s $MEM ]] && jq -c . "$MEM" 2>/dev/null || echo '{}'; }
+mem_gravar() {
+  mkdir -p "${MEM%/*}"
+  local tmp="$MEM.tmp.$$"
+  jq -S . >"$tmp" && mv -f "$tmp" "$MEM"
+}
+# identity + friendly name of every non-internal output, as JSON lines
+externas_json() {
+  local all="$1" internal="$2"
+  jq -c --arg i "$internal" '.[] | select(.name != $i) | {
+      saida: .name, desativada: (.disabled == true),
+      id: (if ((.make // "") + (.model // "") + (.serial // "")) != "" then "\(.make // "")|\(.model // "")|\(.serial // "")" else "saida:\(.name)" end),
+      nome: (if ((.make // "") + (.model // "")) != "" then ([.make, .model] | map(select(. != null and . != "")) | join(" "))
+             elif (.description // "") != "" then .description else "Tela \(.name)" end),
+      video: "\(.width)x\(.height)@\(.refreshRate | . * 100 | round / 100)", escala: .scale }' <<<"$all"
+}
+
+lembrar() {
+  local all internal mode linhas
+  all=$(monitors_json)
+  internal=$(internal_name "$all")
+  mode=$(estado | jq -r .modo)
+  [[ $mode =~ ^(notebook|duplicar|estender|segunda)$ ]] || return 0
+  linhas=$(externas_json "$all" "$internal")
+  [[ -n $linhas ]] || return 0
+  mem_ler | jq -c --arg modo "$mode" --arg agora "$(date -Iseconds)" --slurpfile e <(printf '%s\n' "$linhas") '
+    reduce $e[] as $x (.; .[$x.id] = ((.[$x.id] // {}) + {nome: $x.nome, modo: $modo, visto: $agora, saida: $x.saida}
+      + (if $x.desativada then {} else {video: $x.video, escala: $x.escala} end)))' | mem_gravar
+  echo ok
+}
+
+conectado() {
+  local saida="${1:-}" all internal x id nome desejado atual agora
+  all=$(monitors_json)
+  internal=$(internal_name "$all")
+  x=$(externas_json "$all" "$internal" | jq -c --arg s "$saida" 'select(.saida == $s)' | head -1)
+  [[ -n $x ]] || { echo '{"acao":"ignorado"}'; return 0; }
+  id=$(jq -r .id <<<"$x")
+  nome=$(jq -r .nome <<<"$x")
+  desejado=$(mem_ler | jq -r --arg id "$id" '.[$id].modo // empty')
+  if [[ -z $desejado ]]; then
+    # A screen that came back because our own mode change re-enabled it is not "new".
+    agora=$(date +%s)
+    if [[ -f $ULTIMO ]] && (( agora - $(cat "$ULTIMO") < 8 )); then
+      jq -cn --arg n "$nome" '{acao: "ignorado", nome: $n}'
+    else
+      jq -cn --arg n "$nome" --arg id "$id" '{acao: "novo", nome: $n, id: $id}'
+    fi
+    return 0
+  fi
+  mem_ler | jq -c --arg id "$id" --arg agora "$(date -Iseconds)" '.[$id].visto = $agora' | mem_gravar
+  atual=$(estado | jq -r .modo)
+  if [[ $atual == "$desejado" ]]; then
+    jq -cn --arg n "$nome" --arg m "$desejado" '{acao: "igual", nome: $n, modo: $m}'
+    return 0
+  fi
+  write_mode "$desejado" || { jq -cn --arg n "$nome" '{acao: "falhou", nome: $n}'; return 0; }
+  jq -cn --arg n "$nome" --arg m "$desejado" '{acao: "aplicado", nome: $n, modo: $m}'
+}
+
+esquecer() { mem_ler | jq -c --arg id "${1:-}" 'del(.[$id])' | mem_gravar; echo ok; }
+
+# Safety net (also covered by Simba's own `simba hyprland monitor internal
+# recover`, run by simba-hyprland-monitor-watch on every hotplug and at login):
+# with no enabled external screen the laptop panel must be on, and mode toggles
+# written for a screen that is no longer connected must not linger to next boot.
+seguranca() {
+  local all internal ext_on ext_any int_off mudou=0
+  all=$(monitors_json)
+  internal=$(internal_name "$all")
+  ext_on=$(jq --arg i "$internal" '[.[] | select(.name != $i and .disabled != true)] | length' <<<"$all")
+  ext_any=$(jq --arg i "$internal" '[.[] | select(.name != $i)] | length' <<<"$all")
+  int_off=$(jq --arg i "$internal" '[.[] | select(.name == $i and .disabled == true)] | length' <<<"$all")
+  if (( ext_on == 0 )) && [[ -f $INTERNAL_OFF || $int_off -gt 0 ]]; then
+    rm -f "$INTERNAL_OFF"; mudou=1
+  fi
+  if (( ext_any == 0 )); then
+    [[ -f $MIRROR || -f $EXTERNAL_OFF ]] && { rm -f "$MIRROR" "$EXTERNAL_OFF"; mudou=1; }
+  fi
+  if (( mudou )); then
+    hyprctl reload >/dev/null 2>&1
+    hyprctl dispatch 'hl.dsp.dpms({ action = "enable" })' >/dev/null 2>&1 || true
+    echo restaurado
+  else
+    echo ok
+  fi
+}
+
+cmd="${1:-estado}"
+shift || true
+exec 9>"$LOCK"
+case "$cmd" in
+  estado) estado ;;
+  modo) flock 9; modo "$@" ;;
+  snapshot) flock 9; snapshot ;;
+  pendente) flock 9; arm "${1:-15}" ;;
+  manter) flock 9; manter ;;
+  reverter) flock 9; reverter "$@" ;;
+  lembrar) flock 9; lembrar ;;
+  conectado) flock 9; conectado "$@" ;;
+  memoria) mem_ler ;;
+  esquecer) flock 9; esquecer "$@" ;;
+  seguranca) flock 9; seguranca ;;
+  *) sed -n '2,20p' "$0"; exit 1 ;;
+esac

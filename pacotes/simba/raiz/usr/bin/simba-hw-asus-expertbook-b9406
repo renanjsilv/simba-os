@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# simba:summary=Detect ASUS ExpertBook B9406 series laptops on Intel Panther Lake.
+
+simba-hw-match "B9406" && simba-hw-intel-ptl

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# simba:summary=Install Zed Editor and configure it with the current Simba theme
+
+echo "Installing Zed Editor..."
+simba-pkg-add zed omazed
+
+# Apply Simba theme to Zed
+omazed setup
+
+setsid uwsm-app -- gtk-launch dev.zed.Zed >/dev/null 2>&1 &

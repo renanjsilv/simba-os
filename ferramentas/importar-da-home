@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""importar-da-home — migração única (2026-11-05): copia os componentes próprios do Simba OS,
+que nasceram na pasta pessoal do Renan, para as árvores dos pacotes deste repositório.
+
+    ferramentas/importar-da-home [--ver]
+
+Depois disto o repositório é a fonte: edite aqui, gere os pacotes (ferramentas/construir) e
+instale. Fica guardado como registro de onde cada coisa veio.
+"""
+import os
+import shutil
+import sys
+
+H = os.path.expanduser("~")
+R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APPS = f"{R}/pacotes/simba-apps/raiz"
+DRACO = f"{R}/pacotes/simba-draco/raiz"
+SIMBA = f"{R}/pacotes/simba/raiz"
+
+IGNORAR_DIRS = {"__pycache__", ".venv", "venv", "build", ".git", "voices", "wake-train", "recordings",
+                "workdir", "whisper", ".bak-otimizacao"}
+
+MAPA = [
+    # (origem, destino-raiz, destino)
+    (f"{H}/.config/quickshell/configuracoes", APPS, "etc/xdg/quickshell/configuracoes"),
+    (f"{H}/.config/quickshell/botoes-janela", APPS, "etc/xdg/quickshell/botoes-janela"),
+    (f"{H}/.local/share/explorador", APPS, "usr/share/simba-apps/explorador"),
+    (f"{H}/.local/share/conta", APPS, "usr/share/simba-apps/conta"),
+    (f"{H}/.local/share/gerar-iso", APPS, "usr/share/simba-apps/gerar-iso"),
+    (f"{H}/.local/share/gerenciador-tarefas", APPS, "usr/share/simba-apps/gerenciador-tarefas"),
+    (f"{H}/.local/share/transcrever", APPS, "usr/share/simba-apps/transcrever"),
+    (f"{H}/.local/share/boas-vindas", APPS, "usr/share/simba-apps/boas-vindas"),
+    (f"{H}/.local/share/janelas-nativo", APPS, "usr/share/simba-apps/janelas-nativo"),
+    (f"{H}/.local/share/anydesk-bridge", APPS, "usr/share/simba-apps/anydesk-bridge"),
+    (f"{H}/.local/share/simba/idiomas", APPS, "usr/share/simba-apps/idiomas"),
+    (f"{H}/.local/share/simba/sistema", APPS, "usr/share/simba-apps/sistema"),
+    (f"{H}/.local/share/simba/simba-simbolo.svg", APPS, "usr/share/simba-apps/simba-simbolo.svg"),
+    (f"{H}/.config/simba/bar/modules", APPS, "usr/share/simba-apps/barra"),
+    (f"{H}/.config/simba/plugins/renan.lock", APPS, "usr/share/simba-apps/bloqueio"),
+    (f"{H}/.local/share/dbus-1/services/org.freedesktop.FileManager1.service", APPS, "usr/share/dbus-1/services/org.freedesktop.FileManager1.service"),
+    (f"{H}/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.simba.service", APPS, "usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.simba.service"),
+    (f"{H}/.local/share/xdg-desktop-portal/portals/simba.portal", APPS, "usr/share/xdg-desktop-portal/portals/simba.portal"),
+    ("/usr/local/share/simba-idioma", SIMBA, "usr/share/simba-idioma"),
+    # Draco: só o código (venv, vozes, Whisper e treino ficam na pasta pessoal de cada um)
+    (f"{H}/.config/quickshell/draco", DRACO, "etc/xdg/quickshell/draco"),
+    (f"{H}/.config/quickshell/draco-config", DRACO, "etc/xdg/quickshell/draco-config"),
+    (f"{H}/.local/share/draco/lib", DRACO, "usr/share/draco/lib"),
+    (f"{H}/.local/share/draco/bin", DRACO, "usr/share/draco/bin"),
+    (f"{H}/.local/share/draco/extensions", DRACO, "usr/share/draco/extensions"),
+    (f"{H}/.local/share/draco/tessdata", DRACO, "usr/share/draco/tessdata"),
+    (f"{H}/.local/share/draco/tests", DRACO, "usr/share/draco/tests"),
+    (f"{H}/.local/share/draco/models/draco_wake.npz", DRACO, "usr/share/draco/models/draco_wake.npz"),
+] + [(f"{H}/.local/share/draco/{f}", DRACO, f"usr/share/draco/{f}")
+     for f in ("tts.py", "wake.py", "wake_edge.py", "wake_record.py", "wake_train.py", "prompt.md", "prompt.en.md")]
+
+SCRIPTS_HOME = ["agentes", "atalho-area", "barra-tarefas", "boas-vindas", "brave-nativo", "configuracoes", "conta",
+                "conta-boas-vindas", "explorador", "gerenciador-tarefas", "simba-atualizar", "simba-central",
+                "simba-limpar", "simba-mostrar-gato", "simba-novidades", "simba-papeis", "simba-saude", "simba-t",
+                "tema-boot", "transcrever", "xdg-desktop-portal-simba-wallpaper"]
+SCRIPTS_LOCAL = ["simba-craft-atualizar", "simba-idioma", "simba-loja", "simba-marca", "simba-sistema"]
+MAPA += [(f"{H}/.local/bin/{s}", APPS, f"usr/bin/{s}") for s in SCRIPTS_HOME]
+MAPA += [(f"/usr/local/bin/{s}", APPS, f"usr/bin/{s}") for s in SCRIPTS_LOCAL]
+MAPA += [(f"{H}/.local/bin/draco", DRACO, "usr/bin/draco")]
+
+DESKTOP = ["com.renan.Configuracoes", "com.renan.Explorador", "com.renan.GerenciadorTarefas", "com.renan.Transcrever",
+           "com.simba.BoasVindas", "gerar-iso", "simba-loja"]
+MAPA += [(f"{H}/.local/share/applications/{d}.desktop", APPS, f"usr/share/applications/{d}.desktop") for d in DESKTOP]
+MAPA += [(f"{H}/.local/share/applications/com.simba.Draco.desktop", DRACO, "usr/share/applications/com.simba.Draco.desktop")]
+
+UNIDADES = ["botoes-janela.service", "conta-sync.service", "conta-sync.timer", "explorador-nuvem@.service",
+            "simba-atualizar-avisar.service", "simba-atualizar-avisar.timer", "anydesk-bridge.service"]
+MAPA += [(f"{H}/.config/systemd/user/{u}", APPS, f"usr/lib/systemd/user/{u}") for u in UNIDADES]
+MAPA += [(f"{H}/.config/systemd/user/{u}", DRACO, f"usr/lib/systemd/user/{u}")
+         for u in ("draco-wake.service", "draco-aquecer.service", "draco-limpar-historico.service", "draco-limpar-historico.timer")]
+
+
+def ignorar(dirpath, nomes):
+    return {n for n in nomes if n in IGNORAR_DIRS or ".bak" in n or n.endswith((".pyc", ".log"))}
+
+
+def copiar(src, dst, ver):
+    if not os.path.exists(src):
+        print(f"  (não existe) {src}")
+        return
+    print(f"  {src}  →  {os.path.relpath(dst, R)}")
+    if ver:
+        return
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if os.path.isdir(src) and not os.path.islink(src):
+        shutil.copytree(src, dst, symlinks=True, ignore=ignorar, dirs_exist_ok=True)
+    else:
+        shutil.copy2(src, dst, follow_symlinks=False)
+
+
+def main():
+    ver = "--ver" in sys.argv
+    for src, raiz, dst in MAPA:
+        copiar(src, os.path.join(raiz, dst), ver)
+    # ícones próprios do hicolor
+    base = f"{H}/.local/share/icons/hicolor"
+    for d, _, fs in os.walk(base):
+        for f in fs:
+            if f.startswith(("com.renan.", "com.simba.", "simba-")) and ".bak" not in f:
+                destino = DRACO if "Draco" in f else APPS
+                copiar(os.path.join(d, f), os.path.join(destino, "usr/share/icons/hicolor", os.path.relpath(d, base), f), ver)
+
+
+if __name__ == "__main__":
+    main()

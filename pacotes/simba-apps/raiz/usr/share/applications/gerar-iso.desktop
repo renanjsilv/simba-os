@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Create ISO
+Name[pt_BR]=Gerar ISO
+GenericName=Clone the system and write a USB drive
+GenericName[pt_BR]=Clonar sistema e gravar pendrive
+Comment=Creates an installable ISO of this system and writes it to a USB drive
+Comment[pt_BR]=Cria uma ISO instalável com este sistema e grava em pendrive
+Keywords=iso;create;clone;backup;usb;installer;image;rufus;write;
+Keywords[pt_BR]=iso;gerar;clone;clonar;backup;pendrive;instalador;imagem;usb;rufus;gravar;
+Exec=python3 /usr/share/simba-apps/gerar-iso/app.py
+Icon=com.renan.GerarIso
+Terminal=false
+Categories=System;Utility;
+StartupWMClass=com.renan.GerarIso

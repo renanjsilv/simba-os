@@ -1,0 +1,17 @@
+Simba OS
+========
+
+O pacote base `simba` (shell, menus, scripts simba-*, temas e configurações padrão) é derivado
+do Omarchy (https://github.com/basecamp/omarchy), distribuído sob a licença MIT:
+
+    Copyright (c) David Heinemeier Hansson
+
+O texto completo está em LICENSES/omarchy-MIT.txt e é instalado em
+/usr/share/licenses/simba/ junto com a licença do Simba OS.
+
+O restante (Configurações, Explorador de Arquivos, Gerenciador de Tarefas, Draco, Transcrever,
+Boas-vindas, Gerar ISO, Conta, módulos da barra, sistema de idiomas e ferramentas) é do
+Simba OS, sob a licença MIT do arquivo LICENSE.
+
+Programas de terceiros instalados pelo sistema (Hyprland, Quickshell, Brave, apps do Flathub,
+modelos do Whisper, vozes do Piper etc.) mantêm as licenças dos seus autores.

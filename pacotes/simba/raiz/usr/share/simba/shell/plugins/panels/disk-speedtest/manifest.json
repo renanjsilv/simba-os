@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "simba.disk-speedtest",
+  "name": "Disk speed test",
+  "version": "1.0.0",
+  "author": "Simba",
+  "description": "Live disk write and read speed dials. Summon with: simba-shell shell summon simba.disk-speedtest",
+  "kinds": [
+    "panel"
+  ],
+  "entryPoints": {
+    "panel": "Panel.qml"
+  }
+}

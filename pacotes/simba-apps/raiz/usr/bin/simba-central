@@ -1,0 +1,58 @@
+#!/bin/bash
+# simba-central — ajudante da Central de controle (barra › ícones de rede/som/bateria).
+#   simba-central estado               JSON com o estado de todos os botões e controles
+#   simba-central wifi|bluetooth|naoperturbe|escuro|luznoturna|economia   liga/desliga
+#   simba-central volume <0-100> | brilho <1-100> | mudo
+set -uo pipefail
+
+wifi_on()  { [[ $(nmcli -t -f WIFI g 2>/dev/null) == enabled ]]; }
+bt_on()    { bluetoothctl show 2>/dev/null | grep -q 'Powered: yes'; }
+dnd_on()   { [[ $(simba-shell notifications isDnd 2>/dev/null) =~ ^(on|true)$ ]]; }
+tema()     { cat "$HOME/.local/state/simba/current/theme.name" 2>/dev/null; }
+luz_on()   { local t; t=$(hyprctl hyprsunset temperature 2>/dev/null | grep -oE '[0-9]+' | head -1); [[ -n $t ]] && ((t < 6000)); }
+perfil()   { powerprofilesctl get 2>/dev/null; }
+b() { "$@" && echo true || echo false; }
+
+estado() {
+  local ssid vol mudo bri bmax bat carregando claro
+  ssid=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2=="802-11-wireless"{print $1; exit}')
+  read -r vol mudo < <(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{printf "%d %s\n", $2*100+0.5, ($3=="[MUTED]")?"true":"false"}')
+  bri=$(brightnessctl -m 2>/dev/null | head -1 | cut -d, -f4 | tr -d %)
+  bat=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
+  carregando=$(grep -qx -e Charging -e Full /sys/class/power_supply/BAT*/status 2>/dev/null && echo true || echo false)
+  claro=$(python3 -c "import re,sys
+t=open('$HOME/.local/state/simba/current/theme/colors.toml').read()
+m=re.search(r'^\s*background\s*=\s*[\"\']?#([0-9a-fA-F]{6})',t,re.M)
+h=m.group(1) if m else '000000'; r,g,b=(int(h[i:i+2],16)/255 for i in (0,2,4))
+print('true' if .2126*r+.7152*g+.0722*b>.5 else 'false')" 2>/dev/null || echo false)
+  jq -cn --argjson wifi "$(b wifi_on)" --arg ssid "$ssid" --argjson bt "$(b bt_on)" \
+    --argjson dnd "$(b dnd_on)" --argjson claro "$claro" --argjson luz "$(b luz_on)" \
+    --arg perfil "$(perfil)" --argjson vol "${vol:-0}" --argjson mudo "${mudo:-false}" \
+    --argjson bri "${bri:-0}" --argjson bat "${bat:-null}" --argjson carregando "$carregando" \
+    '{wifi:$wifi, ssid:$ssid, bluetooth:$bt, naoperturbe:$dnd, claro:$claro, luznoturna:$luz,
+      economia:($perfil=="power-saver"), perfil:$perfil, volume:$vol, mudo:$mudo, brilho:$bri,
+      bateria:$bat, carregando:$carregando}'
+}
+
+case "${1:-}" in
+  estado) estado ;;
+  wifi) if wifi_on; then nmcli radio wifi off; else nmcli radio wifi on; fi ;;
+  bluetooth) if bt_on; then bluetoothctl power off >/dev/null; else rfkill unblock bluetooth 2>/dev/null; bluetoothctl power on >/dev/null; fi ;;
+  naoperturbe) simba-shell notifications toggleDnd >/dev/null ;;
+  escuro)
+    # alterna entre o tema escuro e o claro do Simba (black ⇄ white),
+    # lembrando o último escuro/claro usado se for outro
+    st="$HOME/.local/state/simba"; mkdir -p "$st"; t=$(tema)
+    if [[ $(estado | jq -r .claro) == true ]]; then
+      echo "$t" > "$st/tema-claro"; alvo=$(cat "$st/tema-escuro" 2>/dev/null || echo black)
+    else
+      echo "$t" > "$st/tema-escuro"; alvo=$(cat "$st/tema-claro" 2>/dev/null || echo white)
+    fi
+    setsid -f simba-theme-set "$alvo" >/dev/null 2>&1 ;;
+  luznoturna) simba-toggle-nightlight >/dev/null 2>&1 ;;
+  economia) if [[ $(perfil) == power-saver ]]; then powerprofilesctl set balanced; else powerprofilesctl set power-saver; fi ;;
+  volume) wpctl set-mute @DEFAULT_AUDIO_SINK@ 0; wpctl set-volume @DEFAULT_AUDIO_SINK@ "$(( ${2:-50} ))%" ;;
+  mudo) wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle ;;
+  brilho) brightnessctl -q set "$(( ${2:-50} < 1 ? 1 : ${2:-50} ))%" ;;
+  *) sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

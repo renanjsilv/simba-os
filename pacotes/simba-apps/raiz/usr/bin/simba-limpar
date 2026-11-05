@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""simba-limpar — libera espaço em disco com segurança (Configurações › Sistema › Manutenção).
+
+    simba-limpar analisar            JSON [{id, nome, detalhe, bytes, pode, motivo}]
+    simba-limpar limpar ID...        limpa as categorias pedidas; JSON {liberado, erros}
+    simba-limpar limpar seguro       todas as categorias que podem ser limpas agora
+
+Nunca toca em: modelos do Whisper (~/.cache/huggingface), cache do rclone (arquivos que ainda
+não subiram para a nuvem), ~/.cache/simba, configurações e arquivos pessoais.
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.expanduser("/usr/share/simba-apps/idiomas"))
+from simba_i18n import t as _t, n as _n  # noqa: E402
+
+H = os.path.expanduser("~")
+C = f"{H}/.cache"
+
+
+def tamanho(caminhos):
+    total = 0
+    for p in caminhos:
+        if os.path.isfile(p):
+            total += os.path.getsize(p)
+            continue
+        for raiz, _, arqs in os.walk(p, onerror=lambda e: None):
+            for a in arqs:
+                try:
+                    total += os.lstat(os.path.join(raiz, a)).st_size
+                except OSError:
+                    pass
+    return total
+
+
+def rodando(*nomes):
+    out = subprocess.run(["ps", "-eo", "comm="], capture_output=True, text=True).stdout.split()
+    return any(n in out for n in nomes)
+
+
+def pacman_cache():
+    """Pacotes antigos do pacman (mantém as 2 últimas versões de cada um), via paccache -d."""
+    try:
+        o = subprocess.run(["paccache", "-dk2"], capture_output=True, text=True, timeout=60).stdout
+        # "==> finished dry run: 12 candidates (disk space saved: 340.21 MiB)"
+        import re
+        m = re.search(r"\(.*?:\s*([\d.,]+)\s*(KiB|MiB|GiB)\)", o)
+        if m:
+            v = float(m.group(1).replace(",", "."))
+            return int(v * {"KiB": 1 << 10, "MiB": 1 << 20, "GiB": 1 << 30}[m.group(2)])
+    except Exception:
+        pass
+    return 0
+
+
+CATEGORIAS = [
+    {"id": "aur", "nome": _n("Compilações do AUR"), "detalhe": _n("Fontes e pacotes que o yay já instalou"),
+     "caminhos": [f"{C}/yay"]},
+    {"id": "dev", "nome": _n("Caches de programação"),
+     "detalhe": _n("pip, uv, Go, node-gyp, mise e símbolos de depuração — baixados de novo quando precisar"),
+     "caminhos": [f"{C}/pip", f"{C}/uv", f"{C}/go-build", f"{C}/node-gyp", f"{C}/debuginfod_client", f"{C}/mise"]},
+    {"id": "navegador", "nome": _n("Cache do navegador"), "detalhe": _n("Brave (logins e histórico ficam)"),
+     "caminhos": [f"{C}/BraveSoftware"], "fechar": ("brave",)},
+    {"id": "apps", "nome": _n("Cache de apps"), "detalhe": _n("Spotify, miniaturas e shaders"),
+     "caminhos": [f"{C}/spotify", f"{C}/thumbnails", f"{C}/mesa_shader_cache", f"{C}/nvidia"], "fechar": ("spotify",)},
+    {"id": "lixeira", "nome": _n("Lixeira"), "detalhe": _n("Itens excluídos (não dá para recuperar depois)"),
+     "caminhos": [f"{H}/.local/share/Trash/files", f"{H}/.local/share/Trash/info"]},
+    {"id": "pacman", "nome": _n("Pacotes antigos do sistema"),
+     "detalhe": _n("Mantém as 2 últimas versões de cada pacote · pede a senha"), "caminhos": [], "root": True},
+]
+
+
+def analisar():
+    out = []
+    for c in CATEGORIAS:
+        b = pacman_cache() if c["id"] == "pacman" else tamanho([p for p in c["caminhos"] if os.path.exists(p)])
+        aberto = [x for x in c.get("fechar", ()) if rodando(x)]
+        out.append({"id": c["id"], "nome": _t(c["nome"]), "detalhe": _t(c["detalhe"]), "bytes": b,
+                    "pode": b > 0 and not aberto,
+                    "motivo": _t("Feche o %1 antes", aberto[0].capitalize()) if aberto else ""})
+    return out
+
+
+def esvaziar(p):
+    if not os.path.exists(p):
+        return
+    if os.path.isdir(p) and not os.path.islink(p):
+        for x in os.listdir(p):
+            q = os.path.join(p, x)
+            if os.path.isdir(q) and not os.path.islink(q):
+                shutil.rmtree(q, ignore_errors=True)
+            else:
+                try:
+                    os.unlink(q)
+                except OSError:
+                    pass
+    else:
+        os.unlink(p)
+
+
+def limpar(ids):
+    info = {c["id"]: c for c in analisar()}
+    if ids == ["seguro"]:
+        ids = [i for i, c in info.items() if c["pode"] and i not in ("lixeira", "pacman")]
+    liberado, erros = 0, []
+    for c in CATEGORIAS:
+        if c["id"] not in ids:
+            continue
+        if not info[c["id"]]["pode"]:
+            if info[c["id"]]["motivo"]:
+                erros.append(info[c["id"]]["motivo"])
+            continue
+        if c.get("root"):
+            r = subprocess.run(["pkexec", "paccache", "-rk2"], capture_output=True, text=True)
+            if r.returncode == 0:
+                liberado += info[c["id"]]["bytes"]
+            else:
+                erros.append(_t("Senha cancelada"))
+            continue
+        if c["id"] == "dev" and shutil.which("mise"):
+            subprocess.run(["mise", "cache", "clear"], capture_output=True)
+        antes = info[c["id"]]["bytes"]
+        for p in c["caminhos"]:
+            esvaziar(p)
+        liberado += max(0, antes - tamanho([p for p in c["caminhos"] if os.path.exists(p)]))
+    return {"liberado": liberado, "erros": erros}
+
+
+if __name__ == "__main__":
+    a = sys.argv[1:]
+    if a[:1] == ["analisar"]:
+        print(json.dumps(analisar(), ensure_ascii=False))
+    elif a[:1] == ["limpar"] and a[1:]:
+        print(json.dumps(limpar(a[1:]), ensure_ascii=False))
+    else:
+        print(__doc__.strip())
+        sys.exit(1)

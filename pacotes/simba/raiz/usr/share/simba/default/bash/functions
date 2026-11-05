@@ -1,0 +1,1 @@
+for f in $SIMBA_PATH/default/bash/fns/*; do source "$f"; done

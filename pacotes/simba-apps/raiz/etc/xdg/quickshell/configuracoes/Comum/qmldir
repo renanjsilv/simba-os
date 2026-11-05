@@ -1,0 +1,22 @@
+module qs.Comum
+singleton Tema 1.0 Tema.qml
+singleton Icones 1.0 Icones.qml
+singleton Sistema 1.0 Sistema.qml
+singleton Preferencias 1.0 Preferencias.qml
+Texto 1.0 Texto.qml
+Glifo 1.0 Glifo.qml
+Interruptor 1.0 Interruptor.qml
+Deslizante 1.0 Deslizante.qml
+Segmentado 1.0 Segmentado.qml
+Botao 1.0 Botao.qml
+Selecao 1.0 Selecao.qml
+Cartao 1.0 Cartao.qml
+Linha 1.0 Linha.qml
+Campo 1.0 Campo.qml
+Secao 1.0 Secao.qml
+Aviso 1.0 Aviso.qml
+Sombra 1.0 Sombra.qml
+singleton Navegacao 1.0 Navegacao.qml
+Ancora 1.0 Ancora.qml
+Avatar 1.0 Avatar.qml
+singleton I18n 1.0 I18n.qml

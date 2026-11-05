@@ -1,0 +1,41 @@
+# Sempre fora da ISO, em qualquer modo (relativo à pasta pessoal; curingas permitidos).
+# ~/.cache é excluído inteiro pelo gerar-iso-build, exceto ~/.cache/umu (runtime do Hydra).
+
+# Histórico do Claude Code (contém dados sensíveis, inclusive a senha de administrador) — nunca
+.claude
+.claude.json
+.claude.json.*
+
+# Lixeira e metadados de cache
+.local/share/Trash
+.local/share/gvfs-metadata
+.cache/conta
+
+# Codex CLI: banco de histórico e temporários (as skills ficam)
+.codex/*.sqlite*
+.codex/tmp
+.codex/.tmp
+
+# Simba OS: marcador da apresentação do 1º boot (cada instalação nova a vê uma vez)
+.local/state/simba
+
+# Caches de apps Electron/Chromium (refeitos sozinhos)
+.config/*/Cache
+.config/*/Code Cache
+.config/*/GPUCache
+.config/*/DawnGraphiteCache
+.config/*/DawnWebGPUCache
+.config/*/blob_storage
+# Downloads e caches de ferramentas
+.local/share/mise/downloads
+.npm/_cacache
+.npm/_logs
+# Modelo Whisper em inglês do voxtype (o Draco usa o "small", em português)
+.local/share/voxtype/models/ggml-base.en.bin
+# Backups de edições feitas à mão (*.bak-*) nas configurações
+.config/*/*.bak-*
+.config/*/*/*.bak-*
+.config/*/*/*/*.bak-*
+.local/share/*/*.bak-*
+.local/share/*/*/*.bak-*
+.local/bin/*.bak-*

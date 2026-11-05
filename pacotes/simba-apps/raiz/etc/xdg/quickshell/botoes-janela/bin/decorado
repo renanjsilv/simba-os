@@ -1,0 +1,27 @@
+#!/bin/bash
+# Diz como o processo <pid> desenha os botões de janela. Usado por ~/.config/quickshell/botoes-janela:
+#   0         não desenha: o botoes-janela mostra os próprios botões
+#   chromium  Brave/Chrome/Chromium (botões nativos pelo layout do GTK)
+#   gtk       GTK3/GTK4/libadwaita (idem)
+#   1         desenha do próprio jeito (Electron etc.): fica de fora
+# Para chromium e gtk o botoes-janela põe uma camada invisível sobre os botões
+# nativos, para que minimizar/maximizar funcionem e o maximizar mostre os layouts.
+pid=$1
+exe=$(basename "$(readlink "/proc/$pid/exe" 2>/dev/null)")
+case "$exe" in
+  ghostty) echo 0; exit ;;  # GTK, mas o Simba desliga a barra de título dele
+  brave|chrome|chromium|msedge|vivaldi*|opera*) echo chromium; exit ;;
+  electron*|code|codium|cursor|zed*|zeditor|slack|discord|Discord|spotify|obsidian|signal-desktop)
+    echo 1; exit ;;
+esac
+maps=$(cat "/proc/$pid/maps" 2>/dev/null)
+# Apps Qt (inclusive Quickshell) carregam a libgtk-3 só pelo tema da plataforma: não desenham botões.
+if grep -qE 'libQt[56]Gui\.so' <<<"$maps"; then
+  echo 0
+elif grep -qE 'libcef\.so|/electron' <<<"$maps"; then
+  echo 1
+elif grep -qE 'libgtk-4\.so|libgtk-3\.so|libadwaita-1\.so' <<<"$maps"; then
+  echo gtk
+else
+  echo 0
+fi

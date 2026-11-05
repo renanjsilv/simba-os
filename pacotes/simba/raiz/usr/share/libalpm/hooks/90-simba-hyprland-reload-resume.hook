@@ -1,0 +1,12 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = simba-settings
+Target = simba-settings-dev
+
+[Action]
+Description = Reloading Hyprland after Simba settings update...
+When = PostTransaction
+Depends = simba
+Exec = /usr/bin/simba-hyprland-reload-guard resume

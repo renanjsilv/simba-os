@@ -1,0 +1,16 @@
+[Unit]
+Description=Nuvem %i (Explorador de Arquivos)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStartPre=/usr/bin/mkdir -p %h/Nuvem/%i
+EnvironmentFile=-%h/.config/explorador/nuvem/%i.env
+ExecStart=/usr/bin/rclone mount %i: %h/Nuvem/%i $OPCOES --volname %i
+ExecStop=/usr/bin/fusermount3 -uz %h/Nuvem/%i
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=default.target

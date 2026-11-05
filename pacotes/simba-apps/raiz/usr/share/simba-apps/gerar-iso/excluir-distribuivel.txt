@@ -1,0 +1,21 @@
+# Só no modo "Distribuível": tira o que identifica você (além do pessoal e dos logins).
+.gitconfig
+.config/git
+.face
+.config/tigervnc
+.local/share/tigervnc
+.local/share/anydesk-bridge
+.config/obsidian
+.config/opencode
+.config/xournalpp
+.config/explorador/config.json
+.config/explorador/nuvens.json
+.local/state/simba/current/background
+.local/state/simba/current/background
+.local/share/draco/*.bak*
+.local/share/draco/workdir/memoria*
+.local/share/sddm
+# Base de falas para retreinar o "Draco" (~600 MB): o modelo treinado já vai junto
+.local/share/draco/wake-train/fala-pt
+.local/share/draco/wake-train/clips-cache.npz
+.local/share/draco/wake-train/cache

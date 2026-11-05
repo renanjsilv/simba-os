@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# simba:summary=Toggle the current weather panel
+
+simba-shell shell toggle simba.weather

@@ -1,0 +1,14 @@
+#!/bin/bash
+# Primeira inicialização depois de formatar e instalar pela ISO (gerar-iso →
+# instalar-clone cria ~/.local/state/conta/boas-vindas): abre Configurações ›
+# Contas com as boas-vindas, para entrar com o Google e trazer o backup do Drive.
+# Some depois do login ou do "Agora não". Roda no autostart (hypr/autostart.lua).
+conta boas-vindas mostrar || exit 0
+# Simba OS: se a apresentação do 1º boot (boas-vindas) vai aparecer, ela já traz a
+# página "Entrar com Google" — não abre a Configurações por cima dela.
+[[ -x /usr/bin/boas-vindas && ! -e $HOME/.local/state/simba/boas-vindas-vista ]] && exit 0
+# Deixa a sessão subir (barra, Configurações, rede).
+sleep 8
+configuracoes contas
+notify-send -a "$(simba-t "Contas")" -i system-users "$(simba-t "Bem-vindo de volta")" \
+  "$(simba-t "Entre com sua conta Google para trazer suas configurações, papel de parede, histórico e documentos.")"

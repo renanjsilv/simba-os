@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Draco
+GenericName=Voice assistant
+GenericName[pt_BR]=Assistente de voz
+Comment=Say "Draco" or hold F10 — settings live here
+Comment[pt_BR]=Diga "Draco" ou segure F10 — aqui ficam as configurações
+Keywords=assistant;voice;ai;draco;claude;
+Keywords[pt_BR]=assistente;voz;ia;draco;claude;
+Exec=draco config
+Icon=com.simba.Draco
+Categories=Utility;

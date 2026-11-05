@@ -1,0 +1,75 @@
+#!/bin/bash
+
+# simba:summary=Apply Simba hardware-specific packages and system configuration
+# simba:group=apply
+# simba:requires-sudo=true
+# simba:examples=simba apply hardware --install-user dhh
+# simba:hidden=true
+
+set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Usage: simba apply hardware --install-user USER
+       simba apply hardware --defer-provisioning
+
+Runs idempotent hardware detection/setup for the installed machine. This is
+called by simba-apply-system during ISO finalization and can be rerun later
+for diagnostics or after hardware/package updates.
+
+--defer-provisioning runs without an install user (deferred-provisioning installs create the user at
+first boot); group grants are recorded in /var/lib/simba/provisioning/groups.
+USAGE
+}
+
+install_user="${SIMBA_INSTALL_USER:-}"
+defer_provisioning=0
+while (($#)); do
+  case "$1" in
+    --install-user)
+      install_user="${2:-}"
+      shift 2
+      ;;
+    --defer-provisioning)
+      defer_provisioning=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if (( EUID != 0 )); then
+  echo "Error: simba-apply-hardware must run as root" >&2
+  exit 1
+fi
+
+if (( defer_provisioning )); then
+  install_user=""
+else
+  if [[ -z $install_user || $install_user == "root" ]]; then
+    echo "Error: --install-user must name the target non-root user" >&2
+    exit 1
+  fi
+
+  if ! getent passwd "$install_user" >/dev/null; then
+    echo "Error: user '$install_user' does not exist" >&2
+    exit 1
+  fi
+fi
+
+export SIMBA_INSTALL_USER="$install_user"
+export SIMBA_PATH="${SIMBA_PATH:-/usr/share/simba}"
+export SIMBA_INSTALL="${SIMBA_INSTALL:-$SIMBA_PATH/install}"
+export SIMBA_INSTALL_LOG_FILE="${SIMBA_INSTALL_LOG_FILE:-/var/log/simba-install.log}"
+export PATH="$SIMBA_PATH/bin:$PATH"
+
+source "$SIMBA_INSTALL/helpers/logging.sh"
+source "$SIMBA_INSTALL/hardware/all.sh"

@@ -1,0 +1,90 @@
+#!/bin/bash
+# anydesk-bridge — expõe o Hyprland ao AnyDesk através de um X virtual.
+#
+#   Hyprland ──wayvnc (socket unix)──▶ vncviewer em tela cheia dentro do Xvfb :N
+#   AnyDesk captura/injeta no Xvfb :N (X11 de verdade) ──▶ vncviewer ──▶ wayvnc ──▶ Hyprland
+#
+# O shim carregado no serviço do AnyDesk lê $STATE/display para saber qual
+# display usar. Ao sair, o arquivo é removido e o AnyDesk volta ao normal.
+
+set -u
+
+STATE="$XDG_RUNTIME_DIR/anydesk-bridge"
+mkdir -p "$STATE"
+chmod 700 "$STATE"
+rm -f "$STATE/display" "$STATE/wayvnc.sock" "$STATE/wayvnc-ctl.sock"
+
+pids=()
+cleanup() {
+  rm -f "$STATE/display"
+  [ ${#pids[@]} -gt 0 ] && kill "${pids[@]}" 2>/dev/null
+  wait 2>/dev/null
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM
+
+# Monitor focado do Hyprland (nome e resolução física)
+read -r OUTPUT WIDTH HEIGHT < <(hyprctl monitors -j | python3 -I -c '
+import json, sys
+ms = json.load(sys.stdin)
+m = next((m for m in ms if m.get("focused")), ms[0])
+print(m["name"], m["width"], m["height"])')
+
+# Layout de teclado do Hyprland (primeiro da lista), aplicado nas duas pontas
+KB_LAYOUT=$(hyprctl getoption input:kb_layout -j | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("str","").split(",")[0].strip() or "us")')
+KB_VARIANT=$(hyprctl getoption input:kb_variant -j | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("str","").split(",")[0].strip())')
+KB_MODEL=$(hyprctl getoption input:kb_model -j | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("str","").strip())')
+
+if [ -z "${OUTPUT:-}" ]; then
+  echo "anydesk-bridge: nenhum monitor encontrado" >&2
+  exit 1
+fi
+
+# Primeiro display X livre a partir do :5
+N=5
+while [ -e "/tmp/.X11-unix/X$N" ] || [ -e "/tmp/.X$N-lock" ]; do N=$((N + 1)); done
+DPY=":$N"
+
+# 1) wayvnc: captura o monitor e recebe entrada, só via socket unix privado
+wayvnc --unix-socket --output="$OUTPUT" --render-cursor --max-fps=60 \
+  --keyboard="$KB_LAYOUT${KB_VARIANT:+-$KB_VARIANT}" \
+  --socket="$STATE/wayvnc-ctl.sock" "$STATE/wayvnc.sock" &
+pids+=($!)
+
+# 2) Xvfb com cookie próprio (o AnyDesk lê o -auth da linha de comando)
+rm -f "$STATE/Xauthority"
+touch "$STATE/Xauthority"
+chmod 600 "$STATE/Xauthority"
+xauth -f "$STATE/Xauthority" add "$DPY" . "$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+# O AnyDesk identifica o servidor X da sessão pelo -auth e lê DISPLAY/XAUTHORITY
+# do ambiente desse processo, então o Xvfb precisa anunciar o próprio display.
+env -u WAYLAND_DISPLAY DISPLAY="$DPY" XAUTHORITY="$STATE/Xauthority" XDG_SESSION_TYPE=x11 \
+  Xvfb "$DPY" -screen 0 "${WIDTH}x${HEIGHT}x24" -auth "$STATE/Xauthority" \
+  -nolisten tcp -noreset &
+pids+=($!)
+
+for _ in $(seq 50); do
+  [ -S "$STATE/wayvnc.sock" ] && [ -S "/tmp/.X11-unix/X$N" ] && break
+  sleep 0.1
+done
+
+# Mesmo layout do Hyprland no X virtual (ç, acentos, teclas ABNT2)
+env DISPLAY="$DPY" XAUTHORITY="$STATE/Xauthority" \
+  setxkbmap -layout "$KB_LAYOUT" ${KB_VARIANT:+-variant "$KB_VARIANT"} \
+  ${KB_MODEL:+-model "$KB_MODEL"}
+
+# 3) vncviewer em tela cheia dentro do Xvfb
+env -u WAYLAND_DISPLAY DISPLAY="$DPY" XAUTHORITY="$STATE/Xauthority" \
+  vncviewer -FullScreen -RemoteResize=0 -SecurityTypes=None \
+  -ReconnectOnError=0 -AlertOnFatalError=0 -PreferredEncoding=Raw \
+  -AutoSelect=0 -FullColor=1 \
+  -FullscreenSystemKeys=1 -Shared=1 "$STATE/wayvnc.sock" &
+pids+=($!)
+
+echo "$DPY" > "$STATE/display"
+echo "anydesk-bridge: $OUTPUT ${WIDTH}x${HEIGHT} exposto em $DPY"
+
+# Se qualquer componente cair, encerra tudo (o systemd reinicia)
+wait -n
+echo "anydesk-bridge: um componente terminou, reiniciando" >&2
+exit 1

@@ -1,0 +1,103 @@
+#!/bin/bash
+# simba-apps-usuario — deixa o usuário atual usando os apps do Simba OS instalados pelo pacman
+# (/usr/bin, /usr/share/simba-apps, /etc/xdg/quickshell, /usr/share/draco).
+#
+#   simba-apps-usuario            aplica (pode rodar quantas vezes quiser)
+#   simba-apps-usuario --ver      só mostra o que faria
+#
+# Em quem usava as versões antigas na pasta pessoal (~/.local/bin, ~/.local/share/<app>,
+# ~/.config/quickshell/<app>…), elas teriam prioridade sobre as do sistema: são guardadas em
+# ~/.local/share/simba-migracao/<data>/ (nada é apagado). Depois: sair e entrar na sessão.
+set -uo pipefail
+VER=${1:-}
+B="$HOME/.local/share/simba-migracao/$(date +%Y%m%d-%H%M%S)"
+movidos=0
+
+fazer() { if [[ $VER == --ver ]]; then echo "  $*"; else "$@"; fi; }
+guardar() {   # guardar <caminho>… (só se existir)
+  for p in "$@"; do
+    [[ -e $p || -L $p ]] || continue
+    local rel=${p#"$HOME"/}
+    echo "  guardado: ~/$rel"
+    fazer mkdir -p "$B/$(dirname "$rel")"
+    fazer mv "$p" "$B/$rel"
+    movidos=$((movidos + 1))
+  done
+}
+link() {      # link <caminho-do-usuário> <alvo-no-sistema>
+  local p=$1 alvo=$2
+  [[ -e $alvo ]] || return 0
+  [[ -L $p && $(readlink "$p") == "$alvo" ]] && return 0
+  guardar "$p"
+  fazer mkdir -p "$(dirname "$p")"
+  fazer ln -sfn "$alvo" "$p"
+  echo "  link: ${p/#$HOME/\~} → $alvo"
+}
+
+echo "== cópias antigas que esconderiam as do sistema"
+for a in configuracoes botoes-janela draco draco-config; do
+  [[ -d /etc/xdg/quickshell/$a ]] && guardar "$HOME/.config/quickshell/$a"
+done
+for a in explorador gerar-iso gerenciador-tarefas transcrever boas-vindas janelas-nativo anydesk-bridge; do
+  [[ -d /usr/share/simba-apps/$a ]] && guardar "$HOME/.local/share/$a"
+done
+# Conta: só o código (a pasta também guarda dados da restauração)
+[[ -d /usr/share/simba-apps/conta ]] && guardar "$HOME/.local/share/conta/conta.py" "$HOME/.local/share/conta/Restaurar-Simba.sh"
+[[ -d /usr/share/simba-apps/idiomas ]] && guardar "$HOME/.local/share/simba/idiomas"
+# Draco: só o código (venv, vozes, Whisper, gravações, logs, chaves e o modelo retreinado ficam)
+if [[ -d /usr/share/draco ]]; then
+  for f in lib bin extensions tessdata tests tts.py wake.py wake_edge.py wake_record.py wake_train.py prompt.md prompt.en.md; do
+    guardar "$HOME/.local/share/draco/$f"
+  done
+fi
+for f in "$HOME"/.local/bin/*; do
+  n=$(basename "$f")
+  [[ -f /usr/bin/$n ]] && pacman -Qoq "/usr/bin/$n" 2>/dev/null | grep -qx 'simba-apps\|simba-draco\|simba' && guardar "$f"
+done
+for f in /usr/share/applications/*.desktop; do
+  pacman -Qoq "$f" 2>/dev/null | grep -qx 'simba-apps\|simba-draco' && guardar "$HOME/.local/share/applications/$(basename "$f")"
+done
+while read -r f; do
+  rel=${f#/usr/share/}
+  case $rel in icons/*|dbus-1/services/*|xdg-desktop-portal/portals/*) guardar "$HOME/.local/share/$rel" ;; esac
+done < <(pacman -Qlq simba-apps simba-draco 2>/dev/null | grep -v '/$')
+
+echo "== serviços do usuário (os do sistema ficam valendo)"
+ativos=()
+for u in /usr/lib/systemd/user/*; do
+  n=$(basename "$u")
+  pacman -Qoq "$u" 2>/dev/null | grep -qx 'simba-apps\|simba-draco' || continue
+  [[ -f $HOME/.config/systemd/user/$n ]] || continue
+  systemctl --user is-enabled "$n" >/dev/null 2>&1 && ativos+=("$n")
+  [[ $VER == --ver ]] || systemctl --user disable "$n" >/dev/null 2>&1 || true
+  guardar "$HOME/.config/systemd/user/$n"
+done
+if [[ $VER != --ver ]]; then
+  systemctl --user daemon-reload
+  for n in "${ativos[@]}"; do systemctl --user enable "$n" >/dev/null 2>&1 && echo "  reativado: $n"; done
+fi
+
+echo "== módulos da barra e tela de bloqueio"
+link "$HOME/.config/simba/bar/modules" /usr/share/simba-apps/barra
+link "$HOME/.config/simba/plugins/renan.lock" /usr/share/simba-apps/bloqueio
+
+echo "== atalhos e autostart apontando para os caminhos novos"
+NOSSOS='agentes|atalho-area|barra-tarefas|boas-vindas|brave-nativo|configuracoes|conta|conta-boas-vindas|draco|explorador|gerenciador-tarefas|simba-[a-z-]+|tema-boot|transcrever'
+for f in "$HOME"/.config/hypr/*.lua "$HOME"/.config/simba/extensions/*.jsonc; do
+  [[ -f $f ]] || continue
+  novo=$(sed -E \
+    -e "s#os\.getenv\(\"HOME\"\) \.\. \"/\.local/bin/($NOSSOS)#\"/usr/bin/\1#g" \
+    -e "s#(~|\\\$HOME|$HOME)/\.local/bin/($NOSSOS)\b#/usr/bin/\2#g" \
+    -e "s#os\.getenv\(\"HOME\"\) \.\. \"/\.local/share/janelas-nativo/janelas-nativo#\"/usr/share/simba-apps/janelas-nativo/janelas-nativo#g" \
+    -e "s#\"$HOME/\.local/share/draco/venv/bin/python $HOME/\.local/share/draco/tts\.py serve\"#\"draco servidor-voz\"#g" \
+    "$f")
+  if [[ $novo != "$(cat "$f")" ]]; then
+    echo "  ajustado: ${f/#$HOME/\~}"
+    if [[ $VER != --ver ]]; then cp -a "$f" "$f.bak-simba-apps"; printf '%s\n' "$novo" >"$f"; fi
+  fi
+done
+
+echo
+if [[ $VER == --ver ]]; then echo "(só mostrando)"; else
+  echo "Pronto: $movidos item(ns) guardado(s) em ${B/#$HOME/\~}. Saia e entre de novo na sessão."
+fi

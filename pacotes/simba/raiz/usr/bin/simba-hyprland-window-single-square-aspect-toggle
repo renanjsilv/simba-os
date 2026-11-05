@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# simba:summary=Toggle single-window square aspect ratio.
+
+case $(simba-hyprland-toggle single-window-aspect-ratio) in
+  on) simba-notification-send -g  "Proporção quadrada para janela única ativada" ;;
+  off) simba-notification-send -g  "Proporção quadrada para janela única desativada" ;;
+esac

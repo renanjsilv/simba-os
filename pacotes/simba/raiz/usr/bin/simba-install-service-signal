@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# simba:summary=Install Signal and launch it.
+# simba:requires-sudo=true
+
+set -e
+
+echo "Installing Signal..."
+simba-pkg-add signal-desktop
+
+echo "Opening Signal..."
+setsid uwsm-app -- /usr/bin/signal-desktop >/dev/null 2>&1 &
+
+echo ""
+echo "Signal has been installed."

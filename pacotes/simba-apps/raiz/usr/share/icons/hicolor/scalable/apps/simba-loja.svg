@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="frente" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#4cc2ff"/><stop offset="0.5" stop-color="#1a8ae6"/><stop offset="1" stop-color="#0f5bb5"/>
+    </linearGradient>
+    <linearGradient id="lado" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0b4a96"/><stop offset="1" stop-color="#1667c4"/>
+    </linearGradient>
+    <linearGradient id="alca" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a8dcff"/><stop offset="1" stop-color="#5fb4f2"/>
+    </linearGradient>
+    <linearGradient id="dobra" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#002f6c" stop-opacity="0.35"/><stop offset="1" stop-color="#002f6c" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="brilho" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.30"/><stop offset="0.5" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="sombra" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="2.5" stdDeviation="2.5" flood-color="#00264f" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+  <g filter="url(#sombra)">
+    <path fill="none" stroke="url(#alca)" stroke-width="7" stroke-linecap="round" d="M44 44V36a20 20 0 0 1 40 0v8"/>
+    <path fill="url(#lado)" d="M94 42h10a4 4 0 0 1 4 3.8l3 62.2a5 5 0 0 1-5 5H94z"/>
+    <path fill="url(#frente)" d="M16 46a4 4 0 0 1 4-4h76a4 4 0 0 1 4 4v63a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4z"/>
+    <path fill="url(#brilho)" d="M16 46a4 4 0 0 1 4-4h76a4 4 0 0 1 4 4v30H16z"/>
+    <rect x="16" y="42" width="84" height="12" fill="url(#dobra)"/>
+    <path fill="none" stroke="#a8dcff" stroke-width="6" stroke-linecap="round" d="M44 42v9M84 42v9"/>
+    <circle cx="44" cy="53" r="3.6" fill="#0b4a96"/><circle cx="84" cy="53" r="3.6" fill="#0b4a96"/>
+    <path fill="#ffffff" d="M58 66c1.6 9 4.8 12.2 13.8 13.8-9 1.6-12.2 4.8-13.8 13.8-1.6-9-4.8-12.2-13.8-13.8 9-1.6 12.2-4.8 13.8-13.8z"/>
+    <path fill="#ffffff" fill-opacity="0.85" d="M78 62c.8 4.2 2.2 5.6 6.4 6.4-4.2.8-5.6 2.2-6.4 6.4-.8-4.2-2.2-5.6-6.4-6.4 4.2-.8 5.6-2.2 6.4-6.4z"/>
+  </g>
+</svg>

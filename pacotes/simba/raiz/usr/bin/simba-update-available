@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# simba:summary=Mostra se há atualizações do sistema (repositórios do Arch e AUR)
+
+set -euo pipefail
+
+# versões do AUR ignoradas pelo usuário (Configurações › Sistema) não contam
+IGNORADAS="$HOME/.config/simba/atualizacoes-ignoradas.json"
+aur=$(yay -Qua 2>/dev/null || true)
+if [[ -s $IGNORADAS && -n $aur ]]; then
+  aur=$(while read -r nome de seta nova resto; do
+    [[ $(jq -r --arg p "$nome" '.[$p] // empty' "$IGNORADAS") == "$nova" ]] || echo "$nome $de $seta $nova $resto"
+  done <<<"$aur")
+fi
+updates=$( { checkupdates --nocolor 2>/dev/null || true; [[ -n $aur ]] && printf '%s\n' "$aur"; } | grep . || true)
+
+if [[ -n $updates ]]; then
+  printf '%s\n' "$updates"
+  exit 0
+else
+  echo "O Simba OS está em dia"
+  exit 1
+fi

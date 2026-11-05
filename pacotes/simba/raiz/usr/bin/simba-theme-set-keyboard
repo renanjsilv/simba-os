@@ -1,0 +1,7 @@
+#!/bin/bash
+
+# simba:summary=Apply the current theme keyboard color to supported keyboards
+# simba:hidden=true
+
+simba-theme-set-keyboard-asus-rog
+simba-theme-set-keyboard-f16

@@ -1,0 +1,82 @@
+#!/bin/bash
+# dr-web: browser and quick web lookups for Draco (default browser: Brave).
+#
+#   dr-web abrir <url|site>            open in the browser (new tab if it's already open)
+#   dr-web pesquisar "<termos>"        open a Google search in the browser
+#   dr-web youtube "<busca>"           play the first YouTube result in the browser
+#   dr-web buscar "<pergunta>"         top web results as text (title, link, snippet), no browser
+#   dr-web ler <url>                   readable text of a page, no browser (first ~6000 chars)
+#   dr-web aba-fechar | aba-nova | voltar | recarregar   act on the focused browser window
+#   dr-web print                       screenshot of the browser window
+
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36"
+DR_WIN="$(dirname "$0")/dr-win"
+LIB="$(dirname "$0")/../lib"
+BROWSER_CLASS='^brave-browser$'
+
+uri() { jq -rn --arg q "$1" '$q|@uri'; }
+
+open_url() {
+  local url=$1
+  [[ $url =~ ^[a-z]+:// ]] || url="https://$url"
+  simba-launch-browser "$url" >/dev/null 2>&1
+  "$DR_WIN" wait "$BROWSER_CLASS" 10 >/dev/null && "$DR_WIN" focus "$BROWSER_CLASS" >/dev/null
+  echo "Aberto: $url"
+}
+
+browser_key() {
+  "$DR_WIN" focus "$BROWSER_CLASS" >/dev/null || { echo "navegador não está aberto" >&2; exit 1; }
+  sleep 0.15
+  "$(dirname "$0")/dr-key" "$@"
+}
+
+html_to_text() {
+  python3 -c '
+import html, re, sys
+s = sys.stdin.read()
+s = re.sub(r"(?is)<(script|style|noscript|svg|head|nav|footer)[^>]*>.*?</\1>", " ", s)
+s = re.sub(r"(?i)<br\s*/?>|</(p|div|li|h[1-6]|tr)>", "\n", s)
+s = html.unescape(re.sub(r"<[^>]+>", " ", s))
+s = re.sub(r"[ \t\r\f\v]+", " ", s)
+s = re.sub(r"\n\s*\n+", "\n", s)
+print(s.strip()[:6000])'
+}
+
+case $1 in
+  abrir)
+    [[ -n $2 ]] || { echo "uso: dr-web abrir <url>" >&2; exit 2; }
+    open_url "$2"
+    ;;
+  pesquisar)
+    open_url "https://www.google.com/search?q=$(uri "${*:2}")"
+    ;;
+  youtube)
+    [[ -n $2 ]] || { echo "uso: dr-web youtube \"<busca>\"" >&2; exit 2; }
+    id=$(curl -s -A "$UA" --max-time 8 "https://www.youtube.com/results?search_query=$(uri "${*:2}")" |
+      grep -oE '"videoId":"[A-Za-z0-9_-]{11}"' | head -1 | cut -d'"' -f4)
+    if [[ -z $id ]]; then
+      open_url "https://www.youtube.com/results?search_query=$(uri "${*:2}")"
+    else
+      open_url "https://www.youtube.com/watch?v=$id"
+    fi
+    ;;
+  buscar)
+    [[ -n $2 ]] || { echo "uso: dr-web buscar \"<pergunta>\"" >&2; exit 2; }
+    curl -sL -A "$UA" -H "Accept-Language: pt-BR,pt;q=0.9" --max-time 8 \
+      "https://search.brave.com/search?q=$(uri "${*:2}")&source=web" | python3 "$LIB/brave_results.py"
+    ;;
+  ler)
+    [[ -n $2 ]] || { echo "uso: dr-web ler <url>" >&2; exit 2; }
+    curl -sL -A "$UA" -H "Accept-Language: pt-BR,pt;q=0.9" --max-time 10 "$2" | html_to_text
+    ;;
+  aba-fechar) browser_key ctrl+w ;;
+  aba-nova) browser_key ctrl+t ;;
+  voltar) browser_key alt+Left ;;
+  recarregar) browser_key F5 ;;
+  print)
+    "$DR_WIN" focus "$BROWSER_CLASS" >/dev/null || exit 1
+    sleep 0.2
+    "$DR_WIN" shot "$BROWSER_CLASS"
+    ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

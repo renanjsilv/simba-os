@@ -1,0 +1,29 @@
+# Simba OS — pacote base: shell (barra, menus, notificações), scripts simba-*, temas,
+# configurações padrão (/etc/skel), tradução (simba-idioma) e identidade do sistema.
+# Derivado do Omarchy (MIT, ver /usr/share/licenses/simba/omarchy-MIT.txt).
+pkgname=simba
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Simba OS: área de trabalho, ferramentas e configurações do sistema"
+arch=('any')
+url="https://github.com/SIMBA_GH_USER/simba-os"
+license=('MIT')
+options=('!debug' '!strip')
+depends=('bash' 'curl' 'fakeroot' 'git' 'gnome-keyring' 'gum' 'hicolor-icon-theme' 'hyprland' 'jq' 'limine'
+         'limine-mkinitcpio-hook' 'limine-snapper-sync' 'neovim>=0.9.0' 'pacman-contrib' 'perl' 'pipewire'
+         'plymouth' 'quickshell' 'sddm' 'snapper' 'ttf-jetbrains-mono-nerd' 'uwsm' 'wireplumber'
+         'xdg-desktop-portal-hyprland')
+optdepends=('simba-apps: Configurações, Explorador, Gerenciador de Tarefas e os demais apps do Simba OS')
+replaces=('omarchy' 'omarchy-nvim' 'omarchy-settings' 'omarchy-themes-intros')
+conflicts=('omarchy' 'omarchy-nvim' 'omarchy-settings' 'omarchy-themes-intros')
+backup=('etc/sddm.conf.d/99-simba-login.conf')
+
+package() {
+  cp -a "$startdir/raiz/." "$pkgdir/"
+  # plugins do Neovim para novos usuários, com as pastas .git (o lazy.nvim atualiza por elas)
+  install -d "$pkgdir/etc/skel/.local/share/nvim"
+  tar -C "$pkgdir/etc/skel/.local/share/nvim" -xf "$startdir/skel-nvim-lazy.tar.zst"
+  install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/../../LICENSES/omarchy-MIT.txt" "$pkgdir/usr/share/licenses/$pkgname/omarchy-MIT.txt"
+  install -Dm644 "$startdir/../../NOTICE" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+}

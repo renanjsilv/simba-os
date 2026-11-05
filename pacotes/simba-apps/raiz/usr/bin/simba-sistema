@@ -1,0 +1,53 @@
+#!/bin/bash
+# simba-sistema — ações de administrador das Configurações do Simba OS.
+# Chamado pelas Configurações; pede a senha (pkexec) quando não é root.
+#   simba-sistema firewall liga|desliga
+#   simba-sistema pontos-automaticos liga|desliga   ponto de restauração diário (snapper timeline)
+#   simba-sistema menu-restauracao                  mostra o menu de inicialização (com os pontos
+#                                                   de restauração) só na próxima vez que ligar
+#   simba-sistema menu-volta                        desfaz o anterior (roda sozinho no boot)
+set -euo pipefail
+[ "$(id -u)" = 0 ] || exec pkexec "$(readlink -f "$0")" "$@"
+CONF=/boot/limine.conf
+MARCA_BOOT=/boot/simba-menu-uma-vez       # guarda o timeout original (fica na ESP: vale também no snapshot)
+MARCA_VER=/var/lib/simba/menu-uma-vez     # cópia legível pelas Configurações
+mkdir -p /var/lib/simba
+# opcao <nome> <valor>: troca (ou cria no topo) uma opção global do limine.conf
+opcao() { if grep -q "^$1:" "$CONF"; then sed -i "s/^$1:.*/$1: $2/" "$CONF"; else sed -i "1i $1: $2" "$CONF"; fi; }
+# o executável do Limine guarda o hash da configuração: renova depois de editar
+selar() { command -v limine-enroll-config >/dev/null && limine-enroll-config >/dev/null 2>&1 || true; }
+case "${1:-}:${2:-}" in
+  firewall:liga) ufw --force enable >/dev/null; systemctl enable ufw >/dev/null 2>&1 ;;
+  firewall:desliga) ufw disable >/dev/null ;;
+  pontos-automaticos:liga)
+    snapper -c root set-config TIMELINE_CREATE=yes
+    systemctl enable --now snapper-timeline.timer >/dev/null 2>&1 ;;
+  pontos-automaticos:desliga)
+    snapper -c root set-config TIMELINE_CREATE=no
+    systemctl disable --now snapper-timeline.timer >/dev/null 2>&1 ;;
+  menu-restauracao:)
+    # Menu de inicialização só na próxima vez: o Simba usa "timeout: 0" e "quiet: yes" (no modo
+    # silencioso o Limine NÃO desenha o menu, só espera calado). Guarda os dois valores, mostra o
+    # menu por 30 s e renova o hash da configuração gravado no executável do Limine.
+    if [ ! -f "$MARCA_BOOT" ]; then
+      { echo "timeout=$(sed -n 's/^timeout:[[:space:]]*//p' "$CONF" | head -1)"
+        echo "quiet=$(sed -n 's/^quiet:[[:space:]]*//p' "$CONF" | head -1)"; } >"$MARCA_BOOT"
+    fi
+    opcao timeout 30
+    opcao quiet no
+    selar
+    touch "$MARCA_VER" ;;
+  menu-volta:)
+    rm -f "$MARCA_VER"
+    [ -f "$MARCA_BOOT" ] || exit 0
+    if grep -q '^timeout=' "$MARCA_BOOT"; then
+      t=$(sed -n 's/^timeout=//p' "$MARCA_BOOT" | tr -dc '0-9'); q=$(sed -n 's/^quiet=//p' "$MARCA_BOOT" | tr -dc 'a-z')
+    else
+      t=$(tr -dc '0-9' <"$MARCA_BOOT"); q=yes       # marcador antigo (só o timeout)
+    fi
+    opcao timeout "${t:-0}"
+    [ -n "$q" ] && opcao quiet "$q"
+    selar
+    rm -f "$MARCA_BOOT" ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

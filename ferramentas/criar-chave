@@ -1,0 +1,18 @@
+#!/bin/bash
+# criar-chave — cria a chave GPG que assina os pacotes do Simba OS (uma vez só, no seu computador).
+# Pede uma senha: guarde-a. A chave PRIVADA nunca vai para o Git; a pública vai no pacote
+# simba-keyring, que faz as instalações do Simba confiarem nas atualizações.
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+NOME="Simba OS (assinatura de pacotes)"
+EMAIL="$(git -C "$R" config user.email)"
+gpg --quick-generate-key "$NOME <$EMAIL>" ed25519 sign 3y
+FP=$(gpg --list-secret-keys --with-colons "$NOME" | awk -F: '/^fpr/{print $10; exit}')
+sed -i "s/^CHAVE=.*/CHAVE=\"$FP\"                              # impressão digital da chave de assinatura/" "$R/ferramentas/config.sh"
+K="$R/pacotes/simba-keyring/raiz/usr/share/pacman/keyrings"
+mkdir -p "$K"
+gpg --export --armor "$FP" >"$K/simba.gpg"
+echo "$FP:4:" >"$K/simba-trusted"
+: >"$K/simba-revoked"
+echo "✓ chave $FP criada; pública em pacotes/simba-keyring. Faça backup da privada:"
+echo "  gpg --export-secret-keys --armor $FP > simba-chave-privada.asc   (guarde fora do Git!)"

@@ -1,0 +1,107 @@
+#!/bin/bash
+# dr-spotify: control the Spotify desktop app (MPRIS over D-Bus).
+#
+#   dr-spotify tocar "<busca>" [artista|musica|playlist|album] [--fundo]
+#       finds it on Spotify (via web search) and plays it; --fundo keeps the window hidden
+#   dr-spotify uri <spotify:tipo:id | https://open.spotify.com/...> [--fundo]
+#   dr-spotify pausar | continuar | alternar | proxima | anterior
+#   dr-spotify status        "Tocando: artista - música" / "Pausado: ..."
+#   dr-spotify volume <0-100>
+#   dr-spotify mostrar | esconder
+
+DEST=org.mpris.MediaPlayer2.spotify
+OBJ=/org/mpris/MediaPlayer2
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36"
+DR_WIN="$(dirname "$0")/dr-win"
+
+mpris() { gdbus call --session --dest $DEST --object-path $OBJ --method "$@" 2>/dev/null; }
+player() { mpris org.mpris.MediaPlayer2.Player."$1" "${@:2}" >/dev/null; }
+prop() { mpris org.freedesktop.DBus.Properties.Get org.mpris.MediaPlayer2.Player "$1"; }
+running() { busctl --user list 2>/dev/null | grep -q "$DEST"; }
+
+background=0
+args=()
+for a in "$@"; do [[ $a == --fundo ]] && background=1 || args+=("$a"); done
+set -- "${args[@]}"
+
+ensure_running() {
+  running && return 0
+  setsid -f uwsm-app -- spotify >/dev/null 2>&1
+  local i
+  for i in $(seq 1 100); do running && break; sleep 0.1; done
+  running || { echo "Spotify não abriu" >&2; exit 1; }
+  if ((background)); then
+    "$DR_WIN" wait '^spotify$' 10 >/dev/null && "$DR_WIN" hide '^spotify$' >/dev/null
+  fi
+  sleep 1 # the player needs a moment after registering on D-Bus before OpenUri works
+}
+
+status() {
+  local st meta artist title
+  st=$(prop PlaybackStatus | grep -oE "Playing|Paused|Stopped")
+  meta=$(prop Metadata)
+  artist=$(grep -oP "'xesam:artist': <\['\K[^']*" <<<"$meta")
+  title=$(grep -oP "'xesam:title': <'\K[^']*" <<<"$meta")
+  case $st in
+    Playing) echo "Tocando: $artist - $title" ;;
+    Paused) echo "Pausado: $artist - $title" ;;
+    *) echo "Parado" ;;
+  esac
+}
+
+play_uri() {
+  local uri=$1 before i
+  [[ $uri == http* ]] && uri=$(sed -E 's#https?://open\.spotify\.com/(intl-[a-z]+/)?([a-z]+)/([A-Za-z0-9]+).*#spotify:\2:\3#' <<<"$uri")
+  ensure_running
+  before=$(prop Metadata | grep -oP "'mpris:trackid': <'\K[^']*")
+  player OpenUri "$uri"
+  for i in $(seq 1 40); do # wait until the track actually changes and plays
+    sleep 0.15
+    [[ $(prop PlaybackStatus) == *Playing* && $(prop Metadata | grep -oP "'mpris:trackid': <'\K[^']*") != "$before" ]] && break
+  done
+  status
+}
+
+search_uri() {
+  local q=$1 kind=${2:-} type
+  case $kind in
+    artista | artist) type=artist ;;
+    musica | música | track) type=track ;;
+    playlist) type=playlist ;;
+    album | álbum) type=album ;;
+    *) type="(artist|track|playlist|album)" ;;
+  esac
+  local query="site:open.spotify.com ${type//[()|]/ } $q"
+  [[ $type == "(artist|track|playlist|album)" ]] && query="site:open.spotify.com $q"
+  curl -sL -A "$UA" --max-time 6 "https://search.brave.com/search?q=$(jq -rn --arg q "$query" '$q|@uri')" |
+    grep -oE "open\.spotify\.com/$type/[A-Za-z0-9]{22}" | head -1 |
+    sed -E 's#open\.spotify\.com/([a-z]+)/#spotify:\1:#'
+}
+
+case $1 in
+  tocar)
+    [[ -n $2 ]] || { echo "uso: dr-spotify tocar \"<busca>\" [artista|musica|playlist|album]" >&2; exit 2; }
+    uri=$(search_uri "$2" "$3")
+    if [[ -z $uri ]]; then
+      echo "Não achei '$2' na busca. Tente: dr-spotify uri spotify:<tipo>:<id> (se souber o id)." >&2
+      exit 1
+    fi
+    echo "URI: $uri"
+    play_uri "$uri"
+    ;;
+  uri) play_uri "$2" ;;
+  pausar) player Pause; sleep 0.3; status ;;
+  continuar) ensure_running; player Play; sleep 0.3; status ;;
+  alternar) player PlayPause; sleep 0.3; status ;;
+  proxima | próxima) player Next; sleep 0.6; status ;;
+  anterior) player Previous; sleep 0.6; status ;;
+  status) running && status || echo "Spotify fechado" ;;
+  volume)
+    v=$(awk -v v="$2" 'BEGIN{printf "%.2f", v/100}')
+    gdbus call --session --dest $DEST --object-path $OBJ --method org.freedesktop.DBus.Properties.Set \
+      org.mpris.MediaPlayer2.Player Volume "<$v>" >/dev/null && echo "Volume do Spotify: $2%"
+    ;;
+  mostrar) "$DR_WIN" focus '^spotify$' ;;
+  esconder) "$DR_WIN" hide '^spotify$' ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

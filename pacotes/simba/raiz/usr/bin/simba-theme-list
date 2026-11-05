@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# simba:summary=List available themes
+# simba:examples=simba theme list | simba theme set "Tokyo Night"
+
+{
+  find ~/.config/simba/themes/ -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -printf '%f\n'
+  find "$SIMBA_PATH/themes/" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+} | sort -u | sed -E 's/(^|-)([a-z])/\1\u\2/g; s/-/ /g'

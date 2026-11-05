@@ -1,0 +1,567 @@
+#!/bin/bash
+# instalar-clone — instalador do sistema gerado pelo "Gerar ISO".
+# Roda dentro da ISO live, sozinho no tty1 (simba-instalador.service), em telas
+# simples (gum) com o logo da marca: idioma, teclado, conta, disco e progresso.
+# INSTALAR_SIMULAR=1 percorre as telas sem tocar em disco nenhum (teste).
+set -euo pipefail
+
+MEDIA=${INSTALAR_MIDIA:-/run/archiso/bootmnt/clone}
+T=/mnt
+LOG=/tmp/instalacao.log
+SIMULAR=${INSTALAR_SIMULAR:-}
+: > "$LOG"
+
+# shellcheck disable=SC1091
+source "$MEDIA/clone.env"
+MODO=${MODO:-sistema}
+NOME_SISTEMA=${NOME_SISTEMA:-Linux}
+[ "$MODO" = distribuivel ] || NOME_SISTEMA=${NOME_SISTEMA/#Simba/Sistema}
+MARCA=$MEDIA/marca
+
+# ---------------------------------------------------------------- aparência
+# Paleta do console no tom da marca: 0 = fundo, 7 = texto, 8 = cinza, 15 = destaque.
+paleta() {
+  [ -n "$SIMULAR" ] && [ "${TERM:-}" != linux ] && return 0
+  local claro=0
+  [ -f "$MARCA/marca.env" ] && claro=$(sed -n 's/^CLARO=//p' "$MARCA/marca.env")
+  local f=/tmp/paleta
+  if [ "$claro" = 1 ]; then
+    #   0   1   2   3   4   5   6   7    8   9  10  11  12  13  14  15
+    printf '%s\n' \
+      "244,176,46,150,40,255,165,27,128,200,46,150,40,110,0,0" \
+      "244,40,125,100,80,255,165,27,128,50,125,100,80,60,120,0" \
+      "242,40,50,0,140,255,162,27,124,50,50,0,140,140,130,0" > "$f"
+  else
+    printf '%s\n' \
+      "10,230,90,230,90,235,95,236,140,255,120,255,120,220,110,255" \
+      "10,90,200,190,150,235,95,236,140,120,230,220,180,150,220,255" \
+      "10,90,120,90,240,233,93,234,138,120,150,120,255,240,240,255" > "$f"
+  fi
+  printf '\e%%G'                      # console em UTF-8 (os blocos do logo)
+  kbd_mode -u 2>/dev/null || true
+  setvtrgb "$f" >> "$LOG" 2>&1 || true
+  # fonte do console proporcional à tela (~36 linhas)
+  local alt
+  alt=$(cut -d, -f2 /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 768)
+  local tam=$(( alt / 36 ))
+  # a maior que couber; se o kernel recusar um tamanho, tenta o próximo menor
+  for t in 32 28 24 22 20 18 16 14; do
+    [ "$tam" -ge "$t" ] || continue
+    if setfont -C /dev/tty1 "ter-v${t}b" >> "$LOG" 2>&1 || setfont "ter-v${t}b" >> "$LOG" 2>&1; then break; fi
+  done
+  printf '\e[?25l\e[0;37;40m\e[2J\e[H'
+}
+
+export GUM_INPUT_PROMPT_FOREGROUND=7 GUM_INPUT_CURSOR_FOREGROUND=15 GUM_INPUT_PLACEHOLDER_FOREGROUND=8 \
+  GUM_INPUT_HEADER_FOREGROUND=15 GUM_INPUT_WIDTH=50 \
+  GUM_CHOOSE_CURSOR_FOREGROUND=15 GUM_CHOOSE_SELECTED_FOREGROUND=15 GUM_CHOOSE_ITEM_FOREGROUND=7 \
+  GUM_CHOOSE_HEADER_FOREGROUND=15 GUM_CHOOSE_CURSOR="› " \
+  GUM_CONFIRM_PROMPT_FOREGROUND=15 GUM_CONFIRM_SELECTED_BACKGROUND=7 GUM_CONFIRM_SELECTED_FOREGROUND=0 \
+  GUM_CONFIRM_UNSELECTED_BACKGROUND=0 GUM_CONFIRM_UNSELECTED_FOREGROUND=8 \
+  GUM_CHOOSE_SHOW_HELP=false GUM_INPUT_SHOW_HELP=false GUM_CONFIRM_SHOW_HELP=false
+
+COLS=80 LINES_=30
+medir() { COLS=$(tput cols 2>/dev/null || echo 80); LINES_=$(tput lines 2>/dev/null || echo 30); }
+# texto centralizado (largura visível sem os códigos de cor)
+centro() {
+  local l vis pad
+  while IFS= read -r l; do
+    vis=$(printf '%s' "$l" | sed 's/\x1b\[[0-9;]*m//g')
+    pad=$(( (COLS - ${#vis}) / 2 )); if [ $pad -lt 0 ]; then pad=0; fi
+    printf '%*s%s\n' $pad '' "$l"
+  done
+}
+# desenho centralizado como bloco (todas as linhas com o mesmo recuo, senão ele entorta)
+centro_bloco() {
+  local l vis max=0 pad; local -a ls=()
+  while IFS= read -r l; do
+    ls+=("$l"); vis=$(printf '%s' "$l" | sed 's/\x1b\[[0-9;]*m//g')
+    if [ ${#vis} -gt $max ]; then max=${#vis}; fi
+  done
+  pad=$(( (COLS - max) / 2 )); if [ $pad -lt 0 ]; then pad=0; fi
+  for l in "${ls[@]}"; do printf '%*s%s\e[0;37;40m\n' $pad '' "$l"; done
+}
+LOGO_LINHAS=0
+cabecalho() {  # nome (e o logo, com $2 = grande); $1 = subtítulo
+  medir
+  printf '\e[0;37;40m\e[2J\e[H\n'
+  local logo=0
+  if [ "${2:-}" = grande ] && [ -f "$MARCA/logo.ans" ] && [ "$LINES_" -ge $(( $(wc -l < "$MARCA/logo.ans") + 14 )) ]; then
+    centro_bloco < "$MARCA/logo.ans"; logo=$(wc -l < "$MARCA/logo.ans")
+  else
+    logo=$(( LINES_ > 30 ? (LINES_ - 24) / 3 : 2 ))
+    printf '%*s' "$logo" '' | tr ' ' '\n'
+  fi
+  printf '\n'
+  printf '\e[1;37m%s\e[0;37m\n' "$(printf '%s' "$NOME_SISTEMA" | tr '[:lower:]' '[:upper:]' | sed 's/./& /g; s/ $//')" | centro
+  [ -n "${1:-}" ] && printf '\e[1;30m%s\e[0;37m\n' "$1" | centro
+  printf '\n'
+  LOGO_LINHAS=$(( logo + 4 ))
+}
+# recuo para os campos ficarem no meio da tela
+REC=0
+recuo() { REC=$(( (COLS - 50) / 2 )); if [ $REC -lt 2 ]; then REC=2; fi; }
+pergunta() {
+  printf '\n%*s\e[1;37m%s\e[0;37m\n' $REC '' "$1"
+  if [ -n "${2:-}" ]; then printf '%*s\e[1;30m%s\e[0;37m\n' $REC '' "$2"; fi
+  printf '\n'
+}
+entrada() {  # entrada <valor> [opções do gum input...]
+  local v=$1; shift
+  gum input --value "$v" --prompt "$(printf '%*s› ' $REC '')" "$@"
+}
+escolher() { gum choose --header "" --cursor "$(printf '%*s› ' $REC '')" --cursor-prefix "" --unselected-prefix "" \
+  --height 10 "$@" | sed 's/^ *//'; }
+# o recuo vai no cursor do gum (os outros itens recebem a mesma largura em branco)
+itens() { printf '%s\n' "$@"; }
+aviso() { printf '%*s\e[31m%s\e[0;37m\n' $REC '' "$1"; sleep 1.6; }
+
+# ---------------------------------------------------------------- textos
+t() {  # t <pt> <en>
+  if [ "${SYS_LANG:-pt_BR}" = en_US ]; then printf '%s' "$2"; else printf '%s' "$1"; fi
+}
+
+# ---------------------------------------------------------------- telas
+tela_idioma() {
+  cabecalho "$(t "Bem-vindo! Vamos instalar o $NOME_SISTEMA em poucos passos." "Welcome! Let's install $NOME_SISTEMA in a few steps.")" grande
+  recuo; pergunta "Idioma / Language"
+  case $(itens "Português (Brasil)" "English" | escolher) in
+    English) SYS_LANG=en_US ;;
+    *)       SYS_LANG=pt_BR ;;
+  esac
+}
+
+tela_teclado() {
+  cabecalho "$(t "Teclado" "Keyboard")"
+  recuo; pergunta "$(t "Qual é o seu teclado?" "Which keyboard do you have?")" "$(t "Dá para trocar depois nas Configurações." "You can change it later in Settings.")"
+  local br="Português (Brasil) — ABNT2" us="$(t "Inglês (EUA)" "English (US)")" usi="$(t "Inglês (EUA, internacional)" "English (US, international)")"
+  [ "$SYS_LANG" = en_US ] && set -- "$us" "$usi" "$br" || set -- "$br" "$usi" "$us"
+  case $(itens "$@" | escolher) in
+    "$us")  KEYMAP=us XKB=us XKBV= ;;
+    "$usi") KEYMAP=us-acentos XKB=us XKBV=intl ;;
+    *)      KEYMAP=br-abnt2 XKB=br XKBV= ;;
+  esac
+  loadkeys "$KEYMAP" 2>/dev/null || true
+}
+
+tela_conta() {
+  [ "$MODO" = distribuivel ] || return 0
+  while :; do
+    cabecalho "$(t "Sua conta" "Your account")"; recuo
+    pergunta "$(t "Seu nome" "Your name")" "$(t "Como você quer ser chamado no sistema." "How the system should call you.")"
+    FULLNAME=$(entrada "${FULLNAME:-}" --placeholder "$(t "Maria Silva" "Mary Smith")") || continue
+    FULLNAME=$(printf '%s' "$FULLNAME" | tr -d ':\n' | sed 's/^ *//; s/ *$//')
+    [ -n "$FULLNAME" ] && break
+  done
+  local sugestao
+  sugestao=$(printf '%s' "${FULLNAME%% *}" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9')
+  [[ ${sugestao:-x} =~ ^[a-z_] ]] || sugestao=usuario
+  while :; do
+    cabecalho "$(t "Sua conta" "Your account")"; recuo
+    pergunta "$(t "Nome de usuário" "Username")" "$(t "Letras minúsculas e números, sem espaços." "Lowercase letters and numbers, no spaces.")"
+    NEW_USER=$(entrada "${NEW_USER:-$sugestao}") || continue
+    [[ $NEW_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$NEW_USER" != root ] && break
+    aviso "$(t "Use letras minúsculas, números, - ou _ (começando por letra)." "Use lowercase letters, numbers, - or _ (starting with a letter).")"
+  done
+  ler_senha "$(t "Senha" "Password")" "$(t "Também desbloqueia o disco ao ligar o computador." "Also unlocks the disk when the computer starts.")"
+  HOST_PADRAO=${NEW_USER}-pc
+}
+
+ler_senha() {  # $1 título, $2 detalhe → PASS1
+  while :; do
+    cabecalho "$(t "Sua conta" "Your account")"; recuo
+    pergunta "$1" "$2"
+    PASS1=$(gum input --password --prompt "$(printf '%*s› ' $REC '')" --placeholder "$(t "senha" "password")") || continue
+    [ -n "$PASS1" ] || { aviso "$(t "A senha não pode ficar vazia." "The password can't be empty.")"; continue; }
+    printf '%*s\e[1;30m%s\e[0;37m\n' $REC '' "$(t "Repita a senha" "Repeat the password")"
+    PASS2=$(gum input --password --prompt "$(printf '%*s› ' $REC '')" --placeholder "$(t "senha" "password")") || continue
+    [ "$PASS1" = "$PASS2" ] && break
+    aviso "$(t "As senhas não conferem. Tente de novo." "The passwords don't match. Try again.")"
+  done
+}
+
+tela_computador() {
+  while :; do
+    cabecalho "$(t "Este computador" "This computer")"; recuo
+    pergunta "$(t "Nome do computador" "Computer name")" "$(t "Como ele aparece na rede." "How it shows up on the network.")"
+    HOST=$(entrada "${HOST:-${HOST_PADRAO:-$OLD_HOSTNAME}}") || continue
+    [[ $HOST =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]] && break
+    aviso "$(t "Use letras, números e -." "Use letters, numbers and -.")"
+  done
+}
+
+tela_disco() {
+  BOOT_DISK=$(lsblk -no PKNAME "$(findmnt -no SOURCE /run/archiso/bootmnt 2>/dev/null)" 2>/dev/null | head -1 || true)
+  local linhas=() nomes=() n tam modelo tran
+  while read -r n tam; do
+    [ "$(basename "$n")" = "${BOOT_DISK:-nenhum}" ] && continue
+    [ "$tam" -ge "$NEED_BYTES" ] || continue
+    modelo=$(lsblk -dno MODEL "$n" | sed 's/ *$//'); tran=$(lsblk -dno TRAN "$n" | tr -d ' ')
+    nomes+=("$n")
+    linhas+=("$(printf '%s GB   %s' "$((tam / 1000 ** 3))" "${modelo:-$(t "Disco" "Disk")}${tran:+ ($tran)}  ·  $(basename "$n")")")
+  done < <(lsblk -dbpno NAME,SIZE -e 7,11)
+  if [ ${#nomes[@]} -eq 0 ]; then
+    cabecalho; recuo
+    pergunta "$(t "Nenhum disco com espaço suficiente" "No disk with enough space")" \
+      "$(t "É preciso pelo menos $((NEED_BYTES / 1000 ** 3)) GB." "At least $((NEED_BYTES / 1000 ** 3)) GB are required.")"
+    erro_final
+  fi
+  cabecalho "$(t "Onde instalar" "Where to install")"; recuo
+  pergunta "$(t "Escolha o disco" "Choose the disk")" "$(t "Tudo o que estiver nele será apagado." "Everything on it will be erased.")"
+  local esc i
+  esc=$(itens "${linhas[@]}" | escolher)
+  for i in "${!linhas[@]}"; do [ "${linhas[$i]}" = "$esc" ] && DISK=${nomes[$i]}; done
+  SIZE=$(lsblk -dbno SIZE "$DISK")
+  DISK_DESC=$esc
+}
+
+tela_tpm() {
+  USE_TPM=n
+  [ -e /dev/tpmrm0 ] || return 0
+  cabecalho "$(t "Segurança" "Security")"; recuo
+  pergunta "$(t "Desbloquear o disco automaticamente?" "Unlock the disk automatically?")" \
+    "$(t "Usa o chip de segurança (TPM) deste computador: não pede a senha ao ligar." "Uses this computer's security chip (TPM): no password at startup.")"
+  gum confirm --padding "0 0 0 $REC" --affirmative "$(t "Sim" "Yes")" --negative "$(t "Não" "No")" "$(t "Ativar?" "Enable?")" && USE_TPM=s || true
+}
+
+tela_resumo() {
+  cabecalho "$(t "Tudo pronto" "Ready to install")"; recuo
+  local l
+  {
+    [ "$MODO" = distribuivel ] && printf '%s\t%s (%s)\n' "$(t "Conta" "Account")" "$FULLNAME" "$NEW_USER"
+    printf '%s\t%s\n' "$(t "Computador" "Computer")" "$HOST"
+    printf '%s\t%s\n' "$(t "Idioma" "Language")" "$( [ "$SYS_LANG" = en_US ] && echo English || echo "Português (Brasil)")"
+    printf '%s\t%s\n' "$(t "Teclado" "Keyboard")" "$KEYMAP"
+    printf '%s\t%s\n' "$(t "Disco" "Disk")" "$(printf '%s' "$DISK_DESC" | sed 's/  */ /g')"
+  } | while IFS=$'\t' read -r k v; do printf '%*s\e[1;30m%-12s\e[0;37m%s\n' $REC '' "$k" "$v"; done
+  printf '\n%*s\e[31m%s\e[0;37m\n\n' $REC '' "$(t "Todo o conteúdo do disco será apagado." "Everything on the disk will be erased.")"
+  gum confirm --padding "0 0 0 $REC" --affirmative "$(t "Instalar" "Install")" --negative "$(t "Voltar" "Back")" --default=false "$(t "Instalar agora?" "Install now?")"
+}
+
+# ---------------------------------------------------------------- progresso
+# A barra é redesenhada a cada atualização (as porcentagens do unsquashfs chegam
+# várias vezes por segundo), com as últimas linhas do log embaixo.
+PCT=0 TXT=
+progresso() {
+  PCT=$1; TXT=$2
+  local w cheio vazio barra ultimo
+  w=$(( COLS < 70 ? COLS - 10 : 60 )); cheio=$(( PCT * w / 100 ))
+  printf -v barra '%*s' "$cheio" ''; barra=${barra// /█}
+  printf -v vazio '%*s' $(( w - cheio )) ''
+  ultimo=$(tail -n 3 "$LOG" 2>/dev/null | tr -d '\r' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | cut -c1-$((COLS - 8)))
+  {
+    printf '\e[%d;1H\e[J' $((LOGO_LINHAS + 1))
+    printf '\n\e[1;37m%s\e[0;37m\n\n' "$(t "Instalando o $NOME_SISTEMA" "Installing $NOME_SISTEMA")" | centro
+    printf '%s\e[46m%s\e[40m  \e[1;37m%3d%%\e[0;37m\n\n' "$barra" "$vazio" "$PCT" | centro
+    printf '%s\n\n' "$TXT" | centro
+    printf '\e[1;30m%s\e[0;37m\n' "$ultimo" | centro
+  } >&4
+}
+iniciar_desenho() { cabecalho "" grande; exec 4>&1; printf '\e[?25l'; }
+parar_desenho() { :; }
+
+# executa com a saída no log
+x() { "$@" >> "$LOG" 2>&1; local r=$?; [ -z "$TXT" ] || progresso "$PCT" "$TXT"; return $r; }
+# unsquashfs com a porcentagem mapeada para a faixa [ini, fim] da barra
+descompactar() {  # <sqfs> <destino> <ini> <fim> <texto>
+  local p
+  # o status é o do unsquashfs (pipefail); o laço sempre termina em 0
+  unsquashfs -f -percentage -d "$2" "$1" 2>> "$LOG" | {
+    while read -r p; do
+      if [[ $p =~ ^[0-9]+$ ]]; then progresso $(( $3 + ($4 - $3) * p / 100 )) "$5"; fi
+    done
+    true
+  }
+}
+
+erro_final() {
+  parar_desenho
+  printf '\n'
+  printf '%*s\e[1;30m%s\e[0;37m\n' $REC '' "$(t "Últimas mensagens:" "Last messages:")"
+  tail -n 6 "$LOG" | cut -c1-$((COLS - REC - 2)) | sed "s/^/$(printf '%*s' $REC '')/"
+  printf '\n'
+  while :; do
+    case $(itens "$(t "Desligar" "Power off")" "$(t "Reiniciar" "Restart")" "$(t "Abrir um terminal" "Open a terminal")" | escolher) in
+      "$(t "Reiniciar" "Restart")") reboot ;;
+      "$(t "Abrir um terminal" "Open a terminal")") printf '\e[?25h\e[2J\e[H'; bash -l || true; cabecalho ;;
+      *) poweroff ;;
+    esac
+  done
+}
+falhou() {
+  set +e; trap - ERR
+  exec 2>&3
+  parar_desenho
+  cabecalho; recuo
+  pergunta "$(t "A instalação não pôde terminar" "The installation couldn't finish")" "$(t "Nada foi alterado fora do disco escolhido." "Nothing outside the chosen disk was changed.")"
+  erro_final
+}
+
+# ---------------------------------------------------------------- início
+[ -d /sys/firmware/efi ] || [ -n "$SIMULAR" ] || {
+  paleta; SYS_LANG=pt_BR; cabecalho; recuo
+  pergunta "Inicie o pendrive em modo UEFI" "Start the USB drive in UEFI mode. / Ative o UEFI na configuração do computador."
+  erro_final
+}
+paleta
+loadkeys br-abnt2 2>/dev/null || true
+trap 'printf "\e[?25h"' EXIT
+
+while :; do
+  tela_idioma
+  tela_teclado
+  tela_conta
+  [ "$MODO" = distribuivel ] || ler_senha "$(t "Senha do disco" "Disk password")" "$(t "Pedida ao ligar o computador (os usuários e senhas de login continuam os mesmos)." "Asked at startup (login users and passwords stay the same).")"
+  tela_computador
+  tela_disco
+  tela_tpm
+  tela_resumo && break
+done
+
+if [ -n "$SIMULAR" ]; then
+  iniciar_desenho
+  for p in 5 20 40 60 80 100; do progresso $p "$(t "Simulando…" "Simulating…")"; echo "passo $p" >> "$LOG"; sleep 1; done
+  parar_desenho; exit 0
+fi
+
+trap falhou ERR
+iniciar_desenho
+exec 3>&2 2>> "$LOG"   # mensagens de erro de comandos soltos vão para o log
+
+# ---------------------------------------------------------------- partições
+progresso 1 "$(t "Preparando o disco" "Preparing the disk")"
+[[ $DISK =~ [0-9]$ ]] && P="${DISK}p" || P="$DISK"
+swapoff -a 2>/dev/null || true
+umount -R "$T" 2>/dev/null || true
+cryptsetup close root 2>/dev/null || true
+x wipefs -af "$DISK"
+x sgdisk --zap-all "$DISK"
+x sgdisk -n1:0:+2G -t1:ef00 -c1:EFI -n2:0:0 -t2:8309 -c2:root "$DISK"
+x partprobe "$DISK"
+udevadm settle
+ESP="${P}1"
+LUKS="${P}2"
+x mkfs.fat -F32 -n EFI "$ESP"
+
+progresso 2 "$(t "Criptografando o disco" "Encrypting the disk")"
+printf '%s' "$PASS1" | x cryptsetup luksFormat --type luks2 -q --key-file=- "$LUKS"
+printf '%s' "$PASS1" | x cryptsetup open --key-file=- "$LUKS" root
+
+x mkfs.btrfs -f -L sistema /dev/mapper/root
+mount /dev/mapper/root "$T"
+for s in "$ROOT_SUBVOL" "$HOME_SUBVOL" @pkg @log; do x btrfs subvolume create "$T/$s"; done
+umount "$T"
+
+O=rw,relatime,compress=zstd:3,space_cache=v2
+mount -o "$O,subvol=/$ROOT_SUBVOL" /dev/mapper/root "$T"
+mkdir -p "$T"/{home,var/cache/pacman/pkg,var/log,boot}
+mount -o "$O,subvol=/$HOME_SUBVOL" /dev/mapper/root "$T/home"
+mount -o "$O,subvol=/@pkg" /dev/mapper/root "$T/var/cache/pacman/pkg"
+mount -o "$O,subvol=/@log" /dev/mapper/root "$T/var/log"
+mount "$ESP" "$T/boot"
+
+# ---------------------------------------------------------------- restauração
+descompactar "$MEDIA/system.sqfs" "$T" 3 72 "$(t "Copiando o sistema" "Copying the system")"
+descompactar "$MEDIA/home.sqfs" "$T/home" 72 86 "$(t "Copiando as configurações" "Copying the settings")"
+progresso 86 "$(t "Configurando" "Configuring")"
+
+# Wallpaper: fotos pessoais não vêm no clone; se o fundo atual apontar para
+# uma delas, volta para o primeiro fundo padrão do tema.
+for h in "$T"/home/*/; do
+  link="$h.local/state/simba/current/background"
+  [ -L "$link" ] || link="$h.local/state/simba/current/background"
+  [ -L "$link" ] || continue
+  [ -e "$T$(readlink "$link")" ] && continue
+  bgdir="$h.local/state/simba/current/theme/backgrounds"
+  [ -d "$bgdir" ] || bgdir="$h.local/state/simba/current/theme/backgrounds"
+  first=$(find -L "$bgdir" -maxdepth 1 -type f 2>/dev/null | sort | head -1 || true)
+  [ -n "$first" ] || continue
+  ln -nsf "${first#"$T"}" "$link"
+  chown -h "$(stat -c %u:%g "$h")" "$link"
+  echo "Fundo de tela de $(basename "$h"): $(basename "$first")" >> "$LOG"
+done
+
+# Primeiro boot: Configurações › Contas abre com as boas-vindas (opcionais).
+for h in "$T"/home/*/; do
+  [ -x /usr/bin/conta-boas-vindas ] || continue
+  [ -e "$h.local/share/conta/sem-boas-vindas" ] && continue
+  install -d -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$h.local/state" "$h.local/state/conta"
+  install -m 644 -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" /dev/null "$h.local/state/conta/boas-vindas"
+done
+
+# Registros "native messaging" do Brave (extensões carregadas por brave-flags.conf)
+for h in "$T"/home/*/; do
+  [ -f "$h.config/brave-flags.conf" ] || continue
+  u=$(basename "$h")
+  x arch-chroot "$T" runuser -u "$u" -- env HOME="/home/$u" SIMBA_PATH=/usr/share/simba SIMBA_PATH=/usr/share/simba bash -c '
+    for s in simba-install-chromium-copy-url simba-install-chromium-ytdlp simba-install-chromium-copy-url simba-install-chromium-ytdlp; do
+      command -v "$s" >/dev/null && "$s"
+    done
+    host=$HOME/.local/share/draco/bin/draco-wallpaper-host
+    [ -x "$host" ] || exit 0
+    d=$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts
+    mkdir -p "$d"
+    cat > "$d/com.draco.wallpaper.json" <<EOF
+{
+  "name": "com.draco.wallpaper",
+  "description": "Draco: definir papel de parede",
+  "path": "$host",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://nkmhoblamidgnpibdjbpjdbpcdnhkpho/"]
+}
+EOF
+  ' || echo "aviso: extensões do Brave de $u não registradas" >> "$LOG"
+done
+
+x tar -xf "$MEDIA/boot.tar" -C "$T/boot" --no-same-owner --no-same-permissions
+# Entradas do Limine do PC original (machine-id antigo) saem; as novas vêm do limine-mkinitcpio.
+if [ -n "${OLD_MACHINE_ID:-}" ] && [ -f "$T/boot/limine.conf" ]; then
+  awk -v mid="machine-id=$OLD_MACHINE_ID" '
+    function flush() { if (blk != "" && index(blk, mid) == 0) printf "%s", blk; blk = "" }
+    /^\// { flush(); inblk = 1 }
+    { if (inblk) blk = blk $0 "\n"; else print }
+    END { flush() }' "$T/boot/limine.conf" > "$T/boot/limine.conf.novo"
+  mv "$T/boot/limine.conf.novo" "$T/boot/limine.conf"
+  rm -rf "${T:?}/boot/$OLD_MACHINE_ID"
+fi
+
+make_subvol() {
+  local d=$1
+  if [ -d "$d" ] && ! btrfs subvolume show "$d" >/dev/null 2>&1; then
+    rmdir "$d" 2>/dev/null || return 0
+  fi
+  [ -d "$d" ] || x btrfs subvolume create "$d"
+}
+for c in "$T"/etc/snapper/configs/*; do
+  [ -f "$c" ] || continue
+  sv=$(sed -n 's/^SUBVOLUME="\(.*\)"/\1/p' "$c")
+  [ "$sv" = / ] && d="$T/.snapshots" || d="$T${sv%/}/.snapshots"
+  make_subvol "$d"
+  chmod 750 "$d"
+done
+
+OFFSET=
+SWAPFILE=$(awk '$3 == "swap" && $1 ~ /^\// {print $1; exit}' "$T/etc/fstab")
+if [ -n "$SWAPFILE" ]; then
+  progresso 87 "$(t "Criando a memória de troca" "Creating swap")"
+  make_subvol "$T$(dirname "$SWAPFILE")"
+  RAM_G=$(( ($(awk '/MemTotal/ {print $2}' /proc/meminfo) + 1048575) / 1048576 ))
+  x btrfs filesystem mkswapfile --size "${RAM_G}g" "$T$SWAPFILE"
+  OFFSET=$(btrfs inspect-internal map-swapfile -r "$T$SWAPFILE")
+fi
+
+# ---------------------------------------------------------------- conta (distribuível)
+if [ "$MODO" = distribuivel ]; then
+  progresso 88 "$(t "Criando a sua conta" "Creating your account")"
+  if [ "$NEW_USER" != "$OLD_USER" ] && [ -d "$T/home/$OLD_USER" ]; then
+    mv "$T/home/$OLD_USER" "$T/home/$NEW_USER"
+    x arch-chroot "$T" usermod -l "$NEW_USER" -d "/home/$NEW_USER" "$OLD_USER"
+    x arch-chroot "$T" groupmod -n "$NEW_USER" "$OLD_USER" || true
+    sed -i "s/^$OLD_USER:/$NEW_USER:/" "$T/etc/subuid" "$T/etc/subgid" 2>/dev/null || true
+    # o nome antigo nas configurações do sistema: sudoers.d (ex.: "renan ALL=(ALL) ALL"),
+    # login automático do SDDM, serviços etc. (passwd/group/shadow já foram pelo usermod)
+    grep -rlwZ --exclude={passwd,passwd-,group,group-,shadow,shadow-,gshadow,gshadow-,subuid,subgid} \
+      "$OLD_USER" "$T/etc" 2>/dev/null | xargs -0 -r sed -i "s/\b$OLD_USER\b/$NEW_USER/g" || true
+    for f in "$T"/etc/sudoers.d/*"$OLD_USER"*; do
+      [ -e "$f" ] && mv "$f" "${f//$OLD_USER/$NEW_USER}"
+    done
+    x arch-chroot "$T" visudo -c || echo "aviso: sudoers" >> "$LOG"
+    grep -rlIZ --exclude-dir={models,umu,Steam,.git,node_modules,__pycache__} "/home/$OLD_USER" "$T/home/$NEW_USER" 2>/dev/null |
+      xargs -0 -r sed -i "s|/home/$OLD_USER|/home/$NEW_USER|g" || true
+    find "$T/home/$NEW_USER" -type l -lname "/home/$OLD_USER/*" -print0 2>/dev/null |
+      while IFS= read -r -d '' l; do
+        alvo=$(readlink "$l"); ln -nsf "/home/$NEW_USER${alvo#/home/$OLD_USER}" "$l"
+      done
+  fi
+  antigo=$(printf '%s' "$OLD_USER" | sed 's/./\U&/')
+  primeiro=${FULLNAME%% *}
+  for f in "$T/home/$NEW_USER/.local/share/draco/prompt.md" "$T/home/$NEW_USER/.local/share/draco/workdir/CLAUDE.md"; do
+    [ -f "$f" ] && [ -n "$primeiro" ] && sed -i -e "s/\b[dD]o $antigo\b/de $primeiro/g" \
+      -e "s/\b[oO] $antigo\b/$primeiro/g" -e "s/\b$antigo\b/$primeiro/g" "$f"
+  done
+  x arch-chroot "$T" usermod -c "$FULLNAME" "$NEW_USER"
+  printf '%s:%s\n' "$NEW_USER" "$PASS1" | x arch-chroot "$T" chpasswd
+fi
+
+# ---------------------------------------------------------------- marca
+if [ -x "$MARCA/aplicar" ]; then
+  progresso 89 "$(t "Aplicando a identidade do $NOME_SISTEMA" "Applying the $NOME_SISTEMA look")"
+  x bash "$MARCA/aplicar" "$MARCA" "$T" "${NEW_USER:-$OLD_USER}" || echo "aviso: marca não aplicada" >> "$LOG"
+fi
+
+# ---------------------------------------------------------------- identidade
+progresso 90 "$(t "Ajustando este computador" "Setting up this computer")"
+NEW_FS_UUID=$(blkid -s UUID -o value /dev/mapper/root)
+NEW_ESP_UUID=$(blkid -s UUID -o value "$ESP")
+NEW_LUKS_UUID=$(cryptsetup luksUUID "$LUKS")
+NEW_PARTUUID=$(blkid -s PARTUUID -o value "$LUKS")
+
+mapfile -t FILES < <(ls -d "$T"/etc/fstab "$T"/etc/crypttab "$T"/etc/default/limine \
+  "$T"/etc/kernel/cmdline "$T"/etc/limine-entry-tool.d/*.conf "$T"/boot/limine.conf 2>/dev/null)
+sed -i -e "s/$OLD_FS_UUID/$NEW_FS_UUID/g" -e "s/$OLD_ESP_UUID/$NEW_ESP_UUID/g" \
+  -e "s/$OLD_LUKS_UUID/$NEW_LUKS_UUID/g" -e "s/$OLD_PARTUUID/$NEW_PARTUUID/g" "${FILES[@]}"
+[ -n "$OFFSET" ] && sed -i "s/resume_offset=[0-9]*/resume_offset=$OFFSET/g" "${FILES[@]}"
+
+echo "$HOST" > "$T/etc/hostname"
+[ "$HOST" != "$OLD_HOSTNAME" ] && sed -i "s/\b$OLD_HOSTNAME\b/$HOST/g" "$T/etc/hosts" 2>/dev/null || true
+rm -f "$T/etc/machine-id"
+x systemd-machine-id-setup --root="$T"
+
+# teclado (console e Hyprland leem o /etc/vconsole.conf)
+if [ -f "$T/etc/vconsole.conf" ]; then
+  sed -i -e "s/^KEYMAP=.*/KEYMAP=$KEYMAP/" -e "s/^XKBLAYOUT=.*/XKBLAYOUT=$XKB/" "$T/etc/vconsole.conf"
+  sed -i '/^XKBVARIANT=/d' "$T/etc/vconsole.conf"
+  if [ -n "$XKBV" ]; then echo "XKBVARIANT=$XKBV" >> "$T/etc/vconsole.conf"; fi
+  [ "$XKB" = br ] || sed -i 's/^XKBMODEL=.*/XKBMODEL=pc105/' "$T/etc/vconsole.conf"
+fi
+
+progresso 91 "$(t "Aplicando o idioma" "Setting the language")"
+if [ -x "$T/usr/bin/simba-idioma" ]; then
+  x arch-chroot "$T" simba-idioma "$SYS_LANG" || echo "aviso: idioma" >> "$LOG"
+else
+  sed -i "s/^LANG=.*/LANG=$SYS_LANG.UTF-8/" "$T/etc/locale.conf"
+fi
+
+# ---------------------------------------------------------------- boot
+progresso 93 "$(t "Preparando a inicialização" "Preparing startup")"
+x arch-chroot "$T" limine-mkinitcpio || echo "aviso: limine-mkinitcpio" >> "$LOG"
+x arch-chroot "$T" limine-snapper-sync || true
+
+for l in '\EFI\limine\BOOTX64.EFI' '\EFI\BOOT\BOOTX64.EFI'; do
+  if [ -f "$T/boot${l//\\//}" ]; then
+    x efibootmgr --create --disk "$DISK" --part 1 --label "$NOME_SISTEMA" --loader "$l" || true
+    break
+  fi
+done
+
+if [ "$USE_TPM" = s ]; then
+  progresso 98 "$(t "Vinculando ao chip de segurança" "Enrolling the security chip")"
+  PASSWORD=$PASS1 x systemd-cryptenroll --tpm2-device=auto "$LUKS" || echo "aviso: TPM" >> "$LOG"
+fi
+unset PASS1 PASS2
+
+progresso 99 "$(t "Finalizando" "Finishing")"
+sync
+umount -R "$T"
+cryptsetup close root
+progresso 100 "$(t "Pronto" "Done")"
+sleep 1
+trap - ERR
+parar_desenho
+exec 2>&3
+
+# ---------------------------------------------------------------- fim
+cabecalho "" grande; recuo
+pergunta "$(t "O $NOME_SISTEMA foi instalado" "$NOME_SISTEMA is installed")" \
+  "$(t "Retire o pendrive. Ao ligar, entre com a sua senha." "Remove the USB drive. At startup, sign in with your password.")"
+if [ "$MODO" = distribuivel ]; then
+  printf '%*s\e[1;30m%s\e[0;37m\n\n' $REC '' "$(t "Usuário: $NEW_USER" "User: $NEW_USER")"
+fi
+# O pendrive pode já ter sido retirado: reinicia/desliga pelo kernel (sysrq), sem ler
+# nada do sistema live. O disco instalado já foi desmontado acima.
+echo 1 > /proc/sys/kernel/sysrq
+if gum confirm --padding "0 0 0 $REC" --affirmative "$(t "Reiniciar agora" "Restart now")" --negative "$(t "Desligar" "Power off")" "$(t "E agora?" "What next?")"; then
+  echo b > /proc/sysrq-trigger
+else
+  echo o > /proc/sysrq-trigger
+fi

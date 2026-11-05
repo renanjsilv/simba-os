@@ -1,0 +1,6 @@
+module qs.Janela
+singleton Hypr 1.0 Hypr.qml
+Janela 1.0 Janela.qml
+Lateral 1.0 Lateral.qml
+Pagina 1.0 Pagina.qml
+Mica 1.0 Mica.qml

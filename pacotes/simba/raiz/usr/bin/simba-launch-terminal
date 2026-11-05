@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# simba:summary=Launch a terminal in the active terminal's current directory
+# simba:args=[command...]
+
+exec setsid uwsm-app -- xdg-terminal-exec --dir="$(simba-cmd-terminal-cwd)" "$@"

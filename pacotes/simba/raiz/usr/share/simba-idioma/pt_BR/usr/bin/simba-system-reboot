@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# simba:summary=Reboot after closing application windows
+# simba:examples=simba reboot | simba system reboot
+# simba:aliases=simba reboot
+
+# Schedule the reboot in the user manager so closing the terminal's systemd
+# scope cannot terminate it before it runs.
+systemd-run --user --collect --quiet --on-active="2s" --timer-property=AccuracySec=100ms systemctl reboot --no-wall || exit 1
+
+simba-osd -i reboot -m "Reiniciando" -d 5000
+
+simba-state clear re*-required
+
+# Now close all windows
+simba-hyprland-window-close-all
+sleep 1 # Allow apps like Chrome to shutdown correctly

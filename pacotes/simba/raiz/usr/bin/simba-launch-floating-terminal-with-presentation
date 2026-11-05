@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# simba:summary=Launch a floating terminal with the Simba presentation wrapper
+# simba:args=<command>
+
+# Export the current theme's gum styling so gum widgets match the active theme
+# even after a theme switch (the inherited environment is captured at login).
+source simba-restart-gum
+
+cmd="$*"
+presentation_script="simba-show-logo; $cmd; if (( \$? != 130 )); then simba-show-done; fi"
+
+exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.simba.terminal --title=Simba -e bash -c "$presentation_script"

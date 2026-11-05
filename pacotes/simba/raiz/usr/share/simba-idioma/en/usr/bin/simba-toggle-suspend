@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# simba:summary=Toggle suspend availability in the system menu
+
+simba-toggle suspend-off
+
+if simba-toggle-enabled suspend-off; then
+  simba-notification-send -g 󰒲 "Suspend removed from system menu"
+else
+  simba-notification-send -g 󰒲 "Suspend now available in system menu"
+fi

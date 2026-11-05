@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# simba:summary=Reload btop configuration (used by the Simba theme switching).
+
+pkill -SIGUSR2 btop

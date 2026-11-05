@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Converte um logo (PNG) em arte para o console do Linux, feita só de espaços com cor
+de fundo (funciona com qualquer fonte; as do console não têm os meios-blocos ▀▄).
+
+  logo-terminal <imagem> <colunas> <saida.ans>
+
+Três tons: claro (fundo, cor 0), cinza (cor 6) e escuro (cor 7). O instalador troca a
+paleta do console (setvtrgb) para esses tons. Cada caractere tem o dobro da altura da
+largura, então a imagem é reduzida para metade das linhas.
+"""
+import subprocess, sys
+
+img, cols, out = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+
+if img.endswith(".txt"):
+    # Mapa de pixels desenhado à mão (gato-pixel.txt): cada letra vira 2 colunas.
+    #   . fundo (0)   G cinza (6)   D escuro (7)   W branco (5)
+    COR = {".": 0, "G": 6, "D": 7, "W": 5}
+    linhas = []
+    for l in open(img):
+        l = l.rstrip("\n")
+        if not l or l.startswith("#"):
+            continue
+        s_, atual = "", 0
+        for ch in l:
+            c = COR.get(ch, 0)
+            if c != atual:
+                s_ += f"\033[{40 + c}m"
+                atual = c
+            s_ += "  "
+        s_ += "\033[0m" if atual else ""
+        linhas.append(s_)
+    open(out, "w").write("\n".join(linhas) + "\n")
+    sys.exit(0)
+w, h = map(int, subprocess.check_output(
+    ["magick", img, "-trim", "+repage", "-format", "%w %h", "info:"]).split())
+rows = max(1, round(h / w * cols / 2))
+dados = subprocess.check_output(
+    ["magick", img, "-trim", "+repage", "-background", "white", "-alpha", "remove",
+     "-colorspace", "Gray", "-resize", "1000x1000",
+     # traços mais grossos (o escuro se espalha) para o contorno sobreviver à redução
+     "-morphology", "Erode", f"Disk:{max(1, 1000 // cols // 6)}",
+     "-filter", "Box", "-resize", f"{cols}x{rows}!", "-depth", "8", "gray:-"])
+CLARO, CINZA, ESCURO = 0, 6, 7
+
+def tom(v):
+    return ESCURO if v < 120 else CINZA if v < 228 else CLARO
+
+linhas = []
+for y in range(rows):
+    s, atual = "", CLARO
+    for x in range(cols):
+        c = tom(dados[y * cols + x])
+        if c != atual:
+            s += f"\033[{40 + c}m"
+            atual = c
+        s += " "
+    s += "\033[0m" if atual != CLARO else ""
+    linhas.append(s.rstrip() if atual == CLARO else s)
+open(out, "w").write("\n".join(linhas) + "\n")

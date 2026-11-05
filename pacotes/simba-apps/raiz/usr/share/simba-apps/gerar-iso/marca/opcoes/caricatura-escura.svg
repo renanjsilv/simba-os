@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <defs>
+    <filter id="lapis" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" seed="11" result="ruido"/>
+      <feDisplacementMap in="SourceGraphic" in2="ruido" scale="4" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <pattern id="hachura" width="9" height="9" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+      <rect width="9" height="9" fill="#1a1a1a"/>
+      <line x1="0" y1="0" x2="0" y2="9" stroke="#5a5a5a" stroke-width="3"/>
+    </pattern>
+    <pattern id="pelo" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(-30)">
+      <rect width="14" height="14" fill="#2b2b2b"/>
+      <line x1="0" y1="0" x2="0" y2="14" stroke="#343434" stroke-width="4"/>
+    </pattern>
+  </defs>
+  <g filter="url(#lapis)" stroke="#f2f2f2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- orelhas (a esquerda um pouco mais aberta, como na foto) -->
+    <path d="M255 420 C 222 300, 205 190, 222 100 C 295 140, 362 205, 412 280 Z" fill="url(#pelo)" stroke-width="16"/>
+    <path d="M748 425 C 782 305, 800 205, 785 118 C 712 155, 642 215, 590 285 Z" fill="url(#pelo)" stroke-width="16"/>
+    <path d="M272 372 C 258 292, 252 222, 260 168 C 305 205, 343 248, 370 295" fill="url(#hachura)" stroke-width="7"/>
+    <path d="M730 375 C 746 298, 752 232, 746 182 C 700 214, 662 254, 633 298" fill="url(#hachura)" stroke-width="7"/>
+    <!-- cabeça larga com tufos nas bochechas -->
+    <path d="M500 262 C 615 262, 705 298, 763 395 C 802 465, 812 545, 800 615
+             C 822 628, 838 640, 846 660 C 822 664, 806 668, 795 676 C 815 690, 828 705, 832 726
+             C 806 722, 788 722, 772 728 C 722 828, 612 882, 500 885
+             C 388 882, 278 828, 228 728 C 212 722, 194 722, 168 726 C 172 705, 185 690, 205 676
+             C 194 668, 178 664, 154 660 C 162 640, 178 628, 200 615
+             C 188 545, 198 465, 237 395 C 295 298, 385 262, 500 262 Z" fill="url(#pelo)" stroke-width="18"/>
+    <!-- focinho e queixo brancos -->
+    <path d="M500 505 C 560 505, 640 545, 668 620 C 690 690, 650 800, 500 830
+             C 350 800, 310 690, 332 620 C 360 545, 440 505, 500 505 Z" fill="#4a4a4a" stroke="none"/>
+    <!-- listras: o "M" da testa e as laterais -->
+    <path d="M500 290 L 500 372 M 452 292 C 440 325, 444 352, 460 380 M 548 292 C 560 325, 556 352, 540 380
+             M 400 310 C 388 340, 394 362, 412 382 M 600 310 C 612 340, 606 362, 588 382" fill="none" stroke-width="13"/>
+    <path d="M222 470 C 250 478, 275 490, 296 506 M 212 525 C 245 532, 272 542, 292 556
+             M 778 470 C 750 478, 725 490, 704 506 M 788 525 C 755 532, 728 542, 708 556" fill="none" stroke-width="11"/>
+    <!-- sobrancelhas bravas -->
+    <path d="M315 440 C 362 412, 405 420, 452 458" fill="none" stroke-width="15"/>
+    <path d="M685 440 C 638 412, 595 420, 548 458" fill="none" stroke-width="15"/>
+    <!-- olhos semicerrados, inclinados para o nariz -->
+    <path d="M325 478 C 362 455, 418 462, 452 497 C 410 518, 362 512, 325 478 Z" fill="#f2f2f2" stroke-width="8"/>
+    <path d="M675 478 C 638 455, 582 462, 548 497 C 590 518, 638 512, 675 478 Z" fill="#f2f2f2" stroke-width="8"/>
+    <circle cx="402" cy="484" r="8" fill="#121212" stroke="none"/>
+    <circle cx="598" cy="484" r="8" fill="#121212" stroke="none"/>
+    <!-- nariz -->
+    <path d="M466 548 C 478 537, 522 537, 534 548 L 500 582 Z" fill="#f2f2f2" stroke-width="8"/>
+    <path d="M500 582 L 500 606" fill="none" stroke-width="9"/>
+    <!-- boca aberta rugindo -->
+    <path d="M392 616 C 430 600, 470 603, 500 606 C 530 603, 570 600, 608 616
+             C 615 695, 578 772, 500 782 C 422 772, 385 695, 392 616 Z" fill="#050505" stroke-width="14"/>
+    <path d="M436 742 C 458 708, 542 708, 564 742 C 548 768, 452 768, 436 742 Z" fill="url(#hachura)" stroke-width="6"/>
+    <path d="M500 718 L 500 748" fill="none" stroke="#8c8c8c" stroke-width="4"/>
+    <!-- presas -->
+    <path d="M416 621 L 435 682 L 453 617 Z" fill="#ffffff" stroke-width="7"/>
+    <path d="M584 621 L 565 682 L 547 617 Z" fill="#ffffff" stroke-width="7"/>
+    <path d="M438 774 L 451 728 L 466 777 Z" fill="#ffffff" stroke-width="6"/>
+    <path d="M562 774 L 549 728 L 534 777 Z" fill="#ffffff" stroke-width="6"/>
+    <!-- pontinhos dos bigodes e bigodes -->
+    <circle cx="420" cy="585" r="4" fill="#f2f2f2" stroke="none"/><circle cx="440" cy="596" r="4" fill="#f2f2f2" stroke="none"/>
+    <circle cx="580" cy="585" r="4" fill="#f2f2f2" stroke="none"/><circle cx="560" cy="596" r="4" fill="#f2f2f2" stroke="none"/>
+    <path d="M372 598 C 300 582, 225 586, 140 606 M 370 622 C 298 622, 230 638, 155 666 M 376 646 C 318 658, 262 684, 205 722
+             M 628 598 C 700 582, 775 586, 860 606 M 630 622 C 702 622, 770 638, 845 666 M 624 646 C 682 658, 738 684, 795 722"
+          fill="none" stroke-width="6"/>
+  </g>
+</svg>

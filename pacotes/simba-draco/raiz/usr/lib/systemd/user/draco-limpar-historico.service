@@ -1,0 +1,6 @@
+[Unit]
+Description=Apaga o histórico de conversas do Draco (mais antigo que a memória da conversa)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/share/draco/bin/limpar-historico

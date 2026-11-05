@@ -1,0 +1,3 @@
+# Wi-Fi e pareamentos Bluetooth: fora, exceto em "Com arquivos pessoais" + "Incluir senhas e logins".
+etc/NetworkManager/system-connections/*
+var/lib/bluetooth/*

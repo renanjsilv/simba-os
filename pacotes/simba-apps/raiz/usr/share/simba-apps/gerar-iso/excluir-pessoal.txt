@@ -1,0 +1,39 @@
+# Arquivos pessoais: fora, exceto no modo "Com arquivos pessoais" (as pastas ficam, vazias).
+Documents/*
+Downloads/*
+Music/*
+Pictures/*
+Videos/*
+Projects/*
+Work/*
+Desktop/*
+Área de trabalho/*
+Wallpapers/*
+steam-*.log
+
+# Rastros de uso
+.bash_history
+.zsh_history
+.python_history
+.node_repl_history
+.lesshst
+.wget-hsts
+.local/share/recently-used.xbel
+.local/state/*history*
+.local/state/lesshst
+.local/state/configuracoes/iniciar-uso.json
+
+# Draco: gravações de voz e logs de conversa, treino com a sua voz
+.local/share/draco/recordings/*
+.local/share/draco/draco.log
+.local/share/draco/proxy.log
+.local/share/draco/wake-train/minha-fala
+.local/share/draco/wake-train/minhas
+.local/share/draco/wake-train/ambiente.raw
+.local/share/draco/wake-train/auto-sim
+.local/share/draco/wake-train/auto-nao
+.local/share/draco/wake-train/negativos-reais
+.local/share/draco/wake-train/cache
+.local/share/draco/wake-train/clips-cache.npz
+.local/share/draco/wake-train/treino.log
+.local/state/agentes

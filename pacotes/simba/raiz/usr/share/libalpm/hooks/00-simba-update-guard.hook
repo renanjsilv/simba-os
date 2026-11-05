@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Upgrade
+Type = Package
+Target = *
+
+[Action]
+Description = Checking Simba update entrypoint...
+When = PreTransaction
+Depends = simba
+Exec = /usr/bin/simba-update-pacman-guard
+AbortOnFail

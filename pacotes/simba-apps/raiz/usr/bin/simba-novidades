@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+"""simba-novidades — o que vai ser atualizado e o que muda em cada item (changelog).
+
+  simba-novidades            consulta e grava ~/.cache/simba/novidades.json (e imprime)
+  simba-novidades estado     só imprime o último resultado gravado
+
+Fontes das notas, em ordem: releases do projeto no GitHub (achado pelo .nvchecker.toml /
+PKGBUILD / URL do pacote), AppStream (Flatpak), fwupd (firmware) e, por fim, os commits do
+empacotamento (Arch GitLab / AUR). Resultados ficam em cache por pacote+versão.
+Token opcional para o GitHub (60 consultas/h sem ele): GITHUB_TOKEN ou `gh auth login`.
+"""
+import gzip, json, os, re, subprocess, sys, tarfile, time, urllib.parse, urllib.request
+import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
+import sys as _sys, os as _os  # noqa: E401
+_sys.path.insert(0, _os.path.expanduser("/usr/share/simba-apps/idiomas"))
+from simba_i18n import t as _t  # noqa: E402  (traduções: /usr/share/simba-apps/idiomas)
+
+HOME = os.path.expanduser("~")
+SAIDA = f"{HOME}/.cache/simba/novidades.json"
+CACHE = f"{HOME}/.cache/simba/novidades-cache.json"
+DB = os.environ.get("CHECKUPDATES_DB") or f"{os.environ.get('TMPDIR', '/tmp')}/checkup-db-{os.getuid()}"
+LIMITE = 6000
+UA = {"User-Agent": "simba-novidades"}
+
+
+def sh(argv, timeout=90):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout).stdout
+    except Exception:
+        return ""
+
+
+def baixar(url, cab=None, timeout=20):
+    req = urllib.request.Request(url, headers={**UA, **(cab or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+TOKEN = os.environ.get("GITHUB_TOKEN") or sh(["gh", "auth", "token"], 10).strip()
+gh_bloqueado = False
+
+
+def github(caminho):
+    global gh_bloqueado
+    if gh_bloqueado:
+        return None
+    cab = {"Accept": "application/vnd.github+json"}
+    if TOKEN:
+        cab["Authorization"] = f"Bearer {TOKEN}"
+    try:
+        return json.loads(baixar("https://api.github.com/" + caminho, cab))
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 429):
+            gh_bloqueado = True
+        return None
+    except Exception:
+        return None
+
+
+# ── versões ──────────────────────────────────────────────────────────────────
+def upstream(v):
+    """1:2.3.4-2 → 2.3.4"""
+    v = v.split(":", 1)[-1]
+    return v.rsplit("-", 1)[0] if "-" in v else v
+
+
+def vercmp(a, b):
+    try:
+        return int(sh(["vercmp", a, b], 5).strip() or 0)
+    except ValueError:
+        return 0
+
+
+def versao_da_tag(tag):
+    m = re.search(r"\d+(?:[._]\d+)*(?:[-.]?(?:rc|beta|alpha|b|a)\.?\d*)?", tag or "")
+    return m.group(0).replace("_", ".") if m else ""
+
+
+# ── notas ────────────────────────────────────────────────────────────────────
+def limpar_md(t):
+    t = re.sub(r"<!--.*?-->", "", (t or "").replace("\r\n", "\n"), flags=re.S)
+    t = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", t)                 # imagens
+    t = re.sub(r"<img[^>]*>", "", t)
+    t = re.sub(r"\n{3,}", "\n\n", t).strip()
+    return t[:LIMITE] + ("\n\n…" if len(t) > LIMITE else "")
+
+
+def repo_github(*textos):
+    for t in textos:
+        if not t:
+            continue
+        m = re.search(r'github\s*=\s*["\']([\w.-]+/[\w.-]+)["\']', t)          # .nvchecker.toml
+        if not m:
+            m = re.search(r"github\.com[/:]([\w.-]+)/([\w.-]+?)(?:\.git)?(?=[/\"'#\s)]|$)", t)
+            if m:
+                return f"{m.group(1)}/{m.group(2)}"
+        else:
+            return m.group(1)
+    return None
+
+
+def notas_github(repo, de, para):
+    """Releases entre `de` (exclusive) e `para` (inclusive), mais nova primeiro."""
+    rels = github(f"repos/{repo}/releases?per_page=40")
+    if not rels:
+        return None
+    de_u, para_u = upstream(de), upstream(para)
+    blocos = []
+    for r in rels:
+        v = versao_da_tag(r.get("tag_name")) or versao_da_tag(r.get("name"))
+        if not v or r.get("draft"):
+            continue
+        if vercmp(v, para_u) <= 0 and (not de_u or vercmp(v, de_u) > 0):
+            if r.get("prerelease") and vercmp(v, para_u) != 0:
+                continue
+            corpo = limpar_md(r.get("body") or "") or _t("_(sem descrição)_")
+            titulo = r.get("name") or r.get("tag_name")
+            blocos.append(f"### {titulo}\n\n{corpo}")
+        if len(blocos) >= 6:
+            break
+    if not blocos:
+        return None
+    return limpar_md("\n\n".join(blocos)), f"https://github.com/{repo}/releases"
+
+
+def commits_arch(base):
+    proj = urllib.parse.quote("archlinux/packaging/packages/" + base.replace("+", "plus"), safe="")
+    try:
+        cs = json.loads(baixar(f"https://gitlab.archlinux.org/api/v4/projects/{proj}/repository/commits?per_page=4"))
+        return [c["title"] for c in cs], f"https://gitlab.archlinux.org/archlinux/packaging/packages/{base}/-/commits/main"
+    except Exception:
+        return [], None
+
+
+def commits_aur(base):
+    try:
+        x = baixar(f"https://aur.archlinux.org/cgit/aur.git/atom/?h={urllib.parse.quote(base)}")
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        tit = [e.findtext("a:title", "", ns) for e in ET.fromstring(x).findall("a:entry", ns)][:4]
+        return tit, f"https://aur.archlinux.org/cgit/aur.git/log/?h={base}"
+    except Exception:
+        return [], None
+
+
+def arquivo_arch(base, nome):
+    try:
+        return baixar(f"https://gitlab.archlinux.org/archlinux/packaging/packages/{base.replace('+', 'plus')}/-/raw/main/{nome}")
+    except Exception:
+        return ""
+
+
+def arquivo_aur(base, nome):
+    try:
+        return baixar(f"https://aur.archlinux.org/cgit/aur.git/plain/{nome}?h={urllib.parse.quote(base)}")
+    except Exception:
+        return ""
+
+
+def notas_pacote(it):
+    de, para, base = it["de"], it["para"], it["base"]
+    so_pacote = upstream(de) == upstream(para)
+    if it["origem"] == "aur":
+        commits, link_pkg = commits_aur(base)
+        fontes = [arquivo_aur(base, "PKGBUILD"), it.get("url", "")]
+    else:
+        commits, link_pkg = commits_arch(base)
+        fontes = [arquivo_arch(base, ".nvchecker.toml"), it.get("url", ""), arquivo_arch(base, "PKGBUILD")]
+    pkg = ("**" + _t("Empacotamento") + ":**\n\n" + "\n".join(f"- {c}" for c in commits)) if commits else ""
+    if so_pacote:
+        txt = _t("Mesma versão do programa (%1); só o pacote foi refeito (recompilação ou ajuste de empacotamento).", upstream(para))
+        return {"notas": txt + ("\n\n" + pkg if pkg else ""), "fonte": _t("Empacotamento"), "link": link_pkg or it.get("url", "")}
+    repo = repo_github(*fontes)
+    if repo:
+        r = notas_github(repo, de, para)
+        if r:
+            return {"notas": r[0], "fonte": _t("GitHub · ") + repo, "link": r[1]}
+    txt = _t("O projeto não publica notas num lugar que dê para ler daqui. Versão %1 → %2.", upstream(de), upstream(para))
+    return {"notas": txt + ("\n\n" + pkg if pkg else ""), "fonte": _t("Empacotamento"), "link": it.get("url") or link_pkg}
+
+
+# ── tradução para pt-BR ──────────────────────────────────────────────────────
+# Google Tradutor (endpoint do Chrome), linha a linha, protegendo o que não é texto:
+# links, código, versões, #PRs, @pessoas, hashes. Cache por linha (cada versão traduz 1 vez).
+from simba_i18n import idioma as _idioma  # noqa: E402
+_l = _idioma()
+DESTINO = "pt-BR" if _l.startswith("pt") else ("zh-CN" if _l == "zh_CN" else _l.split("_")[0])
+TRAD = f"{HOME}/.cache/simba/novidades-traducoes{'' if DESTINO == 'pt-BR' else '-' + DESTINO}.json"
+_NOSSAS = ["Mesma versão do programa", "O projeto não publica", "**Empacotamento", "_(sem descrição)_", "O app não publicou", "Sem notas"]
+NOSSO = re.compile("^(" + "|".join(re.escape(x) for x in _NOSSAS + [_t(x) for x in _NOSSAS] + ["**" + _t("Empacotamento")]) + "|…$)")
+PROTEGER = re.compile(r"`[^`]*`|\]\([^)]*\)|<[^>]+>|https?://\S+|@[\w-]+|#\d+\b|\b[0-9a-f]{7,40}\b|\bv?\d+(?:\.\d+)+[\w.+-]*")
+PREFIXO = re.compile(r"^(\s*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+|>\s*)*)(.*)$")
+
+
+def _partes(linha):
+    pre, corpo = PREFIXO.match(linha).groups()
+    toks = []
+    def guarda(m):
+        toks.append(m.group(0)); return f"⟦{len(toks) - 1}⟧"
+    return pre, PROTEGER.sub(guarda, corpo), toks
+
+
+def _precisa(linha):
+    pre, corpo, _ = _partes(linha)
+    return bool(re.search(r"[A-Za-z]{3}", re.sub(r"⟦\d+⟧", "", corpo))) and not NOSSO.match(linha.strip())
+
+
+def _google(textos):
+    dados = urllib.parse.urlencode([("q", t) for t in textos]).encode()
+    req = urllib.request.Request("https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=" + DESTINO,
+                                 data=dados, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        res = json.loads(r.read())
+    # resposta: ["texto", ...] ou [["texto", "idioma"], ...]
+    return [x[0] if isinstance(x, list) else x for x in res]
+
+
+def traduzir_tudo(textos):
+    """{texto original: texto no idioma da sessão} para uma lista de markdowns (inglês: não traduz)."""
+    if DESTINO == "en":
+        return {t: t for t in textos}
+    try:
+        cache = json.load(open(TRAD))
+    except Exception:
+        cache = {}
+    faltam = []
+    for t in textos:
+        cerca = False
+        for l in t.split("\n"):
+            if l.lstrip().startswith("```"):
+                cerca = not cerca; continue
+            if not cerca and _precisa(l):
+                corpo = _partes(l)[1]
+                if corpo not in cache and corpo not in faltam:
+                    faltam.append(corpo)
+    lote, tam = [], 0
+    for c in faltam + [None]:
+        if c is None or tam + len(c) > 3500 or len(lote) >= 80:
+            if lote:
+                try:
+                    for o, tr in zip(lote, _google(lote)):
+                        cache[o] = tr
+                except Exception:
+                    break          # sem tradução agora: fica o original, tenta na próxima
+            lote, tam = [], 0
+        if c is not None:
+            lote.append(c); tam += len(c)
+    saida = {}
+    for t in textos:
+        linhas, cerca = [], False
+        for l in t.split("\n"):
+            if l.lstrip().startswith("```"):
+                cerca = not cerca
+            if cerca or l.lstrip().startswith("```") or not _precisa(l):
+                linhas.append(l); continue
+            pre, corpo, toks = _partes(l)
+            tr = cache.get(corpo, corpo)
+            tr = re.sub(r"⟦\s*(\d+)\s*⟧", lambda m: toks[int(m.group(1))] if int(m.group(1)) < len(toks) else "", tr)
+            linhas.append(pre + tr)
+        saida[t] = "\n".join(linhas)
+    with open(TRAD + ".tmp", "w") as f:
+        json.dump(cache, f, ensure_ascii=False)
+    os.replace(TRAD + ".tmp", TRAD)
+    return saida
+
+
+# ── o que está para atualizar ────────────────────────────────────────────────
+def db_sync():
+    """nome → {base, desc, url} a partir do banco temporário do checkupdates."""
+    info = {}
+    pasta = f"{DB}/sync"
+    for f in os.listdir(pasta) if os.path.isdir(pasta) else []:
+        if not f.endswith(".db"):
+            continue
+        try:
+            with tarfile.open(f"{pasta}/{f}") as t:
+                for m in t:
+                    if not m.name.endswith("/desc"):
+                        continue
+                    campos, chave = {}, None
+                    for l in t.extractfile(m).read().decode("utf-8", "replace").splitlines():
+                        if l.startswith("%") and l.endswith("%"):
+                            chave = l.strip("%")
+                        elif l and chave and chave not in campos:
+                            campos[chave] = l
+                    info[campos.get("NAME")] = {"base": campos.get("BASE") or campos.get("NAME"),
+                                                "descricao": campos.get("DESC", ""), "url": campos.get("URL", ""),
+                                                "repo": f[:-3]}
+        except Exception:
+            pass
+    return info
+
+
+def linhas_pkg(saida):
+    for l in saida.splitlines():
+        m = re.match(r"^(\S+)\s+(\S+)\s+->\s+(\S+)", l)
+        if m:
+            yield m.groups()
+
+
+def itens_sistema():
+    out = sh(["checkupdates", "--nosync", "--nocolor"]) or sh(["checkupdates", "--nocolor"])
+    db = db_sync()
+    for nome, de, para in linhas_pkg(out):
+        i = db.get(nome, {})
+        yield {"nome": nome, "origem": "sistema", "de": de, "para": para, "base": i.get("base", nome),
+               "descricao": i.get("descricao", ""), "url": i.get("url", ""), "repo": i.get("repo", "")}
+
+
+def itens_aur():
+    lst = list(linhas_pkg(sh(["yay", "-Qua"], 60)))
+    if not lst:
+        return []
+    q = "&".join("arg[]=" + urllib.parse.quote(n) for n, _, _ in lst)
+    try:
+        res = {r["Name"]: r for r in json.loads(baixar("https://aur.archlinux.org/rpc/v5/info?" + q))["results"]}
+    except Exception:
+        res = {}
+    return [{"nome": n, "origem": "aur", "de": de, "para": para, "base": res.get(n, {}).get("PackageBase", n),
+             "descricao": res.get(n, {}).get("Description", ""), "url": res.get(n, {}).get("URL", "") or ""}
+            for n, de, para in lst]
+
+
+def appstream_releases():
+    rel = {}
+    for base in ("/var/lib/flatpak/appstream",):
+        for raiz, _, arqs in os.walk(base):
+            if "appstream.xml" not in arqs or not raiz.endswith("/active"):
+                continue
+            try:
+                arv = ET.parse(f"{raiz}/appstream.xml")
+            except Exception:
+                continue
+            for c in arv.getroot().iter("component"):
+                rel.setdefault(c.findtext("id", ""), c)
+    return rel
+
+
+def descr_appstream(el):
+    if el is None:
+        return ""
+    partes = []
+    for f in el:
+        txt = " ".join("".join(f.itertext()).split())
+        if f.tag == "p":
+            partes.append(txt)
+        elif f.tag in ("ul", "ol"):
+            partes.append("\n".join("- " + " ".join("".join(li.itertext()).split()) for li in f))
+    return "\n\n".join(p for p in partes if p)
+
+
+def itens_loja():
+    upd = sh(["flatpak", "remote-ls", "--updates", "--system", "--columns=application,name,version"], 60)
+    if not upd.strip():
+        return []
+    inst = {}
+    for l in sh(["flatpak", "list", "--system", "--columns=application,version"]).splitlines():
+        p = l.split("\t")
+        inst[p[0]] = p[1] if len(p) > 1 else ""
+    comps = appstream_releases()
+    itens = []
+    for l in upd.splitlines():
+        p = (l.split("\t") + ["", "", ""])[:3]
+        app, nome, para = p
+        c = comps.get(app) or comps.get(app + ".desktop")
+        notas = ""
+        if c is not None:
+            blocos = []
+            for r in c.findall("releases/release")[:6]:
+                v = r.get("version", "")
+                if inst.get(app) and v and vercmp(v, inst[app]) <= 0:
+                    break
+                d = descr_appstream(r.find("description"))
+                blocos.append(f"### {v}\n\n{d or '_(sem descrição)_'}")
+            notas = "\n\n".join(blocos)
+        itens.append({"nome": nome or app, "origem": "loja", "de": inst.get(app, ""), "para": para,
+                      "descricao": c.findtext("summary", "") if c is not None else "",
+                      "url": f"https://flathub.org/apps/{app}",
+                      "notas": notas or _t("O app não publicou notas desta versão."), "fonte": _t("AppStream (Flathub)"),
+                      "link": f"https://flathub.org/apps/{app}"})
+    return itens
+
+
+def itens_firmware():
+    if not sh(["sh", "-c", "command -v fwupdmgr"]).strip():
+        return []
+    try:
+        d = json.loads(sh(["fwupdmgr", "get-updates", "--json", "--no-unreported-check"], 60) or "{}")
+    except Exception:
+        return []
+    itens = []
+    for dev in d.get("Devices", []):
+        rels = dev.get("Releases") or []
+        if not rels:
+            continue
+        r = rels[0]
+        desc = re.sub(r"<li>", "- ", r.get("Description", ""))
+        desc = re.sub(r"<[^>]+>", "\n", desc)
+        itens.append({"nome": dev.get("Name", "Firmware"), "origem": "firmware", "de": dev.get("Version", ""),
+                      "para": r.get("Version", ""), "descricao": r.get("Summary", ""), "url": r.get("Homepage", ""),
+                      "notas": re.sub(r"\n{2,}", "\n", desc).strip() or _t("Sem notas do fabricante."),
+                      "fonte": _t("LVFS (fwupd)"), "link": r.get("Homepage", "")})
+    return itens
+
+
+def itens_craft():
+    itens = []
+    for l in sh(["/usr/bin/simba-craft-atualizar", "--verificar"], 90).splitlines():
+        m = re.match(r"^(\w+): (.+?) → (\S+)", l)
+        if not m:
+            continue
+        app, de, para = m.groups()
+        r = github(f"repos/storytold/{app}/releases/latest") or {}
+        itens.append({"nome": app.capitalize().replace("craft", "Craft"), "origem": "craft",
+                      "de": "" if de.startswith("não") else de, "para": para, "descricao": _t("Escritório (Craft)"),
+                      "url": f"https://github.com/storytold/{app}",
+                      "notas": limpar_md(r.get("body") or "") or _t("Sem notas nesta versão."),
+                      "fonte": _t("GitHub · storytold/") + app, "link": f"https://github.com/storytold/{app}/releases"})
+    return itens
+
+
+# ── principal ────────────────────────────────────────────────────────────────
+def main():
+    if sys.argv[1:2] == ["estado"]:
+        try:
+            print(open(SAIDA).read().strip())
+        except OSError:
+            print('{"itens":[]}')
+        return
+    try:
+        cache = json.load(open(CACHE))
+    except Exception:
+        cache = {}
+
+    with ThreadPoolExecutor(5) as ex:
+        fs = [ex.submit(lambda: list(itens_sistema())), ex.submit(itens_aur), ex.submit(itens_loja),
+              ex.submit(itens_firmware), ex.submit(itens_craft)]
+        itens = [i for f in fs for i in (f.result() or [])]
+
+    # Pacotes da mesma base (nvidia-utils + nvidia-dkms…) dividem as notas
+    pendentes = {}
+    for it in itens:
+        if "notas" in it:
+            continue
+        k = f"{it['origem']}|{it['base']}|{it['de']}|{it['para']}"
+        it["_k"] = k
+        if k in cache:
+            it.update(cache[k])
+        else:
+            pendentes.setdefault(k, it)
+
+    with ThreadPoolExecutor(8) as ex:
+        for k, r in zip(pendentes, ex.map(notas_pacote, pendentes.values())):
+            if not gh_bloqueado or r["fonte"] != _t("Empacotamento"):
+                cache[k] = r
+            for it in itens:
+                if it.get("_k") == k:
+                    it.update(r)
+
+    try:
+        ignoradas = json.load(open(f"{HOME}/.config/simba/atualizacoes-ignoradas.json"))
+    except Exception:
+        ignoradas = {}
+    for it in itens:
+        it.pop("_k", None)
+        if it["origem"] == "aur":
+            it["ignoravel"] = True
+            it["ignorada"] = ignoradas.get(it["nome"]) == it["para"]
+    pt = traduzir_tudo([i["notas"] for i in itens if i.get("notas")] + [i["descricao"] for i in itens if i.get("descricao")])
+    for it in itens:
+        if it.get("descricao"):
+            it["descricao"] = pt.get(it["descricao"], it["descricao"])
+    for it in itens:
+        if it.get("notas") and pt.get(it["notas"], it["notas"]) != it["notas"]:
+            it["original"], it["notas"] = it["notas"], pt[it["notas"]]
+    ordem = {"sistema": 0, "aur": 1, "loja": 2, "craft": 3, "firmware": 4}
+    itens.sort(key=lambda i: (ordem.get(i["origem"], 9), i["nome"].lower()))
+    vivos = {f"{i['origem']}|{i.get('base', '')}|{i['de']}|{i['para']}" for i in itens}
+    cache = {k: v for k, v in cache.items() if k in vivos}
+
+    res = {"quando": int(time.time()), "githubLimitado": gh_bloqueado, "itens": itens}
+    os.makedirs(os.path.dirname(SAIDA), exist_ok=True)
+    for caminho, dado in ((CACHE, cache), (SAIDA, res)):
+        with open(caminho + ".tmp", "w") as f:
+            json.dump(dado, f, ensure_ascii=False)
+        os.replace(caminho + ".tmp", caminho)
+    print(json.dumps(res, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

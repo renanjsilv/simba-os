@@ -1,0 +1,70 @@
+#!/bin/bash
+# dr-key: press keys / type text in the focused window, reliably.
+#
+#   dr-key <combo>...          e.g.  dr-key ctrl+a  |  dr-key Escape Return  |  dr-key ctrl+alt+slash
+#   dr-key -t "<texto>"        type text by pasting it (ctrl+v); the clipboard is restored after
+#   dr-key -T "<texto>"        same, for terminals (ctrl+shift+v)
+#   dr-key -s <ms>             pause between steps, e.g. dr-key Escape -s 150 ctrl+alt+slash
+#
+# Keys go through Hyprland's send_key_state with the real keyboard layout, unlike
+# wtype, whose fresh virtual keyboard sometimes gets its first keys mistranslated.
+# Key names are xkb names: Return, Escape, Tab, BackSpace, Up, Down, Left, Right,
+# slash, a-z, F1-F12... Modifiers: ctrl, alt, shift, super.
+
+# Keys sent this way also trigger compositor binds, including the global Esc that
+# cancels Draco: leave a mark so `draco cancel` knows the Esc was ours.
+MARK="${XDG_RUNTIME_DIR:-/tmp}/draco/synthetic-keys"
+mkdir -p "${MARK%/*}"
+
+send() { # send <MODS> <KEY>
+  touch "$MARK"
+  hyprctl dispatch "hl.dsp.send_key_state({ mods = \"$1\", key = \"$2\", state = \"down\" })" >/dev/null
+  hyprctl dispatch "hl.dsp.send_key_state({ mods = \"$1\", key = \"$2\", state = \"up\" })" >/dev/null
+}
+
+combo() {
+  local mods="" part key
+  IFS=+ read -ra parts <<<"$1"
+  key=${parts[-1]}
+  for part in "${parts[@]::${#parts[@]}-1}"; do
+    case ${part,,} in
+      ctrl | control) mods+="CTRL " ;;
+      alt) mods+="ALT " ;;
+      shift) mods+="SHIFT " ;;
+      super | win | logo) mods+="SUPER " ;;
+      *) echo "dr-key: modificador desconhecido '$part'" >&2; return 2 ;;
+    esac
+  done
+  [[ ${#key} == 1 && -n $mods ]] && key=${key^^} # shortcuts use the uppercase letter keysym
+  send "${mods% }" "$key"
+}
+
+saved=""
+save_clipboard() {
+  [[ -n $saved ]] && return
+  saved=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/dr-clip.XXXXXX")
+  type=$(wl-paste -l 2>/dev/null | head -1)
+  [[ -n $type ]] && wl-paste -n -t "$type" >"$saved" 2>/dev/null
+  trap restore_clipboard EXIT
+}
+restore_clipboard() {
+  sleep 0.3 # let the target app read the pasted text first
+  if [[ -s $saved && -n $type ]]; then wl-copy -t "$type" <"$saved"; fi
+  rm -f "$saved"
+}
+
+paste() { # paste <text> <combo>
+  save_clipboard
+  printf '%s' "$1" | wl-copy
+  combo "$2"
+}
+
+[[ $# -gt 0 ]] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+while (($#)); do
+  case $1 in
+    -t) paste "$2" ctrl+v; shift 2 ;;
+    -T) paste "$2" ctrl+shift+v; shift 2 ;;
+    -s) sleep "$(awk -v ms="$2" 'BEGIN{print ms/1000}')"; shift 2 ;;
+    *) combo "$1" || exit $?; shift ;;
+  esac
+done

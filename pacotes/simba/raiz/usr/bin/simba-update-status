@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# simba:summary=Refresh the shell update status
+# simba:hidden=true
+
+set -e
+
+if simba-update-available >/dev/null; then
+  simba-shell -q simba.system-update refresh
+else
+  simba-shell -q simba.system-update clear
+fi

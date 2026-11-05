@@ -1,0 +1,42 @@
+#!/bin/bash
+# simba-craft-atualizar — instala/atualiza WordCraft, GridCraft, DeckCraft e PdfCraft
+# a partir das releases oficiais (github.com/storytold), com verificação SHA-256.
+# Roda como root pelo simba-craft-atualizar.timer (diário) ou à mão.
+#   simba-craft-atualizar [--verificar]   --verificar: só mostra o que há de novo
+set -uo pipefail
+APPS=(wordcraft gridcraft deckcraft pdfcraft)
+SO_VER=${1:-}
+CACHE=/var/cache/simba-craft
+log() { printf '%s\n' "$*"; }
+
+[ "$(id -u)" = 0 ] || [ "$SO_VER" = --verificar ] || { echo "rode como root" >&2; exit 1; }
+mkdir -p "$CACHE" 2>/dev/null || true
+falhas=0
+for app in "${APPS[@]}"; do
+  pkg="ai.storyteller.$app"
+  json=$(curl -fsSL --max-time 30 -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/storytold/$app/releases/latest") || { log "$app: sem acesso ao GitHub"; falhas=1; continue; }
+  read -r url digest ver < <(python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for a in d.get("assets", []):
+    if a["name"].endswith("-linux-x86_64.pkg.tar.zst"):
+        print(a["browser_download_url"], a.get("digest", "").removeprefix("sha256:"), d["tag_name"].lstrip("v"))
+        break' <<<"$json")
+  [ -n "${url:-}" ] && [ -n "${digest:-}" ] || { log "$app: release sem pacote/sha256"; falhas=1; continue; }
+  atual=$(pacman -Q "$pkg" 2>/dev/null | awk '{print $2}' | sed 's/-[0-9]*$//')
+  if [ "$atual" = "$ver" ]; then log "$app $ver: em dia"; continue; fi
+  log "$app: ${atual:-não instalado} → $ver"
+  [ "$SO_VER" = --verificar ] && continue
+  f="$CACHE/$(basename "$url")"
+  curl -fsSL --max-time 900 -o "$f.part" "$url" || { log "$app: download falhou"; rm -f "$f.part"; falhas=1; continue; }
+  if ! echo "$digest  $f.part" | sha256sum -c --status; then
+    log "$app: SHA-256 não confere — descartado"; rm -f "$f.part"; falhas=1; continue
+  fi
+  mv "$f.part" "$f"
+  # não briga com outra instalação em andamento (simba-update, loja...)
+  for _ in $(seq 60); do [ -e /var/lib/pacman/db.lck ] || break; sleep 10; done
+  if pacman -U --noconfirm --needed "$f" >/dev/null; then log "$app $ver instalado"; else log "$app: pacman falhou"; falhas=1; fi
+  find "$CACHE" -name "$app-*.pkg.tar.zst" ! -name "$(basename "$f")" -delete
+done
+exit $falhas

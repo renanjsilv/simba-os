@@ -1,0 +1,33 @@
+#!/bin/bash
+# atalho-area <desktop-id>: cria na Área de trabalho um atalho para o app
+# (cópia do .desktop dele). Usado pelo botão direito do menu Super+Espaço.
+set -euo pipefail
+
+id="${1%.desktop}"
+[[ -n $id ]] || { echo "uso: atalho-area <desktop-id>" >&2; exit 1; }
+
+origem=""
+IFS=: read -ra dirs <<<"${XDG_DATA_HOME:-$HOME/.local/share}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+for d in "${dirs[@]}"; do
+  # desktop-id com "-" pode ser subpasta (ex.: kde4-app → kde4/app.desktop)
+  for f in "$d/applications/$id.desktop" "$d/applications/${id//-//}.desktop"; do
+    [[ -f $f ]] && { origem=$f; break 2; }
+  done
+done
+[[ -n $origem ]] || { notify-send -a "$(simba-t "Área de trabalho")" "$(simba-t "Atalho não criado")" "$(simba-t "App não encontrado: %1" "$id")"; exit 1; }
+
+area=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")
+mkdir -p "$area"
+nome=$(sed -n 's/^Name=//p' "$origem" | head -1)
+nome=${nome:-$id}
+nome=${nome//\//-}
+
+destino="$area/$nome.desktop"
+n=2
+while [[ -e $destino ]]; do destino="$area/$nome ($n).desktop"; n=$((n + 1)); done
+
+cp "$origem" "$destino"
+chmod +x "$destino"
+# Nautilus/GNOME só executam atalhos marcados como confiáveis.
+gio set "$destino" metadata::trusted true 2>/dev/null || true
+notify-send -a "$(simba-t "Área de trabalho")" "$(simba-t "Atalho criado")" "$(simba-t "%1 está na Área de trabalho" "$nome")"

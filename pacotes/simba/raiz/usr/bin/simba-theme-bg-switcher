@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# simba:summary=Open the Simba background switcher
+# simba:group=theme
+# simba:name=bg-switcher
+# simba:aliases=simba background
+
+theme_name=$(cat "$HOME/.local/state/simba/current/theme.name" 2>/dev/null)
+current_background=$(readlink -f "$HOME/.local/state/simba/current/background" 2>/dev/null)
+
+simba-menu-images \
+  --selected "$current_background" \
+  "$HOME/.local/state/simba/current/theme/backgrounds" \
+  "$HOME/.config/simba/backgrounds/$theme_name"

@@ -1,0 +1,18 @@
+#!/bin/bash
+# simba-mostrar-gato — o gato Simba (~/.config/simba/branding/about.txt) no topo do
+# terminal, na cor de destaque do tema. Substitui o logo do Simba (simba-show-logo)
+# nos terminais do Simba OS, como o de "Atualizar tudo".
+clear
+arte="$HOME/.config/simba/branding/about.txt"
+[ -f "$arte" ] || exit 0
+cor=$(simba-theme-color accent 2>/dev/null)
+if [[ $cor =~ ^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$ ]]; then
+  printf '\e[38;2;%d;%d;%dm' "0x${BASH_REMATCH[1]}" "0x${BASH_REMATCH[2]}" "0x${BASH_REMATCH[3]}"
+fi
+# centraliza na largura do terminal
+larg=$(tput cols 2>/dev/null || echo 80)
+arteLarg=$(awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }' "$arte")
+pad=$(( (larg - arteLarg) / 2 )); (( pad < 0 )) && pad=0
+echo
+while IFS= read -r l; do printf '%*s%s\n' "$pad" '' "$l"; done <"$arte"
+printf '\e[0m\n'

@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# simba:summary=Edit, set, or reset screensaver branding
+# simba:group=branding
+# simba:name=screensaver
+# simba:args=<image|text|reset>
+# simba:examples=simba branding screensaver image | simba branding screensaver text | simba branding screensaver reset
+
+set -euo pipefail
+
+case "${1:-}" in
+image)
+  image=$(simba-file-select --title "Pick PNG or SVG for screensaver" --extensions "png svg")
+  if simba-transcode-ascii "$image" ~/.config/simba/branding/screensaver.txt; then
+    simba-launch-screensaver force >/dev/null 2>&1
+  fi
+  ;;
+text)
+  simba-launch-editor ~/.config/simba/branding/screensaver.txt >/dev/null 2>&1 && simba-launch-screensaver force >/dev/null 2>&1
+  ;;
+reset)
+  cp "$SIMBA_PATH/logo.txt" ~/.config/simba/branding/screensaver.txt && simba-launch-screensaver force >/dev/null 2>&1
+  ;;
+*)
+  echo "Usage: simba-branding-screensaver <image|text|reset>" >&2
+  exit 1
+  ;;
+esac

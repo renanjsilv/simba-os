@@ -1,0 +1,3 @@
+#!/bin/bash
+# Transcrever (GUI). A versão antiga de terminal continua em ~/.local/share/whisper-venv/transcrever.py
+exec /usr/bin/python3 /usr/share/simba-apps/transcrever/app.py "$@"

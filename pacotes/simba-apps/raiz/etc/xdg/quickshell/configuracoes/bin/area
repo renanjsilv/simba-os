@@ -1,0 +1,459 @@
+#!/usr/bin/env python3
+"""Desktop folder operations for the Configurações desktop layer.
+
+    area listar <pasta> [--ocultos]      JSON list of the folder's items
+    area info <caminho>                  JSON properties of one item
+    area abrir <caminho>                 open (.desktop files are launched)
+    area colar <pasta>                   paste the clipboard (files, image or text)
+    area colar-atalho <pasta>            paste copied files as links
+    area copiar <caminho>...             put files on the clipboard (copy)
+    area recortar <caminho>...           put files on the clipboard (cut)
+    area nova-pasta <pasta>              create "Nova pasta", print its path
+    area novo-texto <pasta>              create "Novo documento de texto.txt"
+    area renomear <caminho> <novo nome>  rename, print the new path
+    area lixeira <caminho>...            move to the trash (gio trash)
+    area soltar <pasta> <uri>...         copy dropped files into the folder
+
+Every command prints one JSON object/array; errors are {"erro": "..."} with a
+non-zero exit. Clipboard formats are the ones Nautilus reads and writes:
+text/uri-list for copy and x-special/gnome-copied-files ("cut\\n<uri>...") for cut.
+"""
+import configparser
+import datetime
+import json
+import mimetypes
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.parse
+import sys as _sys, os as _os  # noqa: E401
+_sys.path.insert(0, _os.path.expanduser("/usr/share/simba-apps/idiomas"))
+from simba_i18n import t as _t  # noqa: E402  (traduções: /usr/share/simba-apps/idiomas)
+
+# Gio/Gtk are imported lazily: importing them costs ~1 s on this machine and
+# listing the desktop must feel instant.
+Gio = None
+
+
+def carregar_gio():
+    global Gio
+    if Gio is None:
+        try:
+            import gi
+            gi.require_version("Gio", "2.0")
+            from gi.repository import Gio as _Gio
+            Gio = _Gio
+        except Exception:
+            Gio = False
+    return Gio or None
+
+
+PASTAS_ESPECIAIS = {
+    "desktop": "user-desktop", "área de trabalho": "user-desktop",
+    "documents": "folder-documents", "documentos": "folder-documents",
+    "downloads": "folder-download", "transferências": "folder-download",
+    "music": "folder-music", "músicas": "folder-music", "música": "folder-music",
+    "pictures": "folder-pictures", "imagens": "folder-pictures",
+    "videos": "folder-videos", "vídeos": "folder-videos",
+    "templates": "folder-templates", "modelos": "folder-templates",
+    "public": "folder-publicshare", "público": "folder-publicshare",
+}
+
+
+def saida(obj, code=0):
+    print(json.dumps(obj, ensure_ascii=False))
+    sys.exit(code)
+
+
+def erro(msg):
+    saida({"erro": msg}, 1)
+
+
+def uri(p):
+    return "file://" + urllib.parse.quote(os.path.abspath(p))
+
+
+def de_uri(u):
+    u = u.strip()
+    if u.startswith("file://"):
+        return urllib.parse.unquote(u[7:])
+    if u.startswith("/"):
+        return u
+    return None
+
+
+def nome_livre(pasta, nome):
+    alvo = os.path.join(pasta, nome)
+    if not os.path.lexists(alvo):
+        return alvo
+    base, ext = os.path.splitext(nome)
+    if os.path.isdir(alvo) or nome.startswith("."):
+        base, ext = nome, ""
+    n = 2
+    while True:
+        alvo = os.path.join(pasta, f"{base} ({n}){ext}")
+        if not os.path.lexists(alvo):
+            return alvo
+        n += 1
+
+
+def entrada_desktop(p):
+    cp = configparser.ConfigParser(interpolation=None, strict=False)
+    try:
+        cp.read(p, encoding="utf-8")
+        e = cp["Desktop Entry"]
+    except Exception:
+        return None
+    lang = os.environ.get("LANG", "pt_BR").split(".")[0]
+    nome = e.get(f"Name[{lang}]") or e.get(f"Name[{lang.split('_')[0]}]") or e.get("Name")
+    return {"nome": nome, "icone": e.get("Icon", ""), "tipo": e.get("Type", "Application")}
+
+
+def descrever(p, com_tamanho=True):
+    st = os.lstat(p)
+    pasta = os.path.isdir(p)
+    nome = os.path.basename(p)
+    item = {
+        "nome": nome,
+        "caminho": p,
+        "uri": uri(p),
+        "pasta": pasta,
+        "link": os.path.islink(p),
+        "tamanho": 0 if pasta else st.st_size,
+        "mtime": int(st.st_mtime),
+        "mime": "inode/directory" if pasta else (mimetypes.guess_type(nome)[0] or "application/octet-stream"),
+        "icones": [],
+        "rotulo": nome,
+        "imagem": "",
+        "atalho": False,
+    }
+    if pasta:
+        esp = PASTAS_ESPECIAIS.get(nome.lower())
+        if os.path.realpath(p) == os.path.realpath(os.path.expanduser("~")):
+            esp = "user-home"   # o atalho "Renan" da área de trabalho
+        item["icones"] = ([esp] if esp else []) + ["folder"]
+    else:
+        m = item["mime"]
+        if nome.endswith(".desktop"):
+            m = item["mime"] = "application/x-desktop"
+        elif m == "application/octet-stream" and os.access(p, os.X_OK):
+            m = item["mime"] = "application/x-executable"
+        topo = m.split("/")[0]
+        item["icones"] = [m.replace("/", "-"), topo + "-x-generic"]
+    if nome.endswith(".desktop") and not pasta:
+        d = entrada_desktop(p)
+        if d:
+            item["atalho"] = True
+            if d["nome"]:
+                item["rotulo"] = d["nome"]
+            if d["icone"]:
+                item["icones"] = [d["icone"]] + item["icones"]
+    if item["mime"].startswith("image/") and item["tamanho"] < 40 * 1024 * 1024:
+        item["imagem"] = p
+    if not pasta:
+        item["icones"] += ["text-x-generic", "application-x-executable"]
+    return item
+
+
+for _ext, _tipo in ((".log", "text/x-log"), (".md", "text/markdown"), (".lua", "text/x-lua"), (".qml", "text/x-qml"),
+                   (".toml", "text/x-toml"), (".jsonc", "application/json"), (".conf", "text/plain"), (".sh", "application/x-shellscript"),
+                   (".AppImage", "application/vnd.appimage"), (".iso", "application/x-cd-image"), (".webp", "image/webp")):
+    mimetypes.add_type(_tipo, _ext)
+
+CACHE = os.path.expanduser("~/.cache/configuracoes/icones.json")
+
+
+def tema_icones():
+    try:
+        r = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "icon-theme"], capture_output=True, text=True, timeout=2)
+        return r.stdout.strip().strip("'")
+    except Exception:
+        return ""
+
+
+def resolver_icones(itens):
+    """Turn icon names into files the way GTK (and so Nautilus) does: the
+    current icon theme, its parents, hicolor and Adwaita. Results are cached
+    per theme so GTK is only loaded for names never seen before."""
+    tema = tema_icones()
+    try:
+        with open(CACHE, encoding="utf-8") as f:
+            cache = json.load(f)
+    except Exception:
+        cache = {}
+    if cache.get("__tema") != tema:
+        cache = {"__tema": tema}
+    faltam = {n for it in itens for n in it["icones"] if n and not n.startswith("/") and n not in cache}
+    if faltam:
+        try:
+            import gi
+            gi.require_version("Gtk", "3.0")
+            from gi.repository import Gtk
+            t = Gtk.IconTheme.get_default()
+            for n in faltam:
+                info = t.lookup_icon(n, 128, 0)
+                cache[n] = info.get_filename() if info else ""
+        except Exception:
+            for n in faltam:
+                cache[n] = ""
+        try:
+            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+            with open(CACHE + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(cache, f)
+            os.replace(CACHE + ".tmp", CACHE)
+        except OSError:
+            pass
+    for it in itens:
+        it["arquivoIcone"] = ""
+        for n in it["icones"]:
+            if n.startswith("/"):
+                if os.path.isfile(n):
+                    it["arquivoIcone"] = n
+                    break
+            elif cache.get(n):
+                it["arquivoIcone"] = cache[n]
+                break
+
+
+def listar(pasta, ocultos):
+    if not os.path.isdir(pasta):
+        erro(_t("pasta não encontrada: ") + pasta)
+    itens = []
+    for nome in os.listdir(pasta):
+        if not ocultos and nome.startswith("."):
+            continue
+        p = os.path.join(pasta, nome)
+        try:
+            itens.append(descrever(p))
+        except OSError:
+            continue
+    resolver_icones(itens)
+    saida(itens)
+
+
+def tamanho_pasta(p, limite=2.0):
+    total, n, ini = 0, 0, time.time()
+    for raiz, dirs, arqs in os.walk(p):
+        for a in arqs:
+            try:
+                total += os.lstat(os.path.join(raiz, a)).st_size
+                n += 1
+            except OSError:
+                pass
+        if time.time() - ini > limite:
+            return total, n, True
+    return total, n, False
+
+
+def info(p):
+    if not os.path.lexists(p):
+        erro(_t("não existe mais"))
+    item = descrever(p)
+    st = os.lstat(p)
+    item["local"] = os.path.dirname(p)
+    item["criado"] = int(getattr(st, "st_birthtime", st.st_ctime))
+    item["acesso"] = int(st.st_atime)
+    item["permissoes"] = oct(st.st_mode & 0o777)[2:]
+    item["dono"] = st.st_uid
+    if os.path.islink(p):
+        item["destino"] = os.readlink(p)
+    if item["pasta"]:
+        t, n, parcial = tamanho_pasta(p)
+        item["tamanho"] = t
+        item["arquivos"] = n
+        item["parcial"] = parcial
+    g = carregar_gio()
+    item["tipoDescricao"] = item["mime"]
+    if g:
+        try:
+            info = g.File.new_for_path(p).query_info("standard::content-type", 0, None)
+            item["mime"] = info.get_content_type() or item["mime"]
+            item["tipoDescricao"] = {"Folder": _t("Pasta"), "plain text document": _t("Documento de texto")}.get(g.content_type_get_description(item["mime"]), g.content_type_get_description(item["mime"]))
+        except Exception:
+            pass
+    saida(item)
+
+
+def abrir(p):
+    if p.endswith(".desktop") and os.path.isfile(p):
+        subprocess.Popen(["gio", "launch", p], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(["xdg-open", p], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    saida({"ok": True})
+
+
+def ler_area_transferencia():
+    try:
+        tipos = subprocess.run(["wl-paste", "--list-types"], capture_output=True, text=True, timeout=3).stdout.split()
+    except Exception:
+        return [], None, None
+    def pegar(t):
+        try:
+            return subprocess.run(["wl-paste", "--no-newline", "--type", t], capture_output=True, timeout=5).stdout
+        except Exception:
+            return b""
+    if "x-special/gnome-copied-files" in tipos:
+        linhas = pegar("x-special/gnome-copied-files").decode("utf-8", "replace").splitlines()
+        if linhas:
+            acao = linhas[0].strip()
+            arquivos = [x for x in (de_uri(l) for l in linhas[1:]) if x]
+            if arquivos:
+                return arquivos, "mover" if acao == "cut" else "copiar", None
+    if "text/uri-list" in tipos:
+        arquivos = [x for x in (de_uri(l) for l in pegar("text/uri-list").decode("utf-8", "replace").splitlines() if not l.startswith("#")) if x]
+        if arquivos:
+            return arquivos, "copiar", None
+    for t in ("image/png", "image/jpeg", "image/webp"):
+        if t in tipos:
+            return [], "imagem", (t, pegar(t))
+    for t in ("text/plain;charset=utf-8", "text/plain", "UTF8_STRING"):
+        if t in tipos:
+            txt = pegar(t)
+            if txt.strip():
+                # A single absolute path copied as text pastes the file itself.
+                s = txt.decode("utf-8", "replace").strip()
+                if "\n" not in s and s.startswith("/") and os.path.exists(s):
+                    return [s], "copiar", None
+                return [], "texto", ("text/plain", txt)
+    return [], None, None
+
+
+def copiar_item(origem, pasta, mover=False):
+    if os.path.abspath(os.path.dirname(origem)) == os.path.abspath(pasta) and mover:
+        return origem
+    destino = nome_livre(pasta, os.path.basename(origem.rstrip("/")))
+    if mover:
+        shutil.move(origem, destino)
+    elif os.path.isdir(origem) and not os.path.islink(origem):
+        shutil.copytree(origem, destino, symlinks=True)
+    else:
+        shutil.copy2(origem, destino, follow_symlinks=False)
+    return destino
+
+
+def colar(pasta, atalho=False):
+    arquivos, acao, dados = ler_area_transferencia()
+    agora = datetime.datetime.now().strftime("%Y-%m-%d %H.%M.%S")
+    if acao is None:
+        erro(_t("A área de transferência está vazia"))
+    criados = []
+    if acao in ("copiar", "mover"):
+        for a in arquivos:
+            if not os.path.lexists(a):
+                continue
+            if atalho:
+                destino = nome_livre(pasta, os.path.basename(a.rstrip("/")))
+                os.symlink(a, destino)
+                criados.append(destino)
+            else:
+                criados.append(copiar_item(a, pasta, mover=(acao == "mover")))
+        if acao == "mover" and not atalho:
+            subprocess.run(["wl-copy", "--clear"], timeout=3)
+        if not criados:
+            erro(_t("Os arquivos copiados não existem mais"))
+        saida({"ok": True, "itens": criados, "acao": "atalho" if atalho else acao})
+    if atalho:
+        erro(_t("Copie arquivos para colar um atalho"))
+    if acao == "imagem":
+        t, b = dados
+        ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[t]
+        destino = nome_livre(pasta, _t("Imagem colada %1%2", agora, ext))
+        with open(destino, "wb") as f:
+            f.write(b)
+        saida({"ok": True, "itens": [destino], "acao": "imagem"})
+    if acao == "texto":
+        destino = nome_livre(pasta, _t("Texto colado %1.txt", agora))
+        with open(destino, "wb") as f:
+            f.write(dados[1])
+        saida({"ok": True, "itens": [destino], "acao": "texto"})
+
+
+def para_area(caminhos, cortar):
+    uris = [uri(c) for c in caminhos if os.path.lexists(c)]
+    if not uris:
+        erro(_t("nada para copiar"))
+    if cortar:
+        corpo, tipo = "cut\n" + "\n".join(uris), "x-special/gnome-copied-files"
+    else:
+        corpo, tipo = "\r\n".join(uris) + "\r\n", "text/uri-list"
+    subprocess.run(["wl-copy", "--type", tipo], input=corpo.encode(), timeout=5)
+    saida({"ok": True, "n": len(uris)})
+
+
+def renomear(p, novo):
+    novo = novo.strip()
+    if not novo or novo in (".", "..") or "/" in novo or "\0" in novo:
+        erro(_t("Nome inválido"))
+    destino = os.path.join(os.path.dirname(p), novo)
+    if destino == p:
+        saida({"ok": True, "caminho": p})
+    if os.path.lexists(destino):
+        erro(_t("Já existe um item chamado “%1”", novo))
+    os.rename(p, destino)
+    saida({"ok": True, "caminho": destino})
+
+
+def main():
+    a = sys.argv[1:]
+    if not a:
+        print(__doc__)
+        return 1
+    cmd, resto = a[0], a[1:]
+    try:
+        if cmd == "listar":
+            listar(resto[0], "--ocultos" in resto)
+        elif cmd == "info":
+            info(resto[0])
+        elif cmd == "abrir":
+            abrir(resto[0])
+        elif cmd == "colar":
+            colar(resto[0])
+        elif cmd == "colar-atalho":
+            colar(resto[0], atalho=True)
+        elif cmd in ("copiar", "recortar"):
+            para_area(resto, cmd == "recortar")
+        elif cmd == "nova-pasta":
+            d = nome_livre(resto[0], _t("Nova pasta"))
+            os.mkdir(d)
+            saida({"ok": True, "caminho": d})
+        elif cmd == "novo-texto":
+            d = nome_livre(resto[0], _t("Novo documento de texto.txt"))
+            open(d, "x").close()
+            saida({"ok": True, "caminho": d})
+        elif cmd == "renomear":
+            renomear(resto[0], resto[1])
+        elif cmd == "lixeira":
+            falhas = []
+            casa = os.path.realpath(os.path.expanduser("~"))
+            for c in resto:
+                # Um atalho para a pasta pessoal vai para a lixeira; a pasta em si, nunca.
+                if not os.path.islink(c) and os.path.realpath(c) in (casa, "/"):
+                    falhas.append(_t("A pasta pessoal não pode ir para a lixeira"))
+                    continue
+                r = subprocess.run(["gio", "trash", "--", c], capture_output=True, text=True)
+                if r.returncode != 0:
+                    falhas.append(r.stderr.strip())
+            if falhas:
+                erro("; ".join(falhas))
+            saida({"ok": True, "n": len(resto)})
+        elif cmd == "soltar":
+            pasta, uris = resto[0], resto[1:]
+            criados = []
+            for u in uris:
+                o = de_uri(u)
+                if o and os.path.lexists(o) and os.path.abspath(os.path.dirname(o)) != os.path.abspath(pasta):
+                    criados.append(copiar_item(o, pasta))
+            saida({"ok": True, "itens": criados})
+        else:
+            erro(_t("comando desconhecido: ") + cmd)
+    except SystemExit:
+        raise
+    except Exception as e:
+        erro(str(e))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,107 @@
+#!/bin/bash
+# simba-atualizar — "Atualizar tudo" do Simba OS: sistema (pacman + AUR), apps da Loja
+# (Flatpak), a suíte de escritório Craft e o firmware (fwupd), num lugar só.
+#
+#   simba-atualizar verificar   JSON {"sistema":n,"aur":n,"loja":n,"craft":n,"firmware":n,"total":n,"quando":epoch}
+#                               (também grava em ~/.cache/simba/atualizacoes.json para a barra)
+#   simba-atualizar estado      o último resultado gravado (sem consultar a internet)
+#   simba-atualizar aplicar     abre o terminal e atualiza tudo, em ordem, mostrando o progresso
+#   simba-atualizar avisar      verifica e, se houver novidade, mostra uma notificação
+set -uo pipefail
+CACHE="$HOME/.cache/simba/atualizacoes.json"
+IGNORADAS="$HOME/.config/simba/atualizacoes-ignoradas.json"   # {"pacote": "versão ignorada"}
+mkdir -p "${CACHE%/*}"
+
+conta() { grep -c . || true; }
+
+verificar() {
+  local sis aur loja craft fw total
+  sis=$(timeout 90 checkupdates 2>/dev/null | conta)
+  # versões do AUR que você mandou ignorar (Configurações › Sistema) não contam
+  aur=$(timeout 60 yay -Qua 2>/dev/null | awk -v ig="$(jq -r 'to_entries[] | "\(.key) \(.value)"' "$IGNORADAS" 2>/dev/null)" '
+    BEGIN { n = split(ig, l, "\n"); for (i = 1; i <= n; i++) { split(l[i], p, " "); x[p[1]] = p[2] } }
+    { if (!($1 in x) || x[$1] != $4) print }' | conta)
+  loja=$(timeout 60 flatpak remote-ls --updates --system --columns=application 2>/dev/null | conta)
+  craft=$(timeout 60 /usr/bin/simba-craft-atualizar --verificar 2>/dev/null | grep -c '→' || true)
+  fw=0
+  if command -v fwupdmgr >/dev/null; then
+    fw=$(timeout 60 fwupdmgr get-updates --json --no-unreported-check 2>/dev/null | jq '[.Devices[]?.Releases[]?] | length' 2>/dev/null || echo 0)
+    [[ $fw =~ ^[0-9]+$ ]] || fw=0
+  fi
+  total=$((sis + aur + loja + craft + fw))
+  printf '{"sistema":%d,"aur":%d,"loja":%d,"craft":%d,"firmware":%d,"total":%d,"quando":%d}\n' \
+    "$sis" "$aur" "$loja" "$craft" "$fw" "$total" "$(date +%s)" | tee "$CACHE.tmp"
+  mv "$CACHE.tmp" "$CACHE"
+  # changelog do que está para atualizar (Configurações › Sistema), em segundo plano
+  setsid "/usr/bin/simba-novidades" >/dev/null 2>&1 < /dev/null &
+}
+
+aplicar() {
+  # roda dentro do terminal flutuante, com o gato Simba no topo (no lugar do logo do Simba)
+  if [[ ${1:-} != --dentro ]]; then
+    source simba-restart-gum 2>/dev/null
+    exec setsid uwsm-app -- xdg-terminal-exec --app-id=org.simba.terminal --title="$(simba-t "Atualizar tudo")" \
+      -e bash -c "/usr/bin/simba-mostrar-gato; $0 aplicar --dentro"
+  fi
+  INICIO=$(date '+%Y-%m-%d %H:%M:%S')
+  titulo() { printf '\n\e[1;36m━━ %s\e[0m\n\n' "$*"; }
+  titulo "1/4  $(simba-t "Sistema e aplicativos instalados (pacman + AUR)")"
+  simba-update || simba-t "A atualização do sistema não terminou — o resto continua."; echo
+  titulo "2/4  $(simba-t "Apps da Loja")"
+  flatpak update --system -y --noninteractive && flatpak uninstall --system -y --noninteractive --unused >/dev/null 2>&1
+  titulo "3/4  $(simba-t "Escritório (WordCraft, GridCraft, DeckCraft, PdfCraft)")"
+  if /usr/bin/simba-craft-atualizar --verificar 2>/dev/null | grep -q '→'; then
+    pkexec /usr/bin/simba-craft-atualizar
+  else
+    simba-t "Já está tudo em dia."; echo
+  fi
+  titulo "4/4  $(simba-t "Firmware (BIOS e dispositivos)")"
+  if command -v fwupdmgr >/dev/null; then
+    fwupdmgr refresh >/dev/null 2>&1 || true
+    fwupdmgr update -y --no-reboot-check 2>&1 | grep -v '^$' || true
+  else
+    simba-t "Atualizador de firmware não instalado."; echo
+  fi
+  verificar >/dev/null
+  titulo "$(simba-t "Conferindo o sistema")"
+  if ! simba-saude --desde "$INICIO" --avisar; then
+    echo
+    simba-t "A atualização terminou, mas deixou as pendências acima."; echo
+  fi
+  titulo "$(simba-t "Pronto! Tudo atualizado.")"
+  notify-send -a "Simba OS" -i system-software-update "$(simba-t "Tudo atualizado")" "$(simba-t "Sistema, Loja, Escritório e firmware estão em dia.")" 2>/dev/null
+  read -rsn1 -p "$(simba-t "Pressione qualquer tecla para fechar.")" || true
+}
+
+avisar() {
+  local j total antes
+  antes=$(jq -r '.total // 0' "$CACHE" 2>/dev/null || echo 0)
+  j=$(verificar)
+  total=$(jq -r .total <<<"$j")
+  ((total > 0)) || return 0
+  ((total == antes)) && return 0   # já avisado destas
+  local acao
+  acao=$(notify-send -a "Simba OS" -i system-software-update -A atualizar="$(simba-t "Atualizar agora")" \
+    "$(simba-t "Atualizações disponíveis")" "$(simba-t "%1 atualização(ões): sistema, Loja e Escritório num clique." "$total")" 2>/dev/null)
+  if [[ $acao == atualizar ]]; then aplicar; fi
+  return 0
+}
+
+# ignorar <pacote> <versão> / designorar <pacote>: só para o AUR (no Arch oficial seria atualização parcial)
+ignorar() {
+  [[ -s $IGNORADAS ]] || echo '{}' >"$IGNORADAS"
+  if [[ $1 == ignorar ]]; then jq --arg p "$2" --arg v "$3" '.[$p] = $v' "$IGNORADAS" >"$IGNORADAS.tmp"
+  else jq --arg p "$2" 'del(.[$p])' "$IGNORADAS" >"$IGNORADAS.tmp"; fi
+  mv "$IGNORADAS.tmp" "$IGNORADAS"
+  verificar >/dev/null
+}
+
+case "${1:-}" in
+  verificar) verificar ;;
+  estado) cat "$CACHE" 2>/dev/null || echo '{"total":0}' ;;
+  aplicar) aplicar "${2:-}" ;;
+  avisar) avisar ;;
+  ignorar) ignorar ignorar "${2:?pacote}" "${3:?versão}" ;;
+  designorar) ignorar designorar "${2:?pacote}" ;;
+  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

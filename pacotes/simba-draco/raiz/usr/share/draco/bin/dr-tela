@@ -1,0 +1,57 @@
+#!/bin/bash
+# dr-tela: what's on the screen / in the clipboard, as cheaply as possible.
+#
+#   dr-tela texto [janela]        OCR of the screen (or just the active window) as text: cheap in
+#                                 tokens; use it to read, translate or summarize what's on screen
+#   dr-tela ver [janela] [--small]  screenshot PNG path (read it only when you need to SEE: images, layout)
+#   dr-tela janela                the active window: app, title
+#   dr-tela copiado               clipboard: the text, or the path of the image saved from it
+#   dr-tela copiar "<texto>"      put text in the clipboard
+#
+# The active window is the one Renan was using (Draco' overlay never takes focus).
+
+RUN="${XDG_RUNTIME_DIR:-/tmp}/draco"
+export TESSDATA_PREFIX="/usr/share/draco/tessdata"
+mkdir -p "$RUN"
+
+geometry() { # active window or whole screen, as a grim -g argument (empty = whole screen)
+  [[ $1 == janela ]] && hyprctl activewindow -j | jq -r '"\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"'
+}
+
+shot() { # shot <out> <janela?> <scale>
+  local g
+  g=$(geometry "$2")
+  if [[ -n $g ]]; then grim -s "$3" -g "$g" "$1"; else grim -s "$3" "$1"; fi
+}
+
+case $1 in
+  texto)
+    shot "$RUN/tela.png" "$2" 1 || exit 1 # scale 1: same text as 1.5, ~2x faster (~5s)
+    tesseract "$RUN/tela.png" - --psm 3 -l por 2>/dev/null | grep -v '^\s*$'
+    ;;
+  ver)
+    out="$RUN/tela-$(date +%H%M%S%N).png"
+    scale=1; [[ " $* " == *" --small "* ]] && scale=0.5
+    w=""; [[ " $* " == *" janela "* ]] && w=janela
+    shot "$out" "$w" "$scale" && echo "$out"
+    ;;
+  janela)
+    hyprctl activewindow -j | jq -r '"App: \(.class)\nTítulo: \(.title)"'
+    ;;
+  copiado)
+    type=$(wl-paste -l 2>/dev/null | head -1)
+    if [[ -z $type ]]; then
+      echo "A área de transferência está vazia."
+    elif [[ $type == image/* ]]; then
+      out="$RUN/copiado.${type#image/}"
+      wl-paste -t "$type" >"$out" && echo "Imagem copiada salva em: $out"
+    else
+      wl-paste -n | head -c 20000
+    fi
+    ;;
+  copiar)
+    [[ -n $2 ]] || { echo "uso: dr-tela copiar \"<texto>\"" >&2; exit 2; }
+    printf '%s' "${*:2}" | wl-copy && echo "Copiado."
+    ;;
+  *) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

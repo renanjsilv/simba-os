@@ -1,0 +1,97 @@
+#!/bin/bash
+# dr-win: fast Hyprland window helpers for Draco. <pattern> is a case-insensitive
+# regex matched against the window class, then the title.
+#
+#   dr-win list                     open windows: address | class | workspace | title
+#   dr-win find <pattern>           print the address of the first match (exit 1 if none)
+#   dr-win wait <pattern> [secs]    poll until a window appears (default 15s), print address
+#   dr-win focus <pattern>          bring it to the current workspace if hidden, focus it
+#   dr-win hide <pattern>           send it to the background (special:scratchpad)
+#   dr-win close <pattern>          close it
+#   dr-win max <pattern>            toggle maximized
+#   dr-win shot [pattern] [--small] screenshot that window (or the whole screen); prints the PNG path
+#   dr-win app <pattern> <url>      open <url> as an Simba web app, replacing the open window of
+#                                   that app (web apps have no address bar to navigate in); prints address
+
+set -o pipefail
+
+find_window() {
+  hyprctl clients -j | jq -r --arg p "$1" '
+    [.[] | select((.class | test($p; "i")) or (.title | test($p; "i")))]
+    | sort_by(.focusHistoryID) | .[0].address // empty'
+}
+
+need() { [[ -n $1 ]] || { echo "uso: dr-win $2 <padrão>" >&2; exit 2; }; }
+
+dispatch() { hyprctl dispatch "$1" >/dev/null; }
+
+case $1 in
+  list)
+    hyprctl clients -j | jq -r '.[] | "\(.address) | \(.class) | \(.workspace.name) | \(.title)"'
+    ;;
+  find)
+    need "$2" find
+    a=$(find_window "$2"); [[ -n $a ]] && echo "$a"
+    ;;
+  wait)
+    need "$2" wait
+    end=$(($(date +%s%N) + ${3:-15} * 1000000000))
+    while (($(date +%s%N) < end)); do
+      a=$(find_window "$2") && [[ -n $a ]] && { echo "$a"; exit 0; }
+      sleep 0.1
+    done
+    echo "janela '$2' não apareceu" >&2; exit 1
+    ;;
+  focus)
+    need "$2" focus
+    a=$(find_window "$2"); [[ -n $a ]] || { echo "nenhuma janela '$2'" >&2; exit 1; }
+    ws=$(hyprctl clients -j | jq -r --arg a "$a" '.[] | select(.address == $a) | .workspace.name')
+    if [[ $ws == special:* ]]; then
+      cur=$(hyprctl activeworkspace -j | jq -r .id)
+      dispatch "hl.dsp.window.move({ workspace = \"$cur\", window = \"address:$a\" })"
+    fi
+    dispatch "hl.dsp.focus({ window = \"address:$a\" })"
+    echo "$a"
+    ;;
+  hide)
+    need "$2" hide
+    a=$(find_window "$2"); [[ -n $a ]] || { echo "nenhuma janela '$2'" >&2; exit 1; }
+    dispatch "hl.dsp.window.move({ workspace = \"special:scratchpad\", follow = false, window = \"address:$a\" })"
+    echo "$a em segundo plano"
+    ;;
+  close)
+    need "$2" close
+    a=$(find_window "$2"); [[ -n $a ]] || { echo "nenhuma janela '$2'" >&2; exit 1; }
+    dispatch "hl.dsp.window.close({ window = \"address:$a\" })"
+    ;;
+  max)
+    need "$2" max
+    "$0" focus "$2" >/dev/null || exit 1
+    dispatch 'hl.dsp.window.fullscreen({ mode = "maximized" })'
+    ;;
+  app)
+    [[ -n $2 && -n $3 ]] || { echo "uso: dr-win app <padrão> <url>" >&2; exit 2; }
+    old=$(find_window "$2")
+    if [[ -n $old ]]; then
+      dispatch "hl.dsp.window.close({ window = \"address:$old\" })"
+      for _ in $(seq 1 30); do [[ -z $(find_window "$2") ]] && break; sleep 0.1; done
+    fi
+    simba-launch-webapp "$3" >/dev/null 2>&1 &
+    "$0" wait "$2" 15
+    ;;
+  shot)
+    out="${XDG_RUNTIME_DIR:-/tmp}/draco/shot-$(date +%H%M%S%N).png"
+    scale=1; [[ $* == *--small* ]] && scale=0.5
+    if [[ -n $2 && $2 != --small ]]; then
+      a=$(find_window "$2"); [[ -n $a ]] || { echo "nenhuma janela '$2'" >&2; exit 1; }
+      g=$(hyprctl clients -j | jq -r --arg a "$a" '.[] | select(.address == $a) | "\(.at[0]),\(.at[1]) \(.size[0])x\(.size[1])"')
+      grim -s "$scale" -g "$g" "$out"
+    else
+      grim -s "$scale" "$out"
+    fi && echo "$out"
+    ;;
+  *)
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac

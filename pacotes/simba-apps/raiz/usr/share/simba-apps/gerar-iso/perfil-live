@@ -1,0 +1,149 @@
+#!/bin/bash
+# perfil-live — transforma o perfil releng do archiso no pendrive de instalação da marca.
+#   perfil-live <perfil> <nome do sistema> <pacote da marca> <usuário dono dos temas>
+#
+# O pendrive liga direto (sem o menu do Arch: segure Espaço para vê-lo), mostra o logo
+# da marca na tela de inicialização (Plymouth) e abre o instalador sozinho no tty1, sem
+# login nem texto de boot. O instalador vem de /clone/instalar-clone na ISO (dá para
+# trocá-lo sem refazer o sistema live); o embutido é a reserva.
+set -euo pipefail
+PROFILE=${1:?perfil} NOME=${2:?nome} MARCA=${3:?pacote da marca} DONO=${4:-}
+SRC="$(dirname "$(readlink -f "$0")")"
+A="$PROFILE/airootfs"
+SLUG=$(printf '%s' "$NOME" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
+SLUG=${SLUG:-sistema}
+PARAMS="copytoram=n quiet splash loglevel=3 rd.udev.log_level=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0"
+# shellcheck disable=SC1091
+. "$MARCA/marca.env"
+
+# ---------------------------------------------------------------- pacotes
+printf '%s\n' btrfs-progs cryptsetup squashfs-tools arch-install-scripts dosfstools \
+  gptfdisk efibootmgr tpm2-tss plymouth gum terminus-font kbd >> "$PROFILE/packages.x86_64"
+sort -u -o "$PROFILE/packages.x86_64" "$PROFILE/packages.x86_64"
+
+# ---------------------------------------------------------------- nome
+sed -i -e "s|^iso_name=.*|iso_name=\"$SLUG\"|" \
+  -e "s|^iso_label=.*|iso_label=\"$(printf '%s' "$SLUG" | tr 'a-z-' 'A-Z_' | cut -c1-20)_\$(date --date=\"@\${SOURCE_DATE_EPOCH:-\$(date +%s)}\" +%Y%m)\"|" \
+  -e "s|^iso_publisher=.*|iso_publisher=\"$NOME\"|" \
+  -e "s|^iso_application=.*|iso_application=\"Instalador do $NOME\"|" "$PROFILE/profiledef.sh"
+cat >> "$PROFILE/profiledef.sh" <<'EOF'
+file_permissions["/usr/local/bin/instalar-clone"]="0:0:755"
+file_permissions["/usr/local/bin/instalar-clone-embutido"]="0:0:755"
+EOF
+cat > "$A/etc/os-release" <<EOF
+NAME="$NOME"
+PRETTY_NAME="Instalador do $NOME"
+ID=arch
+BUILD_ID=rolling
+ANSI_COLOR="0;37"
+EOF
+echo "$SLUG" > "$A/etc/hostname"
+: > "$A/etc/motd"
+printf 'KEYMAP=br-abnt2\nFONT=ter-v22b\n' > "$A/etc/vconsole.conf"
+printf 'LANG=C.UTF-8\n' > "$A/etc/locale.conf"
+
+# ---------------------------------------------------------------- menu de boot
+# UEFI (systemd-boot): uma entrada, sem espera
+rm -f "$PROFILE"/efiboot/loader/entries/*.conf
+printf 'timeout 0\ndefault 01-sistema.conf\n' > "$PROFILE/efiboot/loader/loader.conf"
+cat > "$PROFILE/efiboot/loader/entries/01-sistema.conf" <<EOF
+title    $NOME
+sort-key 01
+linux    /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux
+initrd   /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
+options  archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% $PARAMS %KERNEL_PARAMS%
+EOF
+# BIOS (syslinux): o instalador pede UEFI, mas o menu também leva o nome
+cat > "$PROFILE/syslinux/archiso_sys-linux.cfg" <<EOF
+LABEL arch
+MENU LABEL $NOME
+LINUX /%INSTALL_DIR%/boot/%ARCH%/vmlinuz-linux
+INITRD /%INSTALL_DIR%/boot/%ARCH%/initramfs-linux.img
+APPEND archisobasedir=%INSTALL_DIR% archisosearchuuid=%ARCHISO_UUID% $PARAMS %KERNEL_PARAMS%
+EOF
+sed -i 's/^TIMEOUT .*/TIMEOUT 10/' "$PROFILE/syslinux/archiso_sys.cfg"
+sed -i "s/^MENU TITLE .*/MENU TITLE $NOME/" "$PROFILE/syslinux/archiso_head.cfg"
+for f in "$PROFILE"/grub/*.cfg; do
+  [ -f "$f" ] && sed -i -e "s/Arch Linux install medium/$NOME/g" -e "s/Arch Linux/$NOME/g" "$f"
+done
+
+# ---------------------------------------------------------------- tela de inicialização
+sed -i 's/\bkms\b/kms plymouth/' "$A/etc/mkinitcpio.conf.d/archiso.conf"
+if [ -n "$DONO" ] && [ -x "/home/$DONO/.local/share/temas-boot/gerar" ]; then
+  MARCA_LOGO="$MARCA/logo-nome.png" MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" \
+    "/home/$DONO/.local/share/temas-boot/gerar" marca "$A/usr/share/plymouth/themes/win11-marca" >/dev/null
+  install -Dm644 /dev/stdin "$A/etc/plymouth/plymouthd.conf" <<EOF
+[Daemon]
+Theme=win11-marca
+ShowDelay=0
+DeviceTimeout=8
+EOF
+fi
+# Sem "plymouth quit --retain-splash": ele deixa o tty em modo gráfico (KD_GRAPHICS) e, em
+# máquina real, quando o driver da placa assume a tela depois do splash, o texto do
+# instalador pode nunca aparecer (tela preta). O quit normal devolve o console em modo texto.
+rm -rf "$A/etc/systemd/system/plymouth-quit.service.d"
+
+# ---------------------------------------------------------------- instalador no tty1
+rm -rf "$A/etc/systemd/system/getty@tty1.service.d"
+ln -sf /dev/null "$A/etc/systemd/system/getty@tty1.service"   # o tty1 é do instalador
+install -Dm755 "$SRC/instalar-clone" "$A/usr/local/bin/instalar-clone-embutido"
+install -Dm755 /dev/stdin "$A/usr/local/bin/instalar-clone" <<'EOF'
+#!/bin/bash
+# Usa o instalador gravado no pendrive (/clone), se houver; senão o embutido.
+# Se o pendrive não estiver montado (ex.: o live foi copiado para a RAM), procura e
+# monta ele; se não achar, mostra uma mensagem em vez de deixar a tela preta.
+d=/run/archiso/bootmnt/clone
+plymouth quit 2>/dev/null; chvt 1 2>/dev/null
+if [ ! -f "$d/clone.env" ]; then
+  mkdir -p /run/archiso/bootmnt
+  for dev in $(lsblk -rpno NAME,FSTYPE | awk '$2=="iso9660"{print $1}'); do
+    mount -o ro "$dev" /run/archiso/bootmnt 2>/dev/null || continue
+    [ -f "$d/clone.env" ] && break
+    umount /run/archiso/bootmnt
+  done
+fi
+if [ ! -f "$d/clone.env" ]; then
+  printf '\e[0m\e[2J\e[H\e[?25h\n  Não encontrei os arquivos de instalação no pendrive.\n'
+  printf '  Confira se o pendrive continua conectado e aperte Enter para tentar de novo.\n'
+  printf '  (Ctrl+Alt+F2 abre um terminal: usuário root, sem senha.)\n'
+  read -r _; exit 1
+fi
+if [ -f "$d/instalar-clone" ]; then bash "$d/instalar-clone" "$@"; else /usr/local/bin/instalar-clone-embutido "$@"; fi
+r=$?
+if [ $r -ne 0 ]; then
+  printf '\e[0m\e[2J\e[H\e[?25h\n  O instalador parou com um erro (%s). Últimas linhas do registro:\n\n' "$r"
+  tail -n 15 /tmp/instalacao.log 2>/dev/null | sed 's/^/    /'
+  printf '\n  Aperte Enter para abrir o instalador de novo.\n'; read -r _
+fi
+exit $r
+EOF
+install -Dm644 /dev/stdin "$A/etc/systemd/system/instalador.service" <<EOF
+[Unit]
+Description=Instalador do $NOME
+After=systemd-user-sessions.service plymouth-quit-wait.service systemd-vconsole-setup.service
+Conflicts=getty@tty1.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=idle
+ExecStartPre=-/usr/bin/plymouth quit
+ExecStart=/usr/local/bin/instalar-clone
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Environment=TERM=linux LANG=C.UTF-8 HOME=/root
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+mkdir -p "$A/etc/systemd/system/multi-user.target.wants"
+ln -sf /etc/systemd/system/instalador.service "$A/etc/systemd/system/multi-user.target.wants/instalador.service"
+# sem o leitor de tela/áudio do live do Arch
+rm -f "$A/etc/systemd/system/multi-user.target.wants/livecd-talk.service" \
+  "$A/etc/systemd/system/sound.target.wants/livecd-alsa-unmuter.service"

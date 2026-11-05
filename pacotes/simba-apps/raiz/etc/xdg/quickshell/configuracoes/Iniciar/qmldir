@@ -1,0 +1,14 @@
+module qs.Iniciar
+Iniciar 1.0 Iniciar.qml
+Icone 1.0 Icone.qml
+Bloco 1.0 Bloco.qml
+LinhaApp 1.0 LinhaApp.qml
+CampoBusca 1.0 CampoBusca.qml
+Resultados 1.0 Resultados.qml
+Rodape 1.0 Rodape.qml
+Cabecalho 1.0 Cabecalho.qml
+ListaTodos 1.0 ListaTodos.qml
+EstiloClassico 1.0 EstiloClassico.qml
+EstiloModerno 1.0 EstiloModerno.qml
+EstiloCompacto 1.0 EstiloCompacto.qml
+EstiloTelaCheia 1.0 EstiloTelaCheia.qml

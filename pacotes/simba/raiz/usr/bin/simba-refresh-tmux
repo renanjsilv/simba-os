@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# simba:summary=Overwrite the user tmux config with the Simba default and reload tmux.
+
+simba-refresh-config tmux/tmux.conf
+simba-restart-tmux

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# simba:summary=Reset shell.json to Simba defaults
+# simba:examples=simba refresh shell
+
+set -euo pipefail
+
+simba-refresh-config simba/shell.json
+simba-bar defaults
+
+simba-restart-shell

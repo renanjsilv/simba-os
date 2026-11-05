@@ -1,0 +1,14 @@
+#!/bin/bash
+# Deletes Draco's Claude Code conversation history once it is older than the
+# conversation memory window (DRACO_MEMORIA, settings), so nothing said to Draco
+# stays on disk. Run by draco-limpar-historico.timer.
+eval "$(python3 "/usr/share/draco/lib/config.py" env)"
+min=$(( ${DRACO_MEMORIA:-600} / 60 + 1 ))
+for p in "$HOME/.claude/projects/-home-renan--local-share-draco-workdir" "$HOME/.claude/projects/-home-renan--local-share-draco"; do
+  [[ -d $p ]] || continue
+  for f in "$p"/*.jsonl; do
+    [[ -f $f ]] && [[ -n $(find "$f" -mmin +$min) ]] || continue
+    id=$(basename "$f" .jsonl)
+    rm -rf "$f" "$p/$id" "$HOME/.claude/file-history/$id" "$HOME/.claude/session-env/$id" "$HOME/.claude/todos/$id"* "$HOME/.claude/debug/$id"*
+  done
+done

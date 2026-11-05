@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# simba:summary=Install and start the Dropbox service. Must then be authenticated via the web.
+
+echo "Installing all dependencies..."
+simba-pkg-add dropbox dropbox-cli libappindicator-gtk3 python-gpgme nautilus-dropbox
+
+echo "Adding Dropbox to the bar..."
+simba-plugin-enable simba.dropbox
+
+echo "Starting Dropbox..."
+uwsm-app -- dropbox-cli start &>/dev/null &
+echo "See Dropbox icon behind  hover tray in top right and right-click for setup."

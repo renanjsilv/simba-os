@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# simba:summary=Overwrite the user herdr config with the Simba default and reload herdr.
+
+simba-refresh-config herdr/config.toml
+simba-restart-herdr

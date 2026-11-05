@@ -1,0 +1,26 @@
+#!/bin/bash
+# restauracao — pontos de restauração do sistema (snapper, config root) para Configurações › Restauração.
+#   restauracao estado        JSON {permitido, automatico, menuProxima, pontos:[{numero,data,descricao,tipo}]}
+#   restauracao criar [texto] cria um ponto agora
+#   restauracao apagar <n>    apaga um ponto
+set -uo pipefail
+CFG=/etc/snapper/configs/root
+case "${1:-}" in
+  estado)
+    auto=false; grep -q '^TIMELINE_CREATE="yes"' "$CFG" 2>/dev/null && auto=true
+    menu=false; [ -e /var/lib/simba/menu-uma-vez ] && menu=true
+    if j=$(snapper --jsonout -c root list --disable-used-space 2>/dev/null); then ok=true; else ok=false; j='{"root":[]}'; fi
+    jq -c --argjson ok "$ok" --argjson auto "$auto" --argjson menu "$menu" '{
+      permitido: $ok, automatico: $auto, menuProxima: $menu,
+      pontos: [ .root[] | select(.number != 0) | {
+        numero: .number, data: .date, tipo: .cleanup,
+        descricao: (
+          if .cleanup == "timeline" then "Automático (diário)"
+          elif (.description // "") | test("^[0-9]+\\.[0-9]") then "Antes da atualização do sistema (" + .description + ")"
+          elif (.description // "") == "" then "Ponto de restauração"
+          else .description end)
+      } ] | reverse }' <<<"$j" ;;
+  criar) snapper -c root create -c number -d "${2:-Ponto criado manualmente}" ;;
+  apagar) [[ ${2:-} =~ ^[0-9]+$ ]] && snapper -c root delete "$2" ;;
+  *) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

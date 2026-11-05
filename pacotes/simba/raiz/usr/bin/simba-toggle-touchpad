@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# simba:summary=Enable, disable, or toggle the touchpad
+# simba:args=[on|off|toggle]
+
+exec simba-toggle-input-device touchpad "${1:-toggle}"

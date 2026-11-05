@@ -1,0 +1,36 @@
+#!/bin/bash
+# luz-agenda: night light schedule for the Configurações app.
+#   luz-agenda ligar     < profiles   writes ~/.config/hypr/hyprsunset.conf with the
+#                                     schedule read from stdin and restarts hyprsunset
+#   luz-agenda desligar               restores Simba's default hyprsunset.conf
+#   luz-agenda garantir               start hyprsunset if a schedule is on (login)
+# hyprsunset is not autostarted by Simba; the Configurações daemon (autostarted)
+# calls `garantir` so a schedule keeps working after a reboot.
+set -u
+CONF="$HOME/.config/hypr/hyprsunset.conf"
+DEFAULT="${SIMBA_PATH:-/usr/share/simba}/config/hypr/hyprsunset.conf"
+MARK="# Gerado pelo app Configurações (Tela › Luz noturna › Programar)."
+
+case "${1:-}" in
+  ligar)
+    body=$(cat)
+    [[ -f $CONF ]] && ! grep -qF "$MARK" "$CONF" && cp "$CONF" "$CONF.bak.$(date +%s)"
+    tmp="$CONF.configuracoes.tmp"
+    { echo "$MARK"; echo "# Desligue a programação no app para voltar ao padrão do Simba."; echo; echo "$body"; } >"$tmp"
+    mv -f "$tmp" "$CONF"
+    simba-restart-hyprsunset
+    ;;
+  desligar)
+    if [[ -f $CONF ]] && grep -qF "$MARK" "$CONF"; then
+      cp "$DEFAULT" "$CONF.configuracoes.tmp" && mv -f "$CONF.configuracoes.tmp" "$CONF"
+      pgrep -x hyprsunset >/dev/null && simba-restart-hyprsunset
+    fi
+    ;;
+  garantir)
+    if [[ -f $CONF ]] && grep -qF "$MARK" "$CONF" && ! pgrep -x hyprsunset >/dev/null; then
+      setsid uwsm-app -- hyprsunset >/dev/null 2>&1 &
+    fi
+    ;;
+  *) sed -n '2,9p' "$0"; exit 1 ;;
+esac
+exit 0

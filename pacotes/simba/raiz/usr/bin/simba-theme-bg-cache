@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# simba:summary=Cache background switcher thumbnails for the current theme
+
+theme_name=$(cat "$HOME/.local/state/simba/current/theme.name" 2>/dev/null)
+
+simba-menu-images \
+  --cache-only \
+  "$HOME/.local/state/simba/current/theme/backgrounds" \
+  "$HOME/.config/simba/backgrounds/$theme_name"

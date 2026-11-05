@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="f" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#475569"/><stop offset="1" stop-color="#94a3b8"/></linearGradient>
+    <linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.30"/><stop offset="0.45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0.6" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.18"/></linearGradient>
+    <filter id="g" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#000" flood-opacity="0.22"/></filter>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#f)"/>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#s)"/>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#b)"/>
+  <rect x="8.75" y="8.75" width="110.5" height="110.5" rx="27.25" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="1.5"/>
+  <g filter="url(#g)"><path fill="#fff" stroke="#fff" stroke-width="3" stroke-linejoin="round" fill-rule="evenodd" d="M64.00 31.00 L70.44 31.63 L73.57 40.90 L77.89 43.21 L87.33 40.67 L91.44 45.67 L87.10 54.43 L88.52 59.12 L97.00 64.00 L96.37 70.44 L87.10 73.57 L84.79 77.89 L87.33 87.33 L82.33 91.44 L73.57 87.10 L68.88 88.52 L64.00 97.00 L57.56 96.37 L54.43 87.10 L50.11 84.79 L40.67 87.33 L36.56 82.33 L40.90 73.57 L39.48 68.88 L31.00 64.00 L31.63 57.56 L40.90 54.43 L43.21 50.11 L40.67 40.67 L45.67 36.56 L54.43 40.90 L59.12 39.48Z M75 64 A11 11 0 1 0 53 64 A11 11 0 1 0 75 64Z"/></g>
+</svg>

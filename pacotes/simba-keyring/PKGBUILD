@@ -1,0 +1,15 @@
+# Simba OS — chave pública que assina os pacotes do repositório [simba-os] e a seção do
+# repositório no pacman.conf. Instalar este pacote é o que liga as atualizações pelo GitHub.
+pkgname=simba-keyring
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Simba OS: chave de assinatura e repositório de atualizações [simba-os]"
+arch=('any')
+url="https://github.com/SIMBA_GH_USER/simba-os"
+license=('MIT')
+options=('!debug' '!strip')
+install=simba-keyring.install
+
+package() {
+  cp -a "$startdir/raiz/." "$pkgdir/"
+}

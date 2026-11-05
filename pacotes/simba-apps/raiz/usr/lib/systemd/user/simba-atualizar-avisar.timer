@@ -1,0 +1,10 @@
+[Unit]
+Description=Simba OS: procura atualizações a cada 6 horas
+
+[Timer]
+OnBootSec=8min
+OnUnitActiveSec=6h
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

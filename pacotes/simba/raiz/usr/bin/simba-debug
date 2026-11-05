@@ -1,0 +1,80 @@
+#!/bin/bash
+
+# simba:summary=Print debugging information
+# simba:args=[--no-sudo] [--print]
+# simba:examples=simba debug --print --no-sudo
+# simba:requires-sudo=true
+
+NO_SUDO=false
+PRINT_ONLY=false
+
+while (( $# > 0 )); do
+  case "$1" in
+    --no-sudo)
+      NO_SUDO=true
+      shift
+      ;;
+    --print)
+      PRINT_ONLY=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: simba-debug [--no-sudo] [--print]"
+      exit 1
+      ;;
+  esac
+done
+
+LOG_FILE="/tmp/simba-debug.log"
+
+if [[ $NO_SUDO = "true" ]]; then
+  DMESG_OUTPUT="(skipped - --no-sudo flag used)"
+else
+  DMESG_OUTPUT="$(sudo dmesg)"
+fi
+
+cat > "$LOG_FILE" <<EOF
+Date: $(date)
+Hostname: $(hostname)
+Simba Package: $(pacman -Q simba-dev 2>/dev/null || pacman -Q simba 2>/dev/null || echo "unknown")
+
+=========================================
+SYSTEM INFORMATION
+=========================================
+$(inxi -Farz)
+
+=========================================
+DMESG
+=========================================
+$DMESG_OUTPUT
+
+=========================================
+JOURNALCTL (CURRENT BOOT, WARNINGS+ERRORS)
+=========================================
+$(journalctl -b -p 4..1)
+
+=========================================
+INSTALLED PACKAGES
+=========================================
+$({ expac -S '%n %v (%r)' $(pacman -Qqe) 2>/dev/null; comm -13 <(pacman -Sql | sort) <(pacman -Qqe | sort) | xargs -r expac -Q '%n %v (AUR)'; } | sort)
+EOF
+
+if [[ $PRINT_ONLY = "true" ]]; then
+  cat "$LOG_FILE"
+  exit 0
+fi
+
+OPTIONS=("View log" "Save in current directory")
+
+ACTION=$(gum choose "${OPTIONS[@]}")
+
+case "$ACTION" in
+  "View log")
+    less "$LOG_FILE"
+    ;;
+  "Save in current directory")
+    cp "$LOG_FILE" "./simba-debug.log"
+    echo "✓ Log saved to $(pwd)/simba-debug.log"
+    ;;
+esac

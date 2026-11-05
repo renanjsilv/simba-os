@@ -1,0 +1,3 @@
+#!/bin/bash
+# Conta Google: backup/restauração do sistema no Google Drive (ver conta --help)
+exec python3 "/usr/share/simba-apps/conta/conta.py" "$@"

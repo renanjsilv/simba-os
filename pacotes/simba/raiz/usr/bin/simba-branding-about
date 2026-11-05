@@ -1,0 +1,28 @@
+#!/bin/bash
+
+# simba:summary=Edit, set, or reset About branding
+# simba:group=branding
+# simba:name=about
+# simba:args=<image|text|reset>
+# simba:examples=simba branding about image | simba branding about text | simba branding about reset
+
+set -euo pipefail
+
+case "${1:-}" in
+image)
+  image=$(simba-file-select --title "Pick PNG or SVG for About" --extensions "png svg")
+  if simba-transcode-ascii "$image" ~/.config/simba/branding/about.txt --width 54 --height 26; then
+    simba-launch-about >/dev/null 2>&1
+  fi
+  ;;
+text)
+  simba-launch-editor ~/.config/simba/branding/about.txt >/dev/null 2>&1 && simba-launch-about >/dev/null 2>&1
+  ;;
+reset)
+  cp "$SIMBA_PATH/icon.txt" ~/.config/simba/branding/about.txt && simba-launch-about >/dev/null 2>&1
+  ;;
+*)
+  echo "Usage: simba-branding-about <image|text|reset>" >&2
+  exit 1
+  ;;
+esac

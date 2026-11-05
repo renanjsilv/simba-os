@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Definir como papel de parede",
+  "version": "1.5",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmWbkyqRFjEB8JGAg1GEeVrmjwBsYJCI9C17T+44A9puWIrVkY2sg0N6ypvQ1Okkv68l78/YjCOzXw8RkXMxLJfXO+IhIXQtFbozcGFQM6OhTRTiMWK5/RbahtLfkdSoibnh8lsNBrkJt+xhKfM9dqa00CNVWT4w8p+4HeGXqr1HuIRlNTKkUAYy/dXxg4Pediqx/Xk0Z8T+/F1a1u5y0/wFPBIZ0YrzNlV/KjQjMcj+Zns5yaof0h1M0jZuh9LoXswPG6vqHT5Il2l1zZUmpeR6Mpsmh/wlzuQP4kR4IHfVbQxDlp4XxShgizwuXIzt9nBjrZuvO8u+ydRVTJePJLwIDAQAB",
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "background-v5.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://photos.google.com/*"
+      ],
+      "js": [
+        "photos.js"
+      ],
+      "all_frames": false,
+      "run_at": "document_start"
+    }
+  ]
+}

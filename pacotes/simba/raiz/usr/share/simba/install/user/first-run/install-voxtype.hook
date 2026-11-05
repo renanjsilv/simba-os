@@ -1,0 +1,9 @@
+#!/bin/bash
+
+set -e
+
+if simba-done ensure voxtype-install-invitation; then
+  simba-notification-send -u critical -g  "Install Dictation with Voxtype" \
+    "Click to install voice dictation for Simba." \
+    --exec simba-launch-floating-terminal-with-presentation simba-voxtype-install
+fi

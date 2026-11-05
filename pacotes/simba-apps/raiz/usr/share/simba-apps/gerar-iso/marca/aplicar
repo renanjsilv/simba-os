@@ -1,0 +1,78 @@
+#!/bin/bash
+# Aplica a identidade visual no sistema instalado (roda no instalador, como root).
+#   aplicar <pacote> <raiz-do-alvo> <usuário>
+# O sistema recebe as atualizações oficiais do Arch Linux; um gancho do pacman
+# reaplica o nome e a tela de inicialização depois de cada atualização.
+set -uo pipefail
+pac=${1:?pacote} T=${2:?alvo} u=${3:?usuário}
+. "$pac/marca.env"
+install -d "$T/usr/local/share/marca"
+cp "$pac"/{logo.png,logo-nome.png,papel-de-parede.png,icone.png,marca.env} "$T/usr/local/share/marca/"
+
+install -Dm755 /dev/stdin "$T/usr/local/bin/marca-sistema" <<'SCRIPT'
+#!/bin/bash
+# Nome e tela de inicialização da marca (/usr/local/share/marca). Roda no gancho do
+# pacman (--gancho) depois de cada atualização.
+. /usr/local/share/marca/marca.env || exit 0
+tmp=$(mktemp)
+sed -e "s|^NAME=.*|NAME=\"$NOME\"|" -e "s|^PRETTY_NAME=.*|PRETTY_NAME=\"$NOME\"|" /usr/lib/os-release > "$tmp"
+grep -q '^VARIANT=' "$tmp" || echo 'VARIANT="Simba OS"' >> "$tmp"
+if ! cmp -s "$tmp" /etc/os-release 2>/dev/null || [ -L /etc/os-release ]; then
+  rm -f /etc/os-release; install -m644 "$tmp" /etc/os-release
+fi
+rm -f "$tmp"
+printf '%s \\r (\\l)\n\n' "$NOME" > /etc/issue
+if [ -d /usr/share/plymouth/themes/win11-marca ] && command -v plymouth-set-default-theme >/dev/null; then
+  if [ "$(plymouth-set-default-theme)" != win11-marca ]; then
+    plymouth-set-default-theme win11-marca
+    [ "${1:-}" = --gancho ] && command -v limine-mkinitcpio >/dev/null && limine-mkinitcpio >/dev/null 2>&1
+  fi
+fi
+exit 0
+SCRIPT
+
+install -Dm644 /dev/stdin "$T/etc/pacman.d/hooks/zz-marca.hook" <<HOOK
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = *
+
+[Action]
+Description = Mantendo a identidade do $NOME...
+When = PostTransaction
+Exec = /usr/local/bin/marca-sistema --gancho
+HOOK
+
+# tela de inicialização com o logo e o nome
+gerador=/home/$u/.local/share/temas-boot
+if [ -x "$pac/temas-boot/gerar" ]; then
+  install -d "$T/usr/local/share/marca/temas-boot"
+  cp "$pac"/temas-boot/* "$T/usr/local/share/marca/temas-boot/"
+  gerador=/usr/local/share/marca/temas-boot
+fi
+if [ -x "$T$gerador/gerar" ]; then
+  arch-chroot "$T" env MARCA_LOGO=/usr/local/share/marca/logo-nome.png MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" \
+    "$gerador/gerar" marca /usr/share/plymouth/themes/win11-marca >/dev/null
+fi
+# nome no menu de boot (Limine)
+# e a tela do gato mesmo com console serial (o Plymouth cai para texto se houver um)
+install -Dm644 /dev/stdin "$T/etc/limine-entry-tool.d/zz-marca.conf" <<CONF
+TARGET_OS_NAME="$NOME"
+KERNEL_CMDLINE[default]+=" plymouth.ignore-serial-consoles"
+CONF
+arch-chroot "$T" /usr/local/bin/marca-sistema
+
+# papel de parede: na pasta de fundos do tema atual e como fundo atual
+h="$T/home/$u"
+tema=$(cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || echo vantablack)
+bgbase="$h/.config/simba/backgrounds"
+[ -d "$h/.config/simba/backgrounds" ] && [ ! -d "$bgbase" ] && bgbase="$h/.config/simba/backgrounds"
+install -d -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$bgbase" "$bgbase/$tema"
+install -m644 -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$pac/papel-de-parede.png" \
+  "$bgbase/$tema/00-${NOME// /-}.png"
+statedir="$h/.local/state/simba/current"
+[ -d "$h/.local/state/simba/current" ] && [ ! -d "$statedir" ] && statedir="$h/.local/state/simba/current"
+install -d -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$statedir"
+ln -nsf "$bgbase/$tema/00-${NOME// /-}.png" "$statedir/background"
+chown -h "$(stat -c %u:%g "$h")" "$statedir/background"

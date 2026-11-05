@@ -1,0 +1,34 @@
+#!/bin/bash
+# draco-preparar [--quieto] — prepara o Draco para este usuário (o pacote traz só o código):
+#   ~/.local/share/draco/venv   ambiente Python com as dependências de requirements.txt
+#   ~/.local/share/draco/voices vozes Piper do idioma da sessão (pt: Faber; en: Ryan)
+# O Whisper local é baixado sozinho no primeiro uso. Rodar de novo só completa o que faltar.
+set -uo pipefail
+CODIGO=${DRACO_CODIGO:-/usr/share/draco}
+DATA="$HOME/.local/share/draco"
+Q=${1:-}
+msg() { [[ $Q == --quieto ]] || printf '%s\n' "$*"; }
+mkdir -p "$DATA"/{voices,models,workdir}
+
+if [[ ! -x $DATA/venv/bin/python ]] || ! "$DATA/venv/bin/python" -c 'import piper, faster_whisper, openwakeword' 2>/dev/null; then
+  msg "$(simba-t "Preparando o ambiente do Draco (alguns minutos, só na primeira vez)…")"
+  python3 -m venv "$DATA/venv" || exit 1
+  "$DATA/venv/bin/pip" install -q --upgrade pip
+  "$DATA/venv/bin/pip" install -q -r "$CODIGO/requirements.txt" || { msg "falha no pip"; exit 1; }
+fi
+
+lingua=$(python3 -c 'import sys;sys.path.insert(0,"/usr/share/simba-apps/idiomas");from simba_i18n import idioma;l=idioma();print("pt" if not l or l.startswith("pt") else l.split("_")[0])' 2>/dev/null || echo pt)
+case $lingua in
+  pt) vozes=("pt/pt_BR/faber/medium/pt_BR-faber-medium") ;;
+  *)  vozes=("en/en_US/ryan/medium/en_US-ryan-medium") ;;
+esac
+for v in "${vozes[@]}"; do
+  n=${v##*/}
+  for ext in onnx onnx.json; do
+    [[ -s $DATA/voices/$n.$ext ]] && continue
+    msg "$(simba-t "Baixando a voz") $n…"
+    curl -fsSL -o "$DATA/voices/$n.$ext.part" "https://huggingface.co/rhasspy/piper-voices/resolve/main/$v.$ext" &&
+      mv "$DATA/voices/$n.$ext.part" "$DATA/voices/$n.$ext"
+  done
+done
+msg "✓ $(simba-t "Draco pronto")"

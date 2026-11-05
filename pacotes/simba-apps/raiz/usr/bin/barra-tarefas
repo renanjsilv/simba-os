@@ -1,0 +1,594 @@
+#!/usr/bin/env python3
+"""Barra de tarefas (apps fixados + janelas abertas) da barra do Simba.
+
+O widget é o módulo QML ~/.config/simba/bar/modules/tarefas.qml; as opções
+ficam na própria entrada { "id": "tarefas", "type": "qml", ... } do
+~/.config/simba/shell.json, que o simba-shell aplica na hora.
+
+    barra-tarefas estado                 JSON: ativa, seção, opções, fixados
+    barra-tarefas ativar [seção]         põe na barra (padrão: esquerda, após as áreas de trabalho)
+    barra-tarefas desativar              tira da barra (volta ao padrão do Simba)
+    barra-tarefas secao <left|center|right>
+    barra-tarefas fixar <desktop-id>     fixa um app (sem .desktop)
+    barra-tarefas desafixar <desktop-id>
+    barra-tarefas mover <desktop-id> <-1|+1>
+    barra-tarefas ordem <desktop-id>...  define os fixados nesta ordem (arrastar na barra)
+    barra-tarefas opcao <chave> <valor JSON>
+    barra-tarefas padroes                restaura opções e apps fixados padrão
+
+  Resto da barra (também usado por Configurações › Barra):
+    barra-tarefas areas <numeros|pontos|ocupadas|ocultar>   estilo das áreas de trabalho
+    barra-tarefas relogio <formato Qt> [partes JSON]         texto do relógio
+    barra-tarefas relogio-secao <center|right|left>
+    barra-tarefas tamanho <compacta|normal|confortavel|grande>
+    barra-tarefas bandeja ativar|desativar         seta ^ de ícones ocultos (início da direita)
+    barra-tarefas bandeja recolher                 oculta o que foi solto antes da seta
+    barra-tarefas bandeja ocultar <widget>         manda um ícone do Simba para a seta
+    barra-tarefas bandeja mostrar <widget> [pos]   devolve um ícone do Simba para a barra
+    barra-tarefas bandeja app-ocultar|app-mostrar <chave>   ícones de apps (bandeja do sistema)
+    barra-tarefas centro <ocultar|mostrar>   tira/devolve os ícones do centro (o relógio fica)
+    barra-tarefas icones <desktop-id>...   JSON id → arquivo do ícone colorido (tema de ícones ativo)
+"""
+import json
+import os
+import sys
+import sys as _sys, os as _os  # noqa: E401
+_sys.path.insert(0, _os.path.expanduser("/usr/share/simba-apps/idiomas"))
+from simba_i18n import t as _t  # noqa: E402  (traduções: /usr/share/simba-apps/idiomas)
+
+CAMINHO = os.path.expanduser("~/.config/simba/shell.json")
+ID = "tarefas"
+SECOES = ("left", "center", "right")
+
+OPCOES_PADRAO = {
+    "abertos": True,       # mostra apps abertos que não estão fixados
+    "rotulos": False,      # nome do app ao lado do ícone
+    "tamanho": 18,         # ícone em px
+    "soEstaTela": False,   # só janelas do monitor desta barra
+    "cliqueMinimiza": True, # clicar no app em foco minimiza
+    "estiloIcones": "tema"  # tema (monocromático) | coloridos
+}
+
+TOML = os.path.expanduser("~/.config/simba/shell.toml")
+TAMANHOS = {"compacta": (22, 24), "normal": None, "confortavel": (32, 34), "grande": (38, 40)}
+FORMATO_ALT = "dddd, d 'de' MMMM 'de' yyyy"
+FIXADOS_PADRAO = ["org.gnome.Nautilus", "brave-browser", "foot", "WhatsApp", "spotify", "steam"]
+
+
+def ler():
+    try:
+        with open(CAMINHO, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        with open("/usr/share/simba/config/simba/shell.json", encoding="utf-8") as f:
+            return json.load(f)
+
+
+def gravar(cfg):
+    tmp = CAMINHO + ".tmp-tarefas"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, CAMINHO)
+
+
+def layout(cfg):
+    bar = cfg.setdefault("bar", {})
+    lay = bar.setdefault("layout", {})
+    for s in SECOES:
+        lay.setdefault(s, [])
+    return lay
+
+
+def achar(cfg):
+    lay = layout(cfg)
+    for s in SECOES:
+        for i, e in enumerate(lay[s]):
+            if isinstance(e, dict) and e.get("id") == ID:
+                return s, i, e
+    return None, -1, None
+
+
+def nova_entrada(antiga=None):
+    e = {"id": ID, "type": "qml"}
+    e.update(OPCOES_PADRAO)
+    e["fixados"] = list(FIXADOS_PADRAO)
+    if antiga:
+        e.update({k: v for k, v in antiga.items() if k not in ("id", "type")})
+    return e
+
+
+def inserir(cfg, secao, entrada):
+    lay = layout(cfg)
+    lista = lay[secao]
+    pos = len(lista)
+    if secao == "left":
+        ids = [x.get("id") if isinstance(x, dict) else x for x in lista]
+        if "simba.workspaces" in ids:
+            pos = ids.index("simba.workspaces") + 1
+    elif secao == "right":
+        pos = 0
+    lista.insert(pos, entrada)
+
+
+# Entrada removida fica guardada para "ativar" devolver os mesmos fixados.
+GUARDA = os.path.expanduser("~/.config/configuracoes/tarefas-desativada.json")
+
+
+def achar_id(cfg, ids):
+    lay = layout(cfg)
+    for s in SECOES:
+        for i, e in enumerate(lay[s]):
+            eid = e.get("id") if isinstance(e, dict) else e
+            if eid in ids:
+                return s, i, (e if isinstance(e, dict) else {"id": e})
+    return None, -1, None
+
+
+def estilo_areas(cfg):
+    s, _, e = achar_id(cfg, ("simba.workspaces", "areas"))
+    if e is None:
+        return "ocultar"
+    return "numeros" if e["id"] == "simba.workspaces" else e.get("estilo", "pontos")
+
+
+def toml_bar():
+    try:
+        linhas = open(TOML, encoding="utf-8").read().splitlines()
+    except FileNotFoundError:
+        return []
+    return linhas
+
+
+def tamanho_atual():
+    secao, h = "", None
+    for l in toml_bar():
+        t = l.strip()
+        if t.startswith("["):
+            secao = t.strip("[]").strip()
+        elif secao == "bar" and t.split("=")[0].strip() == "size-horizontal":
+            try:
+                h = int(t.split("=", 1)[1].strip())
+            except ValueError:
+                pass
+    for nome, v in TAMANHOS.items():
+        if v and v[0] == h:
+            return nome
+    return "normal" if h is None else "personalizado"
+
+
+def altura_atual():
+    secao, h = "", 26
+    for l in toml_bar():
+        t = l.strip()
+        if t.startswith("["):
+            secao = t.strip("[]").strip()
+        elif secao == "bar" and t.split("=")[0].strip() == "size-horizontal":
+            try:
+                h = int(t.split("=", 1)[1].strip())
+            except ValueError:
+                pass
+    return h
+
+
+def gravar_tamanho(nome):
+    gravar_px(TAMANHOS[nome])
+
+
+def gravar_px(v):
+    linhas = [l for l in toml_bar()]
+    # tira as chaves antigas de tamanho da seção [bar]
+    out, secao = [], ""
+    for l in linhas:
+        t = l.strip()
+        if t.startswith("["):
+            secao = t.strip("[]").strip()
+        if secao == "bar" and t.split("=")[0].strip() in ("size-horizontal", "size-vertical"):
+            continue
+        out.append(l)
+    if v:
+        novas = [f"size-horizontal = {v[0]}", f"size-vertical = {v[1]}"]
+        idx = next((i for i, l in enumerate(out) if l.strip() == "[bar]"), None)
+        if idx is None:
+            if out and out[-1].strip():
+                out.append("")
+            out += ["[bar]"] + novas
+        else:
+            out[idx + 1:idx + 1] = novas
+    # remove [bar] vazia
+    final = []
+    for i, l in enumerate(out):
+        if l.strip() == "[bar]":
+            prox = next((x.strip() for x in out[i + 1:] if x.strip()), "[")
+            if prox.startswith("["):
+                continue
+        final.append(l)
+    texto = "\n".join(final).strip("\n")
+    if texto:
+        tmp = TOML + ".tmp-tarefas"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(texto + "\n")
+        os.replace(tmp, TOML)
+    elif os.path.exists(TOML):
+        os.remove(TOML)
+
+
+def icones(ids):
+    import glob
+    import subprocess
+    dados = os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":")
+    bases = [os.path.expanduser("~/.local/share")] + dados
+    try:
+        tema = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "icon-theme"],
+                              capture_output=True, text=True, timeout=2).stdout.strip().strip("'")
+    except Exception:
+        tema = ""
+    temas = [t for t in (tema, tema.split("-")[0], "hicolor") if t]
+    out = {}
+    for i in ids:
+        nome = ""
+        for b in bases:
+            f = os.path.join(b, "applications", i + ".desktop")
+            if os.path.isfile(f):
+                for l in open(f, encoding="utf-8", errors="replace"):
+                    if l.startswith("Icon="):
+                        nome = l[5:].strip()
+                        break
+                break
+        if not nome:
+            continue
+        if nome.startswith("/"):
+            out[i] = nome
+            continue
+        achado = ""
+        for t in temas:
+            for b in bases:
+                raiz = os.path.join(b, "icons", t)
+                if not os.path.isdir(raiz):
+                    continue
+                c = glob.glob(f"{raiz}/scalable/apps/{nome}.svg") + glob.glob(f"{raiz}/*/apps/{nome}.svg")
+                if not c:
+                    pngs = glob.glob(f"{raiz}/*/apps/{nome}.png")
+                    def px(p):
+                        d = p.split("/")[-3].split("x")[0].split("@")[0]
+                        return int(d) if d.isdigit() else 0
+                    c = sorted(pngs, key=px, reverse=True)
+                if c:
+                    achado = c[0]
+                    break
+            if achado:
+                break
+        if not achado:
+            for ext in ("svg", "png"):
+                f = f"/usr/share/pixmaps/{nome}.{ext}"
+                if os.path.isfile(f):
+                    achado = f
+                    break
+        if achado:
+            out[i] = achado
+    return out
+
+
+# Itens do centro tirados por "centro ocultar", para "centro mostrar" devolver.
+GUARDA_CENTRO = os.path.expanduser("~/.config/configuracoes/barra-centro-oculto.json")
+
+
+def centro_oculto(cfg):
+    ids = [x.get("id") if isinstance(x, dict) else x for x in layout(cfg)["center"]]
+    return os.path.exists(GUARDA_CENTRO) and all(i == "simba.clock" for i in ids)
+
+
+# ── bandeja (seta ^ com ícones ocultos, estilo Windows 11) ──────────────
+BANDEJA = "bandeja"
+GUARDA_BANDEJA = os.path.expanduser("~/.config/configuracoes/bandeja-desativada.json")
+# Estes estruturam a barra; não vão para a seta.
+NAO_OCULTA = ("tarefas", "areas", BANDEJA, "simba.workspaces", "simba.menu", "simba.spacer")
+
+
+def eid(x):
+    return x.get("id") if isinstance(x, dict) else x
+
+
+def bandeja(cfg, r):
+    sub, r = (r[0] if r else ""), r[1:]
+    lay = layout(cfg)
+    bs, bi, be = achar_id(cfg, (BANDEJA,))
+    if sub == "ativar":
+        if be is not None:
+            return False
+        try:
+            with open(GUARDA_BANDEJA, encoding="utf-8") as f:
+                be = json.load(f)
+        except Exception:
+            be = {"id": BANDEJA, "type": "qml", "apps": [], "ocultos": []}
+        # ícones que estavam ocultos e já voltaram para a barra não duplicam
+        presentes = {eid(x) for s_ in SECOES for x in lay[s_]}
+        be["ocultos"] = [x for x in be.get("ocultos", []) if eid(x) not in presentes]
+        lay["right"].insert(0, be)
+        return True
+    if be is None:
+        print(_t("a bandeja não está na barra"), file=sys.stderr)
+        return None
+    if sub == "desativar":
+        os.makedirs(os.path.dirname(GUARDA_BANDEJA), exist_ok=True)
+        with open(GUARDA_BANDEJA, "w", encoding="utf-8") as f:
+            json.dump(be, f, ensure_ascii=False)
+        # os ícones do Simba ocultos voltam para a barra
+        lay[bs][bi:bi + 1] = be.get("ocultos", [])
+        return True
+    if sub == "recolher":
+        antes = lay[bs][:bi]
+        sai = [x for x in antes if eid(x) not in NAO_OCULTA]
+        if not sai:
+            return False
+        be.setdefault("ocultos", []).extend(sai)
+        lay[bs][:bi] = [x for x in antes if x not in sai]
+        return True
+    if sub == "ocultar":
+        alvo = r[0] if r else ""
+        if alvo in NAO_OCULTA:
+            return False
+        s_, i_, e_ = achar_id(cfg, (alvo,))
+        if e_ is None:
+            return False
+        del lay[s_][i_]
+        be.setdefault("ocultos", []).append(e_)
+        return True
+    if sub == "mostrar":
+        alvo = r[0] if r else ""
+        oc = be.get("ocultos", [])
+        achado = next((x for x in oc if eid(x) == alvo), None)
+        if achado is None:
+            return False
+        oc.remove(achado)
+        pos = int(r[1]) if len(r) > 1 else 0
+        lay[bs].insert(bi + 1 + max(0, pos), achado)
+        return True
+    if sub in ("app-ocultar", "app-mostrar"):
+        chave = r[0] if r else ""
+        apps = be.setdefault("apps", [])
+        if not chave or (chave in apps) == (sub == "app-ocultar"):
+            return False
+        if sub == "app-ocultar":
+            apps.append(chave)
+        else:
+            apps.remove(chave)
+        return True
+    print(_t("bandeja: ativar, desativar, recolher, ocultar, mostrar, app-ocultar, app-mostrar"), file=sys.stderr)
+    return None
+
+
+def estado(cfg):
+    _, _, be = achar_id(cfg, (BANDEJA,))
+    extra = {"bandeja": {"ativa": be is not None, "apps": (be or {}).get("apps", []),
+                         "ocultos": [eid(x) for x in (be or {}).get("ocultos", [])]},
+             "areas": estilo_areas(cfg), "tamanho": tamanho_atual(), "centroOculto": centro_oculto(cfg)}
+    cs, _, ce = achar_id(cfg, ("simba.clock",))
+    extra["relogio"] = {"secao": cs or "", "formato": (ce or {}).get("format", "yyyy-MM-dd HH:mm"),
+                        "partes": (ce or {}).get("partes")}
+    extra["posicao"] = cfg.get("bar", {}).get("position", "top")
+    s, _, e = achar(cfg)
+    if e is None:
+        try:
+            with open(GUARDA, encoding="utf-8") as f:
+                e = json.load(f)
+        except Exception:
+            e = None
+    e = nova_entrada(e)
+    return {**extra, "ativa": s is not None, "secao": s or "left",
+            "opcoes": {k: e.get(k, v) for k, v in OPCOES_PADRAO.items()},
+            "fixados": e.get("fixados", [])}
+
+
+def main(a):
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    cmd, r = a[0], a[1:]
+    cfg = ler()
+    s, i, e = achar(cfg)
+
+    if cmd == "estado":
+        print(json.dumps(estado(cfg), ensure_ascii=False))
+        return 0
+
+    if cmd == "icones":
+        print(json.dumps(icones(r), ensure_ascii=False))
+        return 0
+    if cmd == "areas":
+        alvo = r[0] if r else ""
+        if alvo not in ("numeros", "pontos", "ocupadas", "ocultar"):
+            print(_t("estilos: numeros, pontos, ocupadas, ocultar"), file=sys.stderr)
+            return 1
+        lay = layout(cfg)
+        ws, wi, _ = achar_id(cfg, ("simba.workspaces", "areas"))
+        if ws is not None:
+            del lay[ws][wi]
+        else:
+            ids = [x.get("id") if isinstance(x, dict) else x for x in lay["left"]]
+            ws, wi = "left", (ids.index("simba.menu") + 1 if "simba.menu" in ids else 0)
+        if alvo == "numeros":
+            lay[ws].insert(wi, {"id": "simba.workspaces"})
+        elif alvo != "ocultar":
+            lay[ws].insert(wi, {"id": "areas", "type": "qml", "estilo": alvo, "quantidade": 5})
+        gravar(cfg)
+        return 0
+    if cmd == "relogio":
+        cs, ci, ce = achar_id(cfg, ("simba.clock",))
+        if ce is None:
+            print(_t("o relógio não está na barra"), file=sys.stderr)
+            return 1
+        ce["format"] = r[0]
+        ce["formatAlt"] = FORMATO_ALT
+        if len(r) > 1:
+            ce["partes"] = json.loads(r[1])
+        layout(cfg)[cs][ci] = ce
+        gravar(cfg)
+        return 0
+    if cmd == "relogio-secao":
+        alvo = r[0] if r else ""
+        if alvo not in SECOES:
+            return 1
+        cs, ci, ce = achar_id(cfg, ("simba.clock",))
+        lay = layout(cfg)
+        if ce is None:
+            ce = {"id": "simba.clock", "format": "HH:mm"}
+        else:
+            if cs == alvo:
+                return 0
+            del lay[cs][ci]
+        bar = cfg["bar"]
+        if alvo == "center":
+            ids = [x.get("id") if isinstance(x, dict) else x for x in lay["center"]]
+            pos = ids.index("simba.indicators") + 1 if "simba.indicators" in ids else 0
+            lay["center"].insert(pos, ce)
+            bar["centerAnchor"] = "simba.clock"
+        else:
+            lay[alvo].append(ce) if alvo == "right" else lay[alvo].insert(len(lay[alvo]), ce)
+            if bar.get("centerAnchor") == "simba.clock":
+                bar["centerAnchor"] = ""
+        gravar(cfg)
+        return 0
+    if cmd == "bandeja":
+        mudou = bandeja(cfg, r)
+        if mudou is None:
+            return 1
+        if mudou:
+            gravar(cfg)
+        return 0
+    if cmd == "centro":
+        alvo = r[0] if r else ""
+        lay = layout(cfg)
+        if alvo == "ocultar":
+            fica = [x for x in lay["center"] if (x.get("id") if isinstance(x, dict) else x) == "simba.clock"]
+            sai = [x for x in lay["center"] if x not in fica]
+            if not sai:
+                return 0
+            guardados = []
+            try:
+                with open(GUARDA_CENTRO, encoding="utf-8") as f:
+                    guardados = json.load(f)
+            except Exception:
+                pass
+            os.makedirs(os.path.dirname(GUARDA_CENTRO), exist_ok=True)
+            with open(GUARDA_CENTRO, "w", encoding="utf-8") as f:
+                json.dump(guardados + sai, f, ensure_ascii=False)
+            lay["center"] = fica
+        elif alvo == "mostrar":
+            try:
+                with open(GUARDA_CENTRO, encoding="utf-8") as f:
+                    guardados = json.load(f)
+            except Exception:
+                return 0
+            ids = {(x.get("id") if isinstance(x, dict) else x) for s_ in SECOES for x in lay[s_]}
+            volta = [x for x in guardados if (x.get("id") if isinstance(x, dict) else x) not in ids]
+            # O relógio, se estiver no centro, volta a ficar logo depois dos indicadores.
+            primeiro = volta[0].get("id") if volta and isinstance(volta[0], dict) else (volta[0] if volta else "")
+            n = 1 if primeiro == "simba.indicators" else 0
+            lay["center"] = volta[:n] + lay["center"] + volta[n:]
+            os.remove(GUARDA_CENTRO)
+        else:
+            print(_t("centro: ocultar ou mostrar"), file=sys.stderr)
+            return 1
+        gravar(cfg)
+        return 0
+    if cmd == "altura":
+        # altura livre em px (alça da barra): a barra e os ícones das tarefas
+        # crescem juntos, mantendo a proporção que a pessoa escolheu
+        if not r:
+            print(altura_atual())
+            return 0
+        try:
+            px = max(22, min(60, int(float(r[0]))))
+        except ValueError:
+            print(_t("altura: número de 22 a 60"), file=sys.stderr)
+            return 1
+        # o ícone das tarefas acompanha sozinho (tarefas.qml: tamanho × altura / 26)
+        if px == altura_atual():
+            return 0
+        gravar_px(None if px == 26 else (px, px + 2))
+        # quando a barra já estiver no tamanho novo, as janelas maximizadas e
+        # encaixadas se ajustam à área útil nova (repete: o shell pode demorar)
+        import subprocess
+        subprocess.Popen(["sh", "-c", "for t in 0.6 1.2; do sleep $t; hyprctl dispatch 'janelas.reajustar()' >/dev/null 2>&1; done"],
+                         start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return 0
+    if cmd == "tamanho":
+        if not r or r[0] not in TAMANHOS:
+            print("tamanhos: " + ", ".join(TAMANHOS), file=sys.stderr)
+            return 1
+        gravar_tamanho(r[0])
+        return 0
+
+    if cmd == "ativar":
+        if e is not None:
+            return 0
+        guardada = None
+        try:
+            with open(GUARDA, encoding="utf-8") as f:
+                guardada = json.load(f)
+        except Exception:
+            pass
+        inserir(cfg, r[0] if r and r[0] in SECOES else "left", nova_entrada(guardada))
+    elif cmd == "desativar":
+        if e is None:
+            return 0
+        os.makedirs(os.path.dirname(GUARDA), exist_ok=True)
+        with open(GUARDA, "w", encoding="utf-8") as f:
+            json.dump(e, f, ensure_ascii=False)
+        del layout(cfg)[s][i]
+    else:
+        if e is None:
+            print(_t("A barra de tarefas não está ativa"), file=sys.stderr)
+            return 1
+        if cmd == "secao":
+            if not r or r[0] not in SECOES:
+                print(_t("seção: left, center ou right"), file=sys.stderr)
+                return 1
+            if r[0] == s:
+                return 0
+            del layout(cfg)[s][i]
+            inserir(cfg, r[0], e)
+        elif cmd in ("fixar", "desafixar", "mover"):
+            app = r[0].removesuffix(".desktop") if r else ""
+            if not app:
+                print(_t("falta o id do app"), file=sys.stderr)
+                return 1
+            fix = list(e.get("fixados", []))
+            if cmd == "fixar" and app not in fix:
+                fix.append(app)
+            elif cmd == "desafixar" and app in fix:
+                fix.remove(app)
+            elif cmd == "mover" and app in fix:
+                j = fix.index(app)
+                k = max(0, min(len(fix) - 1, j + int(r[1])))
+                fix.insert(k, fix.pop(j))
+            e["fixados"] = fix
+        elif cmd == "ordem":
+            fix = []
+            for app in r:
+                app = app.removesuffix(".desktop")
+                if app and app not in fix:
+                    fix.append(app)
+            e["fixados"] = fix
+        elif cmd == "opcao":
+            if len(r) < 2 or r[0] not in OPCOES_PADRAO:
+                print(_t("opções: ") + ", ".join(OPCOES_PADRAO), file=sys.stderr)
+                return 1
+            e[r[0]] = json.loads(r[1])
+        elif cmd == "padroes":
+            e.clear()
+            e.update(nova_entrada())
+        else:
+            print(_t("comando desconhecido: ") + cmd, file=sys.stderr)
+            return 1
+    gravar(cfg)
+    return 0
+
+
+if __name__ == "__main__":
+    # Cada monitor tem a própria barra rodando os mesmos comandos: um de cada vez.
+    import fcntl
+    with open(os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "barra-tarefas.lock"), "w") as trava:
+        fcntl.flock(trava, fcntl.LOCK_EX)
+        sys.exit(main(sys.argv[1:]))

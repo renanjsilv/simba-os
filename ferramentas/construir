@@ -1,0 +1,26 @@
+#!/bin/bash
+# construir [pacote…] — gera os pacotes em dist/ (todos, se nenhum for dado) e assina com a
+# chave de config.sh, se houver. Não precisa de root.
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+source "$R/ferramentas/config.sh"
+mkdir -p "$R/dist"
+for p in "${@:-${PACOTES[@]}}"; do
+  [[ -f $R/pacotes/$p/PKGBUILD ]] || { echo "sem PKGBUILD: $p" >&2; continue; }
+  echo "── $p"
+  t=$(mktemp -d)
+  cp -a "$R/pacotes/$p/." "$t/"
+  # nome do usuário do GitHub (endereço do repositório) em todos os arquivos de texto
+  grep -rlI SIMBA_GH_USER "$t" 2>/dev/null | xargs -r sed -i "s#SIMBA_GH_USER#${GH_USER:-SIMBA_GH_USER}#g"
+  # o PKGBUILD lê raiz/ e as licenças relativas a $startdir: aponta para o repositório
+  (cd "$t" && sed -i "s#\$startdir/../../#$R/#g" PKGBUILD && \
+    PKGDEST="$R/dist" SRCDEST="$t" BUILDDIR="$t/build" makepkg -f --nodeps --noconfirm >"$t/makepkg.log" 2>&1) \
+    || { tail -20 "$t/makepkg.log"; exit 1; }
+  rm -rf "$t"
+done
+if [[ -n $CHAVE ]]; then
+  for f in "$R"/dist/*.pkg.tar.zst; do
+    [[ -f $f.sig && $f.sig -nt $f ]] || gpg --batch --yes -u "$CHAVE" --detach-sign "$f"
+  done
+fi
+ls -la "$R/dist"

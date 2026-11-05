@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# simba:summary=Toggles the window gaps globally between no gaps and the default.
+
+simba-hyprland-toggle window-no-gaps

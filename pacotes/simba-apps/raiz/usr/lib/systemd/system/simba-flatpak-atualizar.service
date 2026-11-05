@@ -1,0 +1,11 @@
+[Unit]
+Description=Simba OS: atualiza os apps da Loja (Flatpak)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update --system -y --noninteractive
+ExecStartPost=/usr/bin/flatpak uninstall --system -y --noninteractive --unused
+Nice=10
+IOSchedulingClass=idle

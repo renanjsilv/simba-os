@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# simba:summary=Restore the default Simba Plymouth boot theme and SDDM login screen
+# simba:requires-sudo=true
+
+set -euo pipefail
+
+"$SIMBA_PATH/bin/simba-refresh-plymouth"
+"$SIMBA_PATH/bin/simba-refresh-sddm"

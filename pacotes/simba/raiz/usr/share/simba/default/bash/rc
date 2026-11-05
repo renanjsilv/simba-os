@@ -1,0 +1,7 @@
+: "${SIMBA_PATH:=/usr/share/simba}"
+source "$SIMBA_PATH/default/bash/envs"
+source "$SIMBA_PATH/default/bash/shell"
+source "$SIMBA_PATH/default/bash/aliases"
+source "$SIMBA_PATH/default/bash/functions"
+source "$SIMBA_PATH/default/bash/init"
+[[ $- == *i* ]] && bind -f "$SIMBA_PATH/default/bash/inputrc"

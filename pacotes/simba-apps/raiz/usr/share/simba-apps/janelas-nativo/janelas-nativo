@@ -1,0 +1,53 @@
+#!/bin/bash
+# janelas-nativo — barras de título e controles de janela estilo Windows 11 no Hyprland.
+#   janelas-nativo carregar     compila se o Hyprland mudou e carrega o plugin (autostart)
+#   janelas-nativo compilar     compila contra os cabeçalhos instalados (/usr/include/hyprland)
+#   janelas-nativo ligar|desligar   barras de título (persistente; pedidos dos apps continuam)
+#   janelas-nativo estado       diagnóstico (foco de teclado e decoração de cada janela)
+set -u
+DIR="${JANELAS_FONTE:-/usr/share/simba-apps/janelas-nativo}"   # fonte (pacote simba-apps)
+BUILD="${XDG_CACHE_HOME:-$HOME/.cache}/janelas-nativo"            # compilado por usuário/Hyprland
+SO="$BUILD/janelas.so"
+CONF="$HOME/.config/janelas-nativo"
+LOG="$BUILD/compilar.log"
+
+avisar() { notify-send -a "Janelas" -i preferences-system-windows "Janelas" "$1" 2>/dev/null || true; echo "$1" >&2; }
+
+commit_rodando() { hyprctl version -j 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]*\)".*/\1/p' | head -1; }
+commit_cabecalhos() { sed -n 's/.*GIT_COMMIT_HASH *"\([0-9a-f]*\)".*/\1/p' /usr/include/hyprland/src/version.h 2>/dev/null | head -1; }
+
+compilar() {
+  mkdir -p "$BUILD"
+  if make -C "$DIR" -B OUT="$SO" >"$LOG" 2>&1; then
+    commit_cabecalhos > "$BUILD/.commit"
+    return 0
+  fi
+  avisar "Não consegui compilar o plugin de janelas (veja $LOG)."
+  return 1
+}
+
+carregado() { hyprctl plugin list 2>/dev/null | grep -q '^Plugin janelas '; }
+
+case "${1:-carregar}" in
+  compilar) compilar ;;
+  carregar)
+    RUN=$(commit_rodando); HDR=$(commit_cabecalhos); FEITO=$(cat "$BUILD/.commit" 2>/dev/null)
+    if [ ! -f "$SO" ] || [ "$FEITO" != "$RUN" ]; then
+      if [ "$HDR" = "$RUN" ]; then
+        compilar || exit 1
+      else
+        # o pacman já trocou o Hyprland, mas esta sessão ainda roda o antigo
+        avisar "Hyprland atualizado: saia e entre de novo na sessão para as barras de janela voltarem."
+        exit 1
+      fi
+    fi
+    carregado && exit 0
+    R=$(hyprctl plugin load "$SO" 2>&1)
+    case "$R" in ok*) exit 0 ;; *) avisar "Plugin de janelas não carregou: $R"; exit 1 ;; esac
+    ;;
+  recarregar) carregado && hyprctl plugin unload "$SO" >/dev/null; exec "$0" carregar ;;
+  ligar) rm -f "$CONF/desligado"; hyprctl janelas ligar ;;
+  desligar) mkdir -p "$CONF"; : > "$CONF/desligado"; hyprctl janelas desligar ;;
+  estado) hyprctl janelas foco; echo; hyprctl janelas lista ;;
+  *) sed -n '2,7p' "$0"; exit 2 ;;
+esac

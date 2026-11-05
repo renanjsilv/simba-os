@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# simba:summary=Toggle screensaver availability
+
+simba-toggle screensaver-off
+
+if simba-toggle-enabled screensaver-off; then
+  simba-notification-send -g 󱄄 "Protetor de tela desativado"
+else
+  simba-notification-send -g 󱄄 "Protetor de tela ativado"
+fi

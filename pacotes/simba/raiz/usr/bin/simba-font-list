@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# simba:summary=List available monospace fonts
+# simba:examples=simba font list | simba font set "CaskaydiaMono Nerd Font"
+
+fc-list :spacing=100 -f "%{family[0]}\n" | grep -v -i -E 'emoji|signwriting|simba' | sort -u

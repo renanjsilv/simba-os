@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""simba-saude — confere se o sistema ficou bem depois de uma atualização.
+
+    simba-saude [--desde "2026-11-05 13:00"] [--json] [--avisar]
+
+Olha: serviços com falha (sistema e usuário), programas que travaram (core dumps), pacotes do
+AUR que continuam pendentes, erros da barra (simba-shell), arquivos .pacnew novos em /etc e se
+é preciso reiniciar (kernel novo). --avisar manda uma notificação se achar algo.
+Sai com 0 se está tudo bem, 1 se achou problema.
+"""
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.expanduser("/usr/share/simba-apps/idiomas"))
+from simba_i18n import t as _t  # noqa: E402
+
+IGNORAR_ALVO = os.path.expanduser("~/.config/simba/atualizacoes-ignoradas.json")
+
+
+def sh(*a, timeout=60):
+    try:
+        return subprocess.run(a, capture_output=True, text=True, timeout=timeout).stdout
+    except Exception:
+        return ""
+
+
+def main():
+    args = sys.argv[1:]
+    desde = args[args.index("--desde") + 1] if "--desde" in args else time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 3600))
+    epoca = time.mktime(time.strptime(desde[:16], "%Y-%m-%d %H:%M"))
+    achados = []
+
+    falhas = [l.split()[0] for l in sh("systemctl", "--failed", "--no-legend", "--plain").splitlines() if l.strip()]
+    falhas_u = [l.split()[0] for l in sh("systemctl", "--user", "--failed", "--no-legend", "--plain").splitlines() if l.strip()]
+    if falhas or falhas_u:
+        achados.append({"tipo": "servicos", "titulo": _t("Serviços com falha"), "itens": falhas + [f"{u} ({_t('usuário')})" for u in falhas_u],
+                        "dica": _t("Veja com: systemctl status <nome>")})
+
+    dumps = []
+    for l in sh("coredumpctl", "list", "--since", desde, "--no-legend", "--no-pager").splitlines():
+        exe = next((c for c in l.split() if c.startswith("/")), "")
+        if exe:
+            dumps.append(os.path.basename(exe))
+    dumps = sorted({d for d in dumps if d and d != "-"})
+    if dumps:
+        achados.append({"tipo": "travamentos", "titulo": _t("Programas que travaram"), "itens": dumps,
+                        "dica": _t("O Simba mostra a análise ao clicar na notificação de travamento")})
+
+    try:
+        ignorados = json.load(open(IGNORAR_ALVO))
+    except Exception:
+        ignorados = {}
+    aur = []
+    for l in sh("yay", "-Qua").splitlines():
+        m = re.match(r"^(\S+)\s+\S+\s+->\s+(\S+)", l)
+        if m and ignorados.get(m.group(1)) != m.group(2):
+            aur.append(m.group(1))
+    if aur:
+        achados.append({"tipo": "aur", "titulo": _t("Pacotes do AUR que não atualizaram"), "itens": aur,
+                        "dica": _t("Configurações › Sistema › O que vai ser atualizado: dá para ignorar uma versão problemática")})
+
+    erros = sh("journalctl", "--user", "-t", "simba-shell", "--since", desde, "--no-pager", "-o", "cat") + \
+        sh("journalctl", "-t", "simba-shell", "--since", desde, "--no-pager", "-o", "cat")
+    erros = re.sub(r"\x1b\[[0-9;]*m", "", erros)
+    linhas = sorted({re.sub(r"\s+", " ", l.strip())[:160] for l in erros.splitlines()
+                     if re.search(r"\b(ERROR|TypeError|ReferenceError|is not defined|Cannot assign)\b", l)})
+    if linhas:
+        achados.append({"tipo": "barra", "titulo": _t("Erros na barra (simba-shell)"), "itens": linhas[:8],
+                        "dica": _t("Configurações › Sistema › Reiniciar a barra e as notificações")})
+
+    pacnew = [p for p in glob.glob("/etc/**/*.pacnew", recursive=True) if os.path.getmtime(p) >= epoca]
+    if pacnew:
+        achados.append({"tipo": "pacnew", "titulo": _t("Configurações novas para revisar (.pacnew)"), "itens": pacnew,
+                        "dica": _t("Compare com: sudo pacdiff")})
+
+    if not os.path.isdir(f"/usr/lib/modules/{os.uname().release}"):
+        achados.append({"tipo": "reiniciar", "titulo": _t("Reinicie o computador"), "itens": [_t("O kernel foi atualizado")],
+                        "dica": _t("Até reiniciar, dispositivos novos (pendrive, fone USB) podem não funcionar")})
+
+    if "--json" in args:
+        print(json.dumps({"desde": desde, "ok": not achados, "achados": achados}, ensure_ascii=False))
+    else:
+        if not achados:
+            print("\033[32m✓ " + _t("Tudo certo depois da atualização.") + "\033[0m")
+        for a in achados:
+            print(f"\033[33m! {a['titulo']}\033[0m")
+            for i in a["itens"]:
+                print(f"    • {i}")
+            print(f"    \033[2m{a['dica']}\033[0m")
+    if achados and "--avisar" in args:
+        corpo = " · ".join(a["titulo"] for a in achados)
+        subprocess.run(["notify-send", "-a", "Simba OS", "-i", "dialog-warning", _t("A atualização deixou pendências"), corpo],
+                       capture_output=True)
+    sys.exit(1 if achados else 0)
+
+
+if __name__ == "__main__":
+    main()

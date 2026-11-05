@@ -1,0 +1,457 @@
+#!/bin/bash
+# Draco (internally still "draco"): voice assistant.
+#   draco start  -> begin recording the microphone (bound to F10 press)
+#   draco stop   -> stop, transcribe (Whisper via Groq/voxtype), ask Claude Code, speak the answer (Piper)
+#   draco cancel -> abort whatever Draco is doing (bound to Esc)
+#   draco reset  -> forget the current conversation
+#   draco say "texto" -> just speak a text
+#   draco perguntar "texto" -> a typed request (Start menu): same as voice, minus the mic
+#   draco escuta liga|desliga|status -> the "Draco" wake word (wake.py, draco-wake.service)
+#   draco treinar -> ~4 min session that teaches the wake word your voice, then retrains it
+#   draco config -> settings window: AI provider, transcription, voice, timings (Super+F10)
+#   draco wake-listen | wake-process <wav> <s> <trigger.wav> [trigger.json] | wake-cancel -> called by wake.py
+#     (wake-process <wav> -  = a reply after Draco asked something: no "Draco" needed)
+
+DATA="$HOME/.local/share/draco"          # dados: venv, vozes, Whisper, logs, workdir
+CODIGO="${DRACO_CODIGO:-/usr/share/draco}" # código (pacote simba-draco)
+RUN="${XDG_RUNTIME_DIR:-/tmp}/draco"
+CLAUDE="$HOME/.local/share/mise/installs/claude/latest/claude"
+TTS="$CODIGO/tts.py" # keeps the Piper voice loaded; see the file for details
+WHISPER_MODEL="small" # local fallback transcription
+CONFIG="$CODIGO/lib/config.py" # settings (~/.config/draco): AI provider, transcription, voice, timings
+LOG="$DATA/draco.log"
+
+mkdir -p "$RUN" "$DATA/workdir"
+
+notify() { notify-send -a Draco -t "${2:-4000}" "Draco" "$1"; }
+
+# DRACO_PRONTO, DRACO_STT_URL/KEY/MODELO, DRACO_CLAUDE_ENV, DRACO_MEMORIA (see config.py env)
+load_config() { eval "$(python3 "$CONFIG" env)"; }
+
+# Settings window (~/.config/quickshell/draco-config); $1: why it opened, shown on top.
+settings() {
+  if qs -c draco-config ipc call config show "${1:-}" >/dev/null 2>&1; then return; fi
+  DRACO_CONFIG_MOTIVO="${1:-}" setsid -f qs -c draco-config -n >/dev/null 2>&1
+}
+
+# Nothing to answer with yet (fresh install): open the settings instead.
+need_config() {
+  [[ -n $DRACO_PRONTO ]] && return 1
+  log "sem IA configurada: abrindo as configurações"
+  ui hide
+  settings "$(simba-t "Escolha qual IA o Draco vai usar para começar.")"
+  return 0
+}
+log() { echo "$(date '+%F %T') $*" >>"$LOG"; }
+
+# Primeiro nome de quem usa o computador (campo de nome da conta; senão o login com maiúscula)
+nome_usuario() {
+  local n
+  n=$(getent passwd "$USER" | cut -d: -f5 | cut -d, -f1 | awk '{print $1}')
+  [[ -n $n ]] || n=${USER^}
+  printf '%s' "$n"
+}
+
+# Instruções da IA no idioma da sessão: prompt.<lingua>.md (ex.: prompt.en.md); português = prompt.md
+prompt_file() {
+  local f="$CODIGO/prompt.${DRACO_LINGUA:-pt}.md"
+  [[ ${DRACO_LINGUA:-pt} != pt && -f $f ]] && echo "$f" || echo "$CODIGO/prompt.md"
+}
+
+# On-screen orb (Quickshell config in ~/.config/quickshell/draco). Commands go through
+# $RUN/orb.cmd, which the orb watches: milliseconds, where `qs ipc call` costs ~260 ms.
+orb_running() { # pid cached in $RUN/orb.pid: pgrep alone costs ~120 ms
+  local pid
+  pid=$(cat "$RUN/orb.pid" 2>/dev/null)
+  [[ -n $pid && $(cat "/proc/$pid/comm" 2>/dev/null) == qs ]] && return 0
+  pid=$(pgrep -f '^(/usr/bin/)?qs -c draco -n' | head -n1)
+  [[ -n $pid ]] && echo "$pid" >"$RUN/orb.pid"
+}
+ensure_ui() {
+  orb_running && return
+  rm -f "$RUN/orb.cmd"
+  qs -c draco -n -d >/dev/null 2>&1
+  for _ in {1..60}; do
+    qs -c draco ipc show >/dev/null 2>&1 && return
+    sleep 0.05
+  done
+}
+ui() {
+  [[ -n $DRACO_SECO ]] && return 0 # tests: never touch the on-screen orb
+  touch "$RUN/shown"
+  [[ $(stat -c %s "$RUN/orb.cmd" 2>/dev/null || echo 0) -gt 100000 ]] && : >"$RUN/orb.cmd"
+  jq -cn --arg s "$(date +%s%N)" --arg c "$1" '{s: $s, c: $c, a: $ARGS.positional}' --args -- "${@:2}" >>"$RUN/orb.cmd"
+  orb_running
+}
+
+# Show an error on the orb, falling back to a notification.
+fail() { ui fail "$1" || notify "$1"; }
+
+# Kill a process and all its descendants; the parent goes first so it can't
+# react to its children dying (e.g. by speaking an error). $2: signal (TERM).
+killtree() {
+  local pids=("$1") i=0 c
+  while ((i < ${#pids[@]})); do
+    for c in $(pgrep -P "${pids[i]}"); do pids+=("$c"); done
+    ((i++))
+  done
+  kill -"${2:-TERM}" "${pids[@]}" 2>/dev/null
+}
+
+killpidfile() {
+  [[ -f $RUN/$1.pid ]] && killtree "$(cat "$RUN/$1.pid")" "$2"
+  rm -f "$RUN/$1.pid"
+}
+
+stop_speaking() { killpidfile speak; }
+
+# Claude Code, as Draco runs it. Speed: low effort, no MCP connectors, only the tools
+# Draco uses (smaller prompt, ~40% fewer input tokens); the model and provider come
+# from the settings (DRACO_CLAUDE_ENV: Sonnet by default, measured ~2 s faster than
+# Opus per request). Helper commands (dr-*) live in $DATA/bin. Extra args go last.
+brain() {
+  local cenv=()
+  eval "cenv=($DRACO_CLAUDE_ENV)"
+  cd "$DATA/workdir" || return
+  exec env "${cenv[@]}" PATH="$CODIGO/bin:$PATH" "$CLAUDE" -p \
+    --dangerously-skip-permissions \
+    --effort low --strict-mcp-config --exclude-dynamic-system-prompt-sections \
+    --tools Bash,Read,Edit,Skill,WebSearch,WebFetch \
+    --output-format stream-json --verbose \
+    --append-system-prompt "$(sed "s/{USUARIO}/$(nome_usuario)/g" "$(prompt_file)")" "$@"
+}
+
+continue_flag() { # --continue within the conversation memory window (always for a reply to Draco's question)
+  local last
+  [[ -f $RUN/followup.reply ]] && { echo --continue; return; }
+  last=$(cat "$RUN/last" 2>/dev/null || echo 0)
+  (($(date +%s) - last < ${DRACO_MEMORIA:-600})) && echo --continue
+}
+
+# Start Claude Code while you are still talking: its ~2 s startup is then done by the
+# time the transcript is ready. It waits for the request on a FIFO (stream-json input);
+# brain-hold keeps the FIFO open until process() writes the request (or 90 s pass).
+brain_warm() {
+  brain_kill
+  rm -f "$RUN/brain.in" "$RUN/brain.out"
+  mkfifo "$RUN/brain.in" || return
+  # shellcheck disable=SC2046
+  (brain $(continue_flag) --input-format stream-json <"$RUN/brain.in" >"$RUN/brain.out" 2>>"$LOG") &
+  echo $! >"$RUN/brain.pid"
+  (exec 3>"$RUN/brain.in"; sleep 90) &
+  echo $! >"$RUN/brain-hold.pid"
+}
+
+brain_kill() {
+  killpidfile brain-hold
+  killpidfile brain KILL
+  rm -f "$RUN/brain.in"
+}
+
+# Claude's event stream for request $1: from the warm one if it's there, else a new one.
+ask() {
+  local pid
+  pid=$(cat "$RUN/brain.pid" 2>/dev/null)
+  if [[ -n $pid && -p $RUN/brain.in ]] && kill -0 "$pid" 2>/dev/null &&
+    kill -0 "$(cat "$RUN/brain-hold.pid" 2>/dev/null)" 2>/dev/null; then
+    jq -cn --arg t "$1" '{type: "user", message: {role: "user", content: $t}}' >"$RUN/brain.in"
+    killpidfile brain-hold # EOF after the request: Claude ends when it's answered
+    rm -f "$RUN/brain.in"
+    log "IA: já estava pronta"
+    tail -n +1 -f --pid="$pid" "$RUN/brain.out"
+  else
+    # shellcheck disable=SC2046
+    (brain $(continue_flag) -- "$1" </dev/null 2>>"$LOG")
+  fi
+}
+
+speak() {
+  stop_speaking
+  (
+    ensure_ui
+    : >"$RUN/speech.level"
+    ui speak "$1" "$RUN/speech.level" || notify "$1" 10000
+    python3 "$TTS" say --levels "$RUN/speech.level" "$1"
+    ui done
+  ) &
+  echo $! >"$RUN/speak.pid"
+  wait
+  rm -f "$RUN/speak.pid"
+}
+
+start() {
+  [[ -f $RUN/rec.pid ]] && kill -0 "$(cat "$RUN/rec.pid")" 2>/dev/null && return
+  load_config
+  need_config && return
+  killpidfile job KILL # a new request replaces the one still running
+  stop_speaking
+  pw-record --rate 16000 --channels 1 --format s16 "$RUN/input.wav" &
+  echo $! >"$RUN/rec.pid"
+  log "start (pid $!)"
+  brain_warm
+  ensure_ui
+  ui listening || notify "🎙️ Ouvindo..." 60000
+}
+
+# $1: for the wake word, the seconds of audio before the detection at the start of
+# input.wav (the transcript must say "Draco" there); $2: that trigger audio, kept for
+# retraining the detector (wake-train/auto-sim = it was "Draco", auto-nao = it wasn't);
+# $3: wake.py's Groq transcript of it, if it got one.
+process() {
+  local text reply duration wake=() rc
+
+  duration=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$RUN/input.wav" 2>/dev/null)
+  log "gravação: ${duration}s"
+  [[ -n $1 ]] && wake=(--wake "$1")
+
+  if [[ -z $1 ]] && awk "BEGIN{exit !(${duration:-0} < 0.6)}"; then
+    fail "$(simba-t "Segure F10 enquanto fala")"
+    return
+  fi
+
+  ui transcribe
+
+  # F10 audio comes straight from pw-record: cut the low rumble (fan/table, < 80 Hz)
+  # that was burying the voice; wake.py already filters its own audio.
+  if [[ -z $1 ]] && ffmpeg -v error -y -i "$RUN/input.wav" -af highpass=f=80,highpass=f=80 "$RUN/input-hp.wav"; then
+    mv "$RUN/input-hp.wav" "$RUN/input.wav"
+  fi
+
+  # Whisper na nuvem (Groq/OpenAI, o que estiver nas configurações); senão, ou se falhar, local.
+  # Sem prompt: o Whisper repete o prompt quando o áudio é ruim ("Draco, assistente do computador.").
+  # verbose_json: tempos de cada palavra (para achar o "Draco") e notas de cada trecho
+  # (para jogar fora o que o Whisper inventou no silêncio); veja lib/transcript.py.
+  rc=1
+  if [[ -n $DRACO_STT_URL ]]; then
+    stt() { # <wav> <out.json>
+      curl -sS --max-time 15 "$DRACO_STT_URL/audio/transcriptions" \
+        -H "Authorization: Bearer $DRACO_STT_KEY" \
+        -F model="$DRACO_STT_MODELO" -F language="${DRACO_LINGUA:-pt}" -F temperature=0 -F response_format=verbose_json \
+        -F 'timestamp_granularities[]=word' -F 'timestamp_granularities[]=segment' \
+        -F file=@"$1" -o "$2" 2>>"$LOG"
+    }
+    # The trigger clip alone, in parallel: Whisper hears the name in it even when the
+    # whole recording is noisy (lib/transcript.py --gatilho).
+    rm -f "$RUN/trigger.json"
+    if [[ -s $3 ]]; then cp "$3" "$RUN/trigger.json"
+    elif [[ -n $2 ]]; then stt "$2" "$RUN/trigger.json" &
+    fi
+    stt "$RUN/input.wav" "$RUN/transcript.json"
+    wait
+    [[ -s $RUN/trigger.json ]] && wake+=(--gatilho "$RUN/trigger.json")
+    if jq -e '.segments' "$RUN/transcript.json" >/dev/null 2>&1; then
+      text=$(python3 "$CODIGO/lib/transcript.py" groq "$RUN/transcript.json" "${wake[@]}")
+      rc=$?
+      log "transcrição: nuvem"
+    else
+      log "transcrição na nuvem falhou"
+    fi
+  fi
+  if ((rc == 1)); then
+    text=$(voxtype -q --model "$WHISPER_MODEL" --language "${DRACO_LINGUA:-pt}" \
+      transcribe "$RUN/input.wav" 2>/dev/null | tail -n1)
+    log "transcrição: local"
+    text=$(python3 "$CODIGO/lib/transcript.py" text "$text" "${wake[@]:0:2}")
+    rc=$?
+  fi
+
+  # Privacy: the trigger audio ($2) is no longer kept in wake-train/auto-sim|auto-nao.
+  if ((rc == 2)); then
+    log "alarme falso: ninguém disse \"Draco\""
+    ui hide
+    return
+  fi
+  if ((rc == 3)); then
+    log "só \"Draco\", sem pedido"
+    ui hide
+    return
+  fi
+
+  log "pedido recebido"
+  responder "$text"
+}
+
+# Pergunta já em texto (transcrita ou digitada): pensa, age, fala a resposta.
+responder() {
+  local text=$1 reply
+  [[ -n $DRACO_SECO ]] && { echo "$text"; return; } # tests: stop before Claude
+
+  if [[ -z $text || ${#text} -lt 2 ]]; then
+    fail "$(simba-t "Não entendi nada")"
+    return
+  fi
+  ui think "$text"
+
+  # Stream Claude's events: show each action on screen, and shrink the orb
+  # into the voice line once the first action starts.
+  # The request carries the date and time, so "que dia é hoje" needs no extra step.
+  local line type desc acted=0 failed=0 now_txt
+  if [[ ${DRACO_LINGUA:-pt} == pt ]]; then now_txt=$(LC_TIME=pt_BR.UTF-8 date '+%A, %d/%m/%Y, %H:%M')
+  else now_txt=$(LC_TIME=en_US.UTF-8 date '+%A, %m/%d/%Y, %H:%M'); fi
+  while IFS= read -r line; do
+    type=$(jq -r '.type // empty' <<<"$line" 2>/dev/null)
+    case $type in
+      assistant)
+        desc=$(jq -r '.message.content[]? | select(.type == "tool_use") | .input.description // .name' <<<"$line" | tail -n1)
+        if [[ -n $desc ]]; then
+          ui action "$desc"
+          # Shrink the orb as soon as Draco starts acting, so the screen (and
+          # the OCR in the dr-* helpers) can see what it is doing.
+          ((acted)) || { acted=1; ui acted; }
+        fi
+        ;;
+      result)
+        reply=$(jq -r '.result // empty' <<<"$line")
+        [[ $(jq -r '.is_error' <<<"$line") == true ]] && failed=1
+        break
+        ;;
+    esac
+  done < <(ask "[$(simba-t "agora"): $now_txt] $text")
+  date +%s >"$RUN/last"
+  log "resposta pronta"
+
+  # Not signed in / key refused / out of credit: say so, and open the settings.
+  if ((failed)) && grep -qiE "api key|login|auth|credit|billing|balance|quota|401|403|402" <<<"$reply"; then
+    log "erro da IA (conta/chave)"
+    reply="$(simba-t "Não consegui falar com a IA: a conta ou a chave não está funcionando. Abri as configurações.")"
+    settings "$(simba-t "A IA recusou o pedido: confira a conta ou a chave.")"
+  fi
+  [[ -z $reply ]] && reply="$(simba-t "Desculpe, não consegui responder.")"
+  speak "$reply"
+  followup "$reply"
+}
+
+# Pedido digitado (menu Iniciar › "Pergunte ao Draco"): mesmo caminho da voz,
+# sem gravar nem transcrever.
+perguntar() {
+  local text="$*"
+  [[ -n ${text// /} ]] || return 0
+  load_config
+  need_config && return
+  killpidfile job KILL
+  stop_speaking
+  echo $$ >"$RUN/job.pid"
+  ensure_ui
+  log "pedido digitado"
+  brain_warm
+  responder "$text"
+  [[ $(cat "$RUN/job.pid" 2>/dev/null) == "$$" ]] && { rm -f "$RUN/job.pid"; [[ -n $FOLLOWUP ]] || brain_kill; }
+}
+
+stop() {
+  [[ -f $RUN/rec.pid ]] || { log "stop sem gravação ativa"; ui hide; return; }
+  load_config
+  local pid
+  pid=$(cat "$RUN/rec.pid")
+  rm -f "$RUN/rec.pid"
+  sleep 0.3 # keep the tail of the last word
+  kill -INT "$pid" 2>/dev/null
+  while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
+  echo $$ >"$RUN/job.pid"
+  process
+  [[ $(cat "$RUN/job.pid" 2>/dev/null) == "$$" ]] && { rm -f "$RUN/job.pid"; [[ -n $FOLLOWUP ]] || brain_kill; }
+}
+
+# Wake word: wake.py heard "Draco" and is recording the rest of the sentence.
+wake_listen() {
+  ensure_ui # the orb first: it's what you're waiting to see
+  ui listening || notify "🎙️ Ouvindo..." 15000
+  touch "$RUN/wake.capturing"
+  killpidfile job KILL
+  stop_speaking
+  log "wake word"
+  load_config
+  [[ -n $DRACO_PRONTO ]] && brain_warm
+}
+
+# Draco ended with a question ("Quer que eu pesquise?"): open the mic for the answer,
+# no "Draco" needed. wake.py does the listening (same 5 s wait / 2 s silence); without
+# the wake word service, nothing happens.
+followup() {
+  local end
+  end=$(sed -E "s/[[:space:]\"'”»)]+\$//" <<<"$1")
+  [[ $end == *\? ]] || return
+  [[ -n $DRACO_SECO || -f $DATA/wake.disabled ]] && return
+  systemctl --user is-active --quiet draco-wake.service || return
+  log "pergunta no fim: ouvindo a resposta"
+  brain_kill # before the mic opens: the listener warms a fresh one
+  FOLLOWUP=1
+  touch "$RUN/wake.followup"
+}
+
+wake_process() {
+  rm -f "$RUN/wake.capturing"
+  [[ -s $1 ]] || { ui hide; return; }
+  load_config
+  need_config && return
+  killpidfile job KILL # (wake.py may not have called wake-listen yet)
+  stop_speaking
+  [[ -n $DRACO_SECO ]] || ensure_ui
+  cp "$1" "$RUN/input.wav"
+  echo $$ >"$RUN/job.pid"
+  if [[ $2 == - ]]; then # the answer to Draco's question: like F10, no "Draco" to find
+    touch "$RUN/followup.reply"
+    process
+    rm -f "$RUN/followup.reply"
+  else
+    process "${2:-0}" "$3" "$4"
+  fi
+  [[ $(cat "$RUN/job.pid" 2>/dev/null) == "$$" ]] && { rm -f "$RUN/job.pid"; [[ -n $FOLLOWUP ]] || brain_kill; }
+}
+
+escuta() {
+  case $1 in
+    liga) rm -f "$DATA/wake.disabled"; systemctl --user start draco-wake.service; echo "Escuta do \"Draco\" ligada." ;;
+    desliga) touch "$DATA/wake.disabled"; echo "Escuta do \"Draco\" desligada (microfone fechado)." ;;
+    *)
+      if [[ -f $DATA/wake.disabled ]]; then echo "Escuta: desligada"
+      elif systemctl --user is-active --quiet draco-wake.service; then echo "Escuta: ligada"
+      else echo "Escuta: serviço parado (draco escuta liga)"; fi
+      ;;
+  esac
+}
+
+cancel() {
+  # Esc is bound globally (without swallowing the key), so do nothing unless
+  # Draco is actually busy or on screen.
+  [[ -f $RUN/rec.pid || -f $RUN/job.pid || -f $RUN/speak.pid || -f $RUN/wake.capturing ||
+    -n $(find "$RUN/shown" -newermt '-20 seconds' 2>/dev/null) ]] || return 0
+  # Draco's own keystrokes (dr-key) go through the compositor and hit this bind too.
+  [[ -n $(find "$RUN/synthetic-keys" -newermt '-1.5 seconds' 2>/dev/null) ]] && return 0
+  if [[ -f $RUN/rec.pid ]]; then
+    kill "$(cat "$RUN/rec.pid")" 2>/dev/null
+    rm -f "$RUN/rec.pid"
+  fi
+  if [[ -f $RUN/wake.capturing ]]; then # tell wake.py to drop what it's recording
+    touch "$RUN/wake.abort"
+    rm -f "$RUN/wake.capturing"
+  fi
+  killpidfile job KILL # Claude must not get to run one more action
+  rm -f "$RUN/wake.followup" "$RUN/followup.reply"
+  brain_kill
+  stop_speaking
+  ui hide
+  rm -f "$RUN/shown"
+  log "cancelado"
+}
+
+case "$1" in
+  start) start ;;
+  stop) stop ;;
+  cancel) cancel ;;
+  reset) rm -f "$RUN/last" && notify "$(simba-t "Conversa reiniciada.")" ;;
+  say) speak "${*:2}" ;;
+  perguntar) perguntar "${@:2}" ;;
+  escuta) escuta "$2" ;;
+  config) settings "${*:2}" ;;
+  treinar) exec "$DATA/venv/bin/python" -I "$CODIGO/wake_record.py" "${@:2}" ;;
+  # primeira vez (ou depois de atualizar o Python): ambiente Python e vozes do idioma da sessão
+  preparar) exec "$CODIGO/bin/draco-preparar" "${@:2}" ;;
+  servidor-voz)
+    [[ -x $DATA/venv/bin/python ]] || "$CODIGO/bin/draco-preparar" --quieto || exit 1
+    exec "$DATA/venv/bin/python" "$TTS" serve ;;
+  wake-listen) wake_listen ;;
+  wake-process) wake_process "${@:2}" ;;
+  wake-cancel) rm -f "$RUN/wake.capturing"; brain_kill; ui hide ;;
+  *) echo "uso: draco start|stop|cancel|reset|say <texto>|escuta liga|desliga|status|config|treinar" >&2; exit 1 ;;
+esac

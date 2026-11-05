@@ -1,0 +1,73 @@
+#!/bin/bash
+# dr-lembrete: reminders and timers at the exact time, in plain Portuguese.
+#
+#   dr-lembrete em "<duração>" "<texto>"     "20 minutos", "1h30", "meia hora", "2 horas e 15 minutos"
+#   dr-lembrete as "<quando>" "<texto>"      "21h", "9 da noite", "amanhã 8h", "segunda 10h", "20/10 15h"
+#   dr-lembrete timer "<duração>"            same as em, with "Timer de <duração> acabou"
+#   dr-lembrete lista
+#   dr-lembrete cancelar "<parte do texto>"  |  dr-lembrete limpar
+#   --silencioso                             notification only (default: Draco also says it out loud)
+#
+# Uses the same systemd timers/naming as simba-reminder, so they show up in Simba's
+# reminders indicator and `simba-reminder show|clear`, but fire at the exact time.
+
+LIB="$(dirname "$0")/../lib"
+DIR="${XDG_RUNTIME_DIR:-/tmp}/simba-reminders"
+mkdir -p "$DIR"
+
+speak=1
+args=()
+for a in "$@"; do [[ $a == --silencioso ]] && speak=0 || args+=("$a"); done
+set -- "${args[@]}"
+
+schedule() { # schedule <em|as> <when> <message>
+  local parsed at label now minutes unit
+  parsed=$(python3 "$LIB/when.py" "$1" "$2") || exit 1
+  at=${parsed%%$'\t'*}; label=${parsed#*$'\t'}
+  now=$(date +%s)
+  minutes=$(((at - now + 59) / 60)); ((minutes < 1)) && minutes=1
+  unit="simba-reminder-${minutes}m-$now"
+  printf '%s' "$3" >"$DIR/$unit.message"
+  systemd-run --user --quiet --collect --unit="$unit" --on-calendar="@$at" \
+    bash -c 'simba-notification-send -g 󰢌 "Lembrete" "$1"; [[ $3 == 1 ]] && "/usr/bin/draco" say "Lembrete: $1"; rm -f "$2"; simba-shell -q simba.indicators refresh >/dev/null 2>&1 || true' \
+    bash "$3" "$DIR/$unit.message" "$speak" || { echo "Não consegui agendar." >&2; exit 1; }
+  simba-shell -q simba.indicators refresh >/dev/null 2>&1
+  local when_day
+  case $(date -d "@$at" +%F) in
+    "$(date +%F)") when_day="hoje" ;;
+    "$(date -d tomorrow +%F)") when_day="amanhã" ;;
+    *) when_day="em $(date -d "@$at" '+%A, %d/%m')" ;;
+  esac
+  echo "Lembrete marcado para $when_day às $(date -d "@$at" +%H:%M) ($label): $3"
+}
+
+case $1 in
+  em | as | às)
+    [[ -n $2 && -n $3 ]] || { echo "uso: dr-lembrete $1 \"<quando>\" \"<texto>\"" >&2; exit 2; }
+    schedule "${1/às/as}" "$2" "${*:3}"
+    ;;
+  timer)
+    [[ -n $2 ]] || { echo "uso: dr-lembrete timer \"<duração>\"" >&2; exit 2; }
+    schedule em "$2" "Timer de $2 acabou"
+    ;;
+  lista)
+    simba-reminder show -j | jq -r '.reminders // [] | if length == 0 then "Nenhum lembrete pendente." else .[] | "\(.at | localtime | strftime("%d/%m")) \(.atTime) - \(.label)" end' 2>/dev/null ||
+      echo "Nenhum lembrete pendente."
+    ;;
+  cancelar)
+    [[ -n $2 ]] || { echo "uso: dr-lembrete cancelar \"<parte do texto>\"" >&2; exit 2; }
+    n=0
+    for f in "$DIR"/simba-reminder-*.message; do
+      [[ -f $f ]] || continue
+      if grep -qiF -- "$2" "$f"; then
+        unit=$(basename "$f" .message)
+        systemctl --user stop "$unit.timer" 2>/dev/null
+        echo "Cancelado: $(<"$f")"; rm -f "$f"; n=$((n + 1))
+      fi
+    done
+    simba-shell -q simba.indicators refresh >/dev/null 2>&1
+    ((n)) || { echo "Nenhum lembrete com '$2'." >&2; exit 5; }
+    ;;
+  limpar) simba-reminder clear >/dev/null 2>&1; echo "Todos os lembretes foram apagados." ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

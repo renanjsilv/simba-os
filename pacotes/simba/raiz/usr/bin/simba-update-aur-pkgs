@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# simba:summary=Atualiza os pacotes do AUR (um pacote quebrado não segura os outros)
+
+pacman -Qem >/dev/null || exit 0
+
+if ! simba-pkg-aur-accessible; then
+  echo -e "\e[31m\nAUR fora do ar (atualizações do AUR puladas)\e[0m"
+  echo
+  exit 0
+fi
+
+echo -e "\e[32m\nAtualizando pacotes do AUR\e[0m"
+YAY=(yay --noconfirm --cleanafter --answerclean None --answerdiff None --answeredit None)
+
+# Versões que você mandou ignorar (Configurações › Sistema › O que vai ser atualizado):
+# ficam de fora enquanto o AUR oferecer exatamente aquela versão.
+IGNORADAS="$HOME/.config/simba/atualizacoes-ignoradas.json"
+IGNORAR="gcc14,gcc14-libs"
+if [[ -s $IGNORADAS ]]; then
+  while read -r nome _ _ nova _; do
+    [[ $(jq -r --arg p "$nome" '.[$p] // empty' "$IGNORADAS") == "$nova" ]] && IGNORAR+=",$nome" && echo "Ignorando $nome $nova (escolha sua)"
+  done < <(yay -Qua 2>/dev/null)
+fi
+
+if "${YAY[@]}" -Sua --ignore "$IGNORAR"; then
+  echo
+  exit 0
+fi
+
+# O lote falhou (uma dependência impossível, um build quebrado…): de novo, um grupo por
+# vez. Pacotes da mesma base (ex.: nvidia-utils + nvidia-dkms) vão juntos.
+echo -e "\e[33m\nA atualização em lote do AUR falhou; tentando pacote por pacote\e[0m"
+mapfile -t pend < <(yay -Qua 2>/dev/null | awk '{print $1}' | grep -vxF -f <(tr , '\n' <<<"$IGNORAR"))
+((${#pend[@]})) || exit 0
+q=$(printf '&arg[]=%s' "${pend[@]}")
+declare -A grupo
+while IFS=$'\t' read -r nome base; do
+  grupo[$base]+="$nome "
+done < <(curl -fsS --max-time 30 "https://aur.archlinux.org/rpc/v5/info?${q#&}" | jq -r '.results[] | "\(.Name)\t\(.PackageBase)"')
+
+falhas=()
+for base in "${!grupo[@]}"; do
+  echo -e "\e[32m\n→ ${grupo[$base]}\e[0m"
+  # shellcheck disable=SC2086
+  "${YAY[@]}" -S ${grupo[$base]} || falhas+=("${grupo[$base]% }")
+done
+echo
+if ((${#falhas[@]})); then
+  echo -e "\e[31mNão atualizados (o resto foi):\e[0m"
+  printf '  • %s\n' "${falhas[@]}"
+  echo -e "\e[2mVeja o erro acima de cada um. Às vezes o pacote do AUR pede uma versão de\ndependência que o Arch não tem mais; costuma se resolver numa versão seguinte.\e[0m"
+  echo
+fi
+exit 0

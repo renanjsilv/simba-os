@@ -1,0 +1,37 @@
+# Caminhos excluídos do clone do sistema (relativos a /, curingas permitidos).
+
+# Gerados de novo na máquina de destino
+swap/swapfile
+.snapshots/*
+etc/machine-id
+var/lib/dbus/machine-id
+var/lib/systemd/random-seed
+var/lib/systemd/credential.secret
+# Estado preso ao TPM/credential.secret deste PC: o systemd e o libvirt recriam no 1º boot
+var/lib/systemd/tpm2-srk-public-key.*
+var/lib/systemd/nvpcr/*
+var/lib/libvirt/secrets/secrets-encryption-key
+etc/ssh/ssh_host_*
+var/lib/NetworkManager/secret_key
+
+# Identidade do AnyDesk (cada máquina precisa de um ID próprio)
+etc/anydesk/*
+
+# root
+root/.ssh
+root/.bash_history
+root/.zsh_history
+root/.cache
+
+# Temporários, caches e logs
+tmp/*
+var/tmp/*
+var/cache/pacman/pkg/*
+var/log/*
+var/lib/systemd/coredump/*
+
+# Documentação e índices (o pacman do Simba OS já não extrai a documentação)
+usr/share/doc/*
+usr/share/gtk-doc/*
+var/lib/plocate/*
+var/cache/simba-craft/*

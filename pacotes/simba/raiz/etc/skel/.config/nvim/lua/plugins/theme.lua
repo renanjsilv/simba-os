@@ -1,0 +1,1 @@
+../../../../.local/state/simba/current/theme/neovim.lua

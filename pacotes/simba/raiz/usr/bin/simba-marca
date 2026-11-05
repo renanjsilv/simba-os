@@ -1,0 +1,6 @@
+#!/bin/bash
+# Mantém o os-release e o /etc/issue do Simba OS (gancho do pacman zz-simba-marca).
+f=/etc/os-release
+[ -L $f ] && rm -f $f
+install -m644 /usr/share/simba/etc-overrides/os-release $f
+printf 'Simba OS \\r (\\l)\n\n' > /etc/issue

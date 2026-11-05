@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=App Store
+Name[pt_BR]=Loja de Apps
+GenericName=App store
+GenericName[pt_BR]=Loja de aplicativos
+Comment=Install and update verified apps from Flathub
+Comment[pt_BR]=Instale e atualize apps verificados do Flathub
+Keywords=store;apps;install;software;flathub;bazaar;
+Keywords[pt_BR]=loja;store;apps;instalar;programas;flathub;bazaar;
+Exec=simba-loja
+Icon=simba-loja
+Categories=System;PackageManager;
+StartupWMClass=io.github.kolunmi.Bazaar
+StartupNotify=true

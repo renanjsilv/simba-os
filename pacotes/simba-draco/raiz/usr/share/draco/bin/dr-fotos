@@ -1,0 +1,91 @@
+#!/bin/bash
+# dr-fotos: Google Photos (Simba web app). Each command opens the right page directly
+# by URL, replacing the Photos window that is open.
+#
+#   dr-fotos abrir                     main timeline (most recent first)
+#   dr-fotos buscar "<termo>"          Google's own search: "praia", "cachorro", "aniversário",
+#                                      "dezembro 2025", "São Paulo", a person's name, an album name...
+#   dr-fotos albuns | pessoas | lugares | compartilhadas | lixeira | videos
+#   dr-fotos ver [--small]             screenshot of the Photos window (read it to describe what's on screen)
+#   dr-fotos foto <n>                  open the n-th result of the page (1 = first, keyboard only)
+#   dr-fotos proxima | anterior        next/previous photo in the open viewer
+#   dr-fotos baixar                    download the photo open in the viewer (prints the path)
+#   dr-fotos papel-de-parede           download the open photo and set it as the wallpaper
+#   dr-fotos mostrar | esconder | fechar
+#
+# Uploading isn't automated (it needs the browser's file picker).
+
+DIR="$(dirname "$0")"
+CLASS='^brave-photos\.google\.com' # the web app only
+BASE=https://photos.google.com
+
+focus_photos() {
+  "$DIR/dr-win" focus "$CLASS" >/dev/null || { echo "O Google Fotos não está aberto." >&2; exit 1; }
+  sleep 0.3
+}
+
+uri() { jq -rn --arg q "$1" '$q|@uri'; }
+
+open_page() { # open_page <path> <label>
+  local a
+  a=$("$DIR/dr-win" app "$CLASS" "$BASE/$1") || { echo "O Google Fotos não abriu." >&2; exit 1; }
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$a\" })" >/dev/null
+  [[ $(hyprctl activewindow -j | jq -r .fullscreen) == 0 ]] &&
+    hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized" })' >/dev/null
+  echo "Google Fotos: $2"
+}
+
+case $1 in
+  abrir) open_page "" "fotos recentes" ;;
+  buscar)
+    [[ -n $2 ]] || { echo "uso: dr-fotos buscar \"<termo>\"" >&2; exit 2; }
+    open_page "search/$(uri "${*:2}")" "busca por \"${*:2}\""
+    ;;
+  albuns | álbuns) open_page albums "álbuns" ;;
+  pessoas) open_page people "pessoas e animais" ;;
+  lugares) open_page places "lugares" ;;
+  compartilhadas) open_page sharing "compartilhamentos" ;;
+  lixeira) open_page trash "lixeira" ;;
+  videos | vídeos) open_page "search/videos" "vídeos" ;;
+  ver)
+    "$DIR/dr-win" focus "$CLASS" >/dev/null || { echo "O Google Fotos não está aberto." >&2; exit 1; }
+    sleep 0.3
+    "$DIR/dr-win" shot "$CLASS" "${2:-}"
+    ;;
+  foto)
+    [[ $2 =~ ^[0-9]+$ ]] || { echo "uso: dr-fotos foto <n>" >&2; exit 2; }
+    focus_photos
+    # Search page: Tab x4 reaches the first thumbnail once loaded; arrows move inside the grid.
+    keys=(Tab -s 150 Tab -s 150 Tab -s 150 Tab -s 150 Tab -s 200)
+    for ((i = 1; i < $2; i++)); do keys+=(Right -s 150); done
+    "$DIR/dr-key" "${keys[@]}" Return
+    sleep 2
+    echo "Foto $2 aberta."
+    ;;
+  proxima | próxima) focus_photos; "$DIR/dr-key" Right; sleep 1.5; echo "Próxima foto." ;;
+  anterior) focus_photos; "$DIR/dr-key" Left; sleep 1.5; echo "Foto anterior." ;;
+  baixar | papel-de-parede | wallpaper)
+    focus_photos
+    dir="$HOME/Pictures/Wallpapers"; [[ $1 == baixar ]] && dir=$(xdg-user-dir DOWNLOAD)
+    mkdir -p "$dir"; mark=$(mktemp); sleep 0.2
+    "$DIR/dr-key" shift+d # Google Photos shortcut: download the open photo
+    # Brave asks where to save: type the full target path into the Name field of the dialog.
+    "$DIR/dr-win" wait 'xdg-desktop-portal' 8 >/dev/null || { rm -f "$mark"; echo "A janela de salvar não abriu." >&2; exit 1; }
+    "$DIR/dr-win" focus 'xdg-desktop-portal' >/dev/null; sleep 0.4
+    "$DIR/dr-key" ctrl+a -t "$dir/foto-$(date +%Y%m%d-%H%M%S).jpg" -s 300 Return
+    f=""
+    for _ in $(seq 40); do
+      f=$(find "$dir" -maxdepth 1 -type f -newer "$mark" -name 'foto-*' -size +1k | head -1)
+      [[ -n $f ]] && break; sleep 0.5
+    done
+    rm -f "$mark"
+    [[ -n $f ]] || { echo "Não consegui baixar a foto (tem uma foto aberta no visualizador?)." >&2; exit 1; }
+    if [[ $1 == baixar ]]; then echo "Foto baixada: $f"; exit 0; fi
+    out=$("$DIR/draco-wallpaper-fit" "$f") || out=$f
+    simba-theme-bg-set "$out" >/dev/null 2>&1 && echo "Papel de parede definido: $(identify -format '%wx%h' "$out" 2>/dev/null)"
+    ;;
+  mostrar) "$DIR/dr-win" focus "$CLASS" ;;
+  esconder) "$DIR/dr-win" hide "$CLASS" ;;
+  fechar) "$DIR/dr-win" close "$CLASS" ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

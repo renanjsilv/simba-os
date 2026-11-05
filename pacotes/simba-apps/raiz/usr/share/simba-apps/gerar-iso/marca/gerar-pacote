@@ -1,0 +1,55 @@
+#!/bin/bash
+# Gera o pacote de identidade visual de uma ISO distribuível.
+#   gerar-pacote "<nome>" <estilo> <pasta-de-saída>
+# Estilos (desenhos em opcoes/, feitos a partir da foto do gato):
+#   tinta (padrão) · retrato · gravura · selo   → fundo escuro
+#   tinta-claro · lapis · caricatura            → fundo claro
+#   caricatura-escura                           → fundo escuro
+# Saída: logo.png, logo-nome.png (tela de inicialização), papel-de-parede.png,
+#        icone.png (botão Iniciar), marca.env
+set -euo pipefail
+OP="$(cd "$(dirname "$0")" && pwd)/opcoes"
+HOME_DONO=$(cd "$(dirname "$0")/../../../.." && pwd)   # ~/.local/share/gerar-iso/marca → ~
+nome=${1:?nome} estilo=${2:-tinta} out=${3:?saída}
+mkdir -p "$out"
+case $estilo in
+  tinta)       cab=C-cabeca.png claro=0 ;;
+  retrato)     cab=cabeca.png   claro=0 ;;
+  gravura)     cab=gravura.png  claro=0 ;;
+  selo)        cab=selo.png     claro=0 ;;
+  tinta-claro) cab=F-cabeca.png claro=1 ;;
+  lapis)       cab=lapis.png    claro=1 ;;
+  caricatura)  cab=carc-claro.png  claro=1 ;;
+  caricatura-escura) cab=carc-escuro.png claro=0 ;;
+  *) echo "estilo desconhecido: $estilo" >&2; exit 2 ;;
+esac
+if [ "$claro" = 1 ]; then tinta='#111111' fundo='#f4f4f2' fundo2='#d9d9d6'; else tinta='#ffffff' fundo='#262626' fundo2='#050505'; fi
+NOME_MAIUSC=$(printf '%s' "$nome" | tr '[:lower:]' '[:upper:]')
+NOME_XML=$(printf '%s' "$NOME_MAIUSC" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+magick "$OP/$cab" -trim +repage -resize 1024x1024 "PNG32:$out/logo.png"
+magick -background none pango:"<span foreground='$tinta' font_desc='Adwaita Sans Heavy 70' letter_spacing='22000'>$NOME_XML</span>" \
+  -trim +repage "$out/nome.png"
+# logo + nome (transparente), proporção da prévia aprovada
+magick "$out/logo.png" -resize 820x660 "$out/cab.tmp.png"
+h=$(magick identify -format %h "$out/cab.tmp.png")
+magick -size 900x$((h + 130)) xc:none "$out/cab.tmp.png" -gravity north -composite \
+  \( "$out/nome.png" -resize 470x \) -gravity south -composite -trim +repage "PNG32:$out/logo-nome.png"
+# papel de parede 2560x1440: degradê, o gato grande e discreto, o nome no canto
+magick -size 2560x1440 radial-gradient:"$fundo"-"$fundo2" \
+  \( "$out/logo.png" -resize 1200x1040 -channel A -evaluate multiply 0.10 +channel \) -gravity center -geometry +500+50 -composite \
+  \( "$out/nome.png" -resize 400x -channel A -evaluate multiply 0.55 +channel \) -gravity southwest -geometry +120+110 -composite \
+  -strip "$out/papel-de-parede.png"
+magick "$out/logo.png" -resize 256x256 "PNG32:$out/icone.png"
+# gerador da tela de inicialização (vai junto: o do sistema clonado pode ser mais antigo)
+install -d "$out/temas-boot"
+install -m755 "$HOME_DONO/.local/share/temas-boot/gerar" "$out/temas-boot/gerar"
+install -m644 "$HOME_DONO/.local/share/temas-boot/tema.script" "$out/temas-boot/tema.script"
+install -m644 "$HOME_DONO/.local/share/temas-boot/simba-simbolo.svg" "$out/temas-boot/simba-simbolo.svg"
+rm -f "$out/cab.tmp.png"
+cat > "$out/marca.env" <<ENV
+NOME='${nome//\'/}'
+ESTILO='$estilo'
+CLARO=$claro
+ENV
+echo "$out"

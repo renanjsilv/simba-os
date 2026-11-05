@@ -1,0 +1,12 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = simba-settings
+Target = simba-settings-dev
+
+[Action]
+Description = Pausing Hyprland config auto-reload for Simba settings update...
+When = PreTransaction
+Depends = simba
+Exec = /usr/bin/simba-hyprland-reload-guard pause

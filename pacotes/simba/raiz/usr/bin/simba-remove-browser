@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# simba:summary=Remove a supported browser and clean up Simba browser defaults
+# simba:args=<chrome|brave|brave-origin|edge|firefox|zen>
+# simba:examples=simba remove browser firefox | simba remove browser brave
+# simba:requires-sudo=true
+
+set_fallback_default_browser() {
+  local current_browser
+  current_browser=$(simba-cmd-default-browser)
+
+  if [[ $current_browser != $1 ]]; then
+    return
+  fi
+
+  if simba-cmd-present chromium; then
+    env -u BROWSER XDG_CURRENT_DESKTOP= xdg-settings set default-web-browser chromium.desktop || true
+  fi
+}
+
+case $1 in
+chrome)
+  echo "Removing Chrome..."
+  set_fallback_default_browser google-chrome.desktop
+  simba-pkg-drop google-chrome
+  rm -f ~/.config/chrome-flags.conf
+  sudo rm -f /etc/opt/chrome/policies/managed/color.json /etc/opt/chrome/policies/managed/simba.json
+  ;;
+edge)
+  echo "Removing Edge..."
+  set_fallback_default_browser microsoft-edge.desktop
+  simba-pkg-drop microsoft-edge-stable-bin
+  rm -f ~/.config/microsoft-edge-stable-flags.conf
+  sudo rm -f /etc/opt/edge/policies/managed/color.json /etc/opt/edge/policies/managed/simba.json
+  ;;
+brave)
+  echo "Removing Brave..."
+  set_fallback_default_browser brave-browser.desktop
+  simba-pkg-drop brave-bin
+  rm -f ~/.config/brave-flags.conf
+
+  if simba-pkg-missing brave-origin-bin; then
+    sudo rm -rf /etc/brave
+  fi
+  ;;
+brave-origin)
+  echo "Removing Brave Origin..."
+  set_fallback_default_browser brave-origin.desktop
+  simba-pkg-drop brave-origin-bin
+  rm -f ~/.config/brave-origin-flags.conf
+
+  if simba-pkg-missing brave-bin; then
+    sudo rm -rf /etc/brave
+  fi
+  ;;
+firefox)
+  echo "Removing Firefox..."
+  set_fallback_default_browser firefox.desktop
+  simba-pkg-drop firefox
+  ;;
+zen)
+  echo "Removing Zen..."
+  set_fallback_default_browser zen.desktop
+  simba-pkg-drop zen-browser-bin
+  ;;
+*)
+  echo "Usage: simba-remove-browser <chrome|brave|brave-origin|edge|firefox|zen>"
+  exit 1
+  ;;
+esac

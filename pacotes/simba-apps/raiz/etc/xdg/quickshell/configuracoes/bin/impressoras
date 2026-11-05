@@ -1,0 +1,23 @@
+#!/bin/bash
+# impressoras — impressoras do CUPS para Configurações › Impressoras e scanners.
+#   impressoras estado         JSON {cups, impressoras:[{nome, descricao, estado, padrao}], scanner}
+#   impressoras padrao <nome>  define a impressora padrão (do usuário)
+#   impressoras teste <nome>   imprime a página de teste
+set -uo pipefail
+case "${1:-}" in
+  estado)
+    cups=false; LC_ALL=C lpstat -r 2>/dev/null | grep -q 'is running' && cups=true
+    padrao=$(LANG=C lpstat -d 2>/dev/null | sed -n 's/^system default destination: //p')
+    lista=$(LANG=C lpstat -l -p 2>/dev/null | awk '
+      /^printer /{ if (n) print n "\t" e "\t" d; n=$2; e=($3=="is" ? $4 : $3); sub(/\.$/, "", e); d="" }
+      /^[ \t]+Description:/{ sub(/^[ \t]+Description: */, ""); d=$0 }
+      END{ if (n) print n "\t" e "\t" d }')
+    scanner=false; command -v simple-scan >/dev/null && scanner=true
+    jq -cn --argjson cups "$cups" --arg padrao "$padrao" --arg lista "$lista" --argjson scanner "$scanner" '{
+      cups: $cups, scanner: $scanner,
+      impressoras: [ $lista | split("\n")[] | select(length > 0) | split("\t") |
+        { nome: .[0], estado: .[1], descricao: (if (.[2] // "") == "" then .[0] else .[2] end), padrao: (.[0] == $padrao) } ] }' ;;
+  padrao) lpoptions -d "${2:?}" >/dev/null ;;
+  teste) lp -d "${2:?}" /usr/share/cups/data/testprint >/dev/null ;;
+  *) sed -n '2,5p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

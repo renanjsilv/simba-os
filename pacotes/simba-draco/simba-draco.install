@@ -1,0 +1,4 @@
+post_install() {
+  echo ":: Draco instalado. Na primeira vez em cada usuário ele prepara o ambiente sozinho"
+  echo "   (ou rode: draco preparar — baixa ~800 MB de dependências e a voz do idioma)."
+}

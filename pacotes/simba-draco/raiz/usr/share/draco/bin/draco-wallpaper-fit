@@ -1,0 +1,15 @@
+#!/bin/bash
+# draco-wallpaper-fit <imagem>: se a proporção da imagem não bate com a da tela, gera uma versão
+# com a foto inteira centralizada sobre um fundo desfocado dela mesma (sem cortar rostos) e imprime o caminho.
+in=$1
+read -r mw mh < <(hyprctl -j monitors | jq -r '.[]|select(.focused)|"\(.width) \(.height)"')
+read -r w h < <(magick identify -format '%w %h\n' "$in[0]" | head -1)
+# proporções parecidas (até 5% de diferença): usa a imagem como está
+if awk -v a="$((w * mh))" -v b="$((h * mw))" 'BEGIN{r=a/b; exit !(r>0.95 && r<1.05)}'; then echo "$in"; exit 0; fi
+# trabalha em 2x a resolução da tela pra continuar nítido
+W=$((mw * 2)) H=$((mh * 2))
+out="${in%.*}-tela.jpg"
+magick "$in[0]" -auto-orient \
+  \( -clone 0 -resize "${W}x${H}^" -gravity center -extent "${W}x${H}" -blur 0x30 -modulate 70 \) \
+  \( -clone 0 -resize "${W}x${H}" \) \
+  -delete 0 -gravity center -composite -quality 92 "$out" && echo "$out"

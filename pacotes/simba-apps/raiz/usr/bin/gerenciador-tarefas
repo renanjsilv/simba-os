@@ -1,0 +1,12 @@
+#!/bin/bash
+# Gerenciador de Tarefas (Ctrl+Shift+Esc). Argumento opcional: processos|desempenho|inicializacao|detalhes|servicos
+# Já aberto: traz a janela para a área de trabalho atual (inclusive se minimizada) e foca.
+info=$(hyprctl clients -j 2>/dev/null | jq -r '.[] | select(.class=="com.renan.GerenciadorTarefas") | "\(.address) \(.workspace.name)"' | head -1)
+if [[ -n $info ]]; then
+  read -r addr ws <<<"$info"
+  atual=$(hyprctl activeworkspace -j | jq -r .name)
+  [[ $ws != "$atual" ]] && hyprctl dispatch "hl.dsp.window.move({ workspace = \"$atual\", follow = false, window = \"address:$addr\" })" >/dev/null
+  hyprctl dispatch "foco.janela(\"$addr\")" >/dev/null
+  [[ -z $1 ]] && exit 0
+fi
+exec python3 "/usr/share/simba-apps/gerenciador-tarefas/app.py" "$@"

@@ -1,0 +1,121 @@
+#!/bin/bash
+# dr-youtube: YouTube for Draco. Lookups are plain HTTP (no window); playback uses
+# the YouTube web app (one window, reused).
+#
+#   dr-youtube buscar "<busca>" [n]       top n results (default 5): id | título | canal | duração | quando | views
+#   dr-youtube tocar "<busca>" [--fundo]  play the first result
+#   dr-youtube video <id|url> [--fundo]   play a specific video
+#   dr-youtube canal "<canal>" [n]        latest n videos of a channel (default 5)
+#   dr-youtube ultimo "<canal>" [--fundo] play the channel's latest video
+#   dr-youtube pausar | continuar | alternar | status
+#   dr-youtube avancar <seg> | voltar <seg>
+#   dr-youtube proximo | tela-cheia | legendas | mudo | mais-rapido | mais-devagar
+#   dr-youtube mostrar | esconder | fechar
+#
+# --fundo: keep the window in the background (audio only, e.g. music).
+
+UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140 Safari/537.36"
+DIR="$(dirname "$0")"
+LIB="$DIR/../lib"
+CLASS='^brave-.*youtube\.com' # the web app; a browser tab titled "YouTube" must not match
+
+background=0
+args=()
+for a in "$@"; do [[ $a == --fundo ]] && background=1 || args+=("$a"); done
+set -- "${args[@]}"
+
+uri() { jq -rn --arg q "$1" '$q|@uri'; }
+
+search() { # search <query> [n] [filter]
+  curl -s -A "$UA" -H "Accept-Language: pt-BR,pt;q=0.9" --max-time 8 \
+    "https://www.youtube.com/results?search_query=$(uri "$1")${3:+&sp=$3}" |
+    python3 "$LIB/yt_results.py" "${2:-5}"
+}
+
+channel_id() {
+  curl -s -A "$UA" --max-time 8 "https://www.youtube.com/results?search_query=$(uri "$1")&sp=EgIQAg%253D%253D" |
+    grep -oE '"channelId":"UC[A-Za-z0-9_-]{22}"' | head -1 | cut -d'"' -f4
+}
+
+channel_videos() { # channel_videos <name> <n>
+  local id
+  id=$(channel_id "$1")
+  [[ -n $id ]] || { echo "Canal '$1' não encontrado." >&2; return 1; }
+  curl -s --max-time 8 "https://www.youtube.com/feeds/videos.xml?channel_id=$id" | python3 -c '
+import re, sys, html
+s = sys.stdin.read()
+print("Canal:", html.unescape(re.search(r"<title>(.*?)</title>", s).group(1)))
+for vid, title, pub in re.findall(r"<yt:videoId>(.*?)</yt:videoId>.*?<title>(.*?)</title>.*?<published>(.*?)</published>", s, re.S)[:int(sys.argv[1])]:
+    print(f"{vid} | {html.unescape(title)} | {pub[:10]}")' "$2"
+}
+
+# Play a video id in the YouTube web app, replacing the window that is open.
+play() {
+  local id=$1 new i
+  new=$("$DIR/dr-win" app "$CLASS" "https://www.youtube.com/watch?v=$id") || { echo "O YouTube não abriu." >&2; return 1; }
+  if ((!background)); then
+    echo "Abrindo no YouTube: https://youtu.be/$id"
+    return 0
+  fi
+  # A window hidden before playback starts never starts playing: wait for it.
+  for i in $(seq 1 75); do
+    "$DIR/dr-midia" --player brave status | grep -q Playing && break
+    sleep 0.2
+  done
+  hyprctl dispatch "hl.dsp.window.move({ workspace = \"special:scratchpad\", follow = false, window = \"address:$new\" })" >/dev/null
+  if "$DIR/dr-midia" --player brave status | grep -q Playing; then
+    echo "Tocando no YouTube em segundo plano: https://youtu.be/$id"
+  else
+    echo "Abri o vídeo em segundo plano, mas ele não começou a tocar (anúncio ou login?): https://youtu.be/$id"
+  fi
+}
+
+key() { # key <combo>: press a YouTube shortcut in its window
+  "$DIR/dr-win" focus "$CLASS" >/dev/null || { echo "O YouTube não está aberto." >&2; exit 1; }
+  sleep 0.15
+  "$DIR/dr-key" "$1"
+}
+
+case $1 in
+  buscar)
+    [[ -n $2 ]] || { echo "uso: dr-youtube buscar \"<busca>\" [n]" >&2; exit 2; }
+    search "$2" "${3:-5}"
+    ;;
+  tocar)
+    [[ -n $2 ]] || { echo "uso: dr-youtube tocar \"<busca>\"" >&2; exit 2; }
+    first=$(search "$2" 1)
+    id=${first%% |*}
+    [[ -n $id && $id != sem* ]] || { echo "Nada encontrado para '$2'." >&2; exit 1; }
+    echo "$first"
+    play "$id"
+    ;;
+  video)
+    id=$(grep -oE '[A-Za-z0-9_-]{11}' <<<"${2##*[=/]}" | head -1)
+    [[ -n $id ]] || { echo "uso: dr-youtube video <id|url>" >&2; exit 2; }
+    play "$id"
+    ;;
+  canal)
+    [[ -n $2 ]] || { echo "uso: dr-youtube canal \"<canal>\" [n]" >&2; exit 2; }
+    channel_videos "$2" "${3:-5}"
+    ;;
+  ultimo | último)
+    [[ -n $2 ]] || { echo "uso: dr-youtube ultimo \"<canal>\"" >&2; exit 2; }
+    latest=$(channel_videos "$2" 1) || exit 1
+    echo "$latest"
+    play "$(tail -1 <<<"$latest" | cut -d' ' -f1)"
+    ;;
+  pausar | continuar | alternar | avancar | avançar | voltar)
+    "$DIR/dr-midia" --player brave "$@"
+    ;;
+  status) "$DIR/dr-midia" --player brave status ;;
+  proximo | próximo) key shift+n ;;
+  tela-cheia) key f ;;
+  legendas) key c ;;
+  mudo) key m ;;
+  mais-rapido) key shift+period ;;
+  mais-devagar) key shift+comma ;;
+  mostrar) "$DIR/dr-win" focus "$CLASS" ;;
+  esconder) "$DIR/dr-win" hide "$CLASS" ;;
+  fechar) "$DIR/dr-win" close "$CLASS" ;;
+  *) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

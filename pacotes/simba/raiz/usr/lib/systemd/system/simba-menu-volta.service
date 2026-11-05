@@ -1,0 +1,11 @@
+[Unit]
+Description=Simba OS: esconde de novo o menu de inicialização depois de usado uma vez
+RequiresMountsFor=/boot
+ConditionPathExists=/boot/simba-menu-uma-vez
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/simba-sistema menu-volta
+
+[Install]
+WantedBy=multi-user.target

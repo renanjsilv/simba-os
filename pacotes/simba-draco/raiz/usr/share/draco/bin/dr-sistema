@@ -1,0 +1,173 @@
+#!/bin/bash
+# dr-sistema: system controls in one place (Simba-native where possible).
+#
+#   dr-sistema status                        volume, brilho, bateria, wifi, bluetooth, não perturbe, luz noturna
+#   dr-sistema volume <N|+N|-N|mudo|status>  output volume in %
+#   dr-sistema brilho <N|+N|-N|status>       screen brightness in %
+#   dr-sistema bateria
+#   dr-sistema wifi <status|liga|desliga|redes|conectar "<rede>">   (only networks already saved)
+#   dr-sistema bluetooth <status|liga|desliga|dispositivos|conectar "<nome>"|desconectar "<nome>">
+#   dr-sistema nao-perturbe <liga|desliga|status>
+#   dr-sistema luz-noturna <liga|desliga|status>
+#   dr-sistema energia <economia|equilibrado|desempenho|status>
+#   dr-sistema tema <lista|atual|"<nome>">   Simba theme (fuzzy name)
+#   dr-sistema papel-de-parede                next background of the current theme
+#   dr-sistema print                          screenshot of the whole screen, saved (prints the path)
+#   dr-sistema bloquear
+#   dr-sistema suspender|reiniciar|desligar|sair --confirmado
+#       these need --confirmado: ask Renan first and only run after he says yes.
+
+norm() { iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null <<<"$1" | tr 'A-Z' 'a-z'; }
+
+volume_now() { wpctl get-volume @DEFAULT_AUDIO_SINK@ | awk '{v=int($2*100+0.5); m=($3=="[MUTED]")?" (mudo)":""; print v "%" m}'; }
+brightness_now() { simba-brightness-display 2>/dev/null | head -1 | grep -oE '[0-9]+' | head -1; }
+wifi_now() { nmcli -t -f TYPE,STATE,CONNECTION device | awk -F: '$1=="wifi"{print ($2=="connected") ? "conectado em " $3 : $2; exit}'; }
+bt_now() {
+  if bluetoothctl show 2>/dev/null | grep -q "Powered: yes"; then
+    local c
+    c=$(bluetoothctl devices Connected 2>/dev/null | cut -d' ' -f3- | paste -sd, -)
+    echo "ligado${c:+, conectado a: $c}"
+  else
+    echo "desligado"
+  fi
+}
+dnd_now() { [[ $(simba-shell notifications dndState 2>/dev/null) == on ]] && echo ligado || echo desligado; }
+night_now() { simba-toggle-nightlight --status | jq -r 'if .enabled then "ligada" else "desligada" end'; }
+
+pct() { # normalize "50", "50%", "+10", "-10" -> sets n and sign
+  n=$(grep -oE '[0-9]+' <<<"$1"); sign=""
+  [[ $1 == +* ]] && sign=+; [[ $1 == -* ]] && sign=-
+  [[ -n $n ]]
+}
+
+bt_device() { # fuzzy device name -> MAC
+  bluetoothctl devices 2>/dev/null | while read -r _ mac name; do
+    [[ $(norm "$name") == *"$(norm "$1")"* ]] && { echo "$mac $name"; break; }
+  done
+}
+
+confirmed() {
+  [[ " $* " == *" --confirmado "* ]] && return 0
+  echo "Ação sensível: pergunte ao Renan se ele confirma e só então rode com --confirmado." >&2
+  exit 3
+}
+
+case $1 in
+  status)
+    echo "Volume: $(volume_now)"
+    echo "Brilho: $(brightness_now)%"
+    echo "$(simba-battery-status 2>/dev/null)"
+    echo "Wi-Fi: $(wifi_now)"
+    echo "Bluetooth: $(bt_now)"
+    echo "Não perturbe: $(dnd_now)"
+    echo "Luz noturna: $(night_now)"
+    ;;
+  volume)
+    case $(norm "${2:-status}") in
+      status) ;;
+      mudo | mute | silencio) wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle ;;
+      desmuta* | som) wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 ;;
+      *)
+        pct "$2" || { echo "uso: dr-sistema volume <N|+N|-N|mudo>" >&2; exit 2; }
+        wpctl set-mute @DEFAULT_AUDIO_SINK@ 0
+        if [[ -n $sign ]]; then simba-audio-output-volume "$sign$n" >/dev/null 2>&1
+        else wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ "$n%"; fi
+        ;;
+    esac
+    echo "Volume: $(volume_now)"
+    ;;
+  brilho)
+    if [[ ${2:-status} != status ]]; then
+      pct "$2" || { echo "uso: dr-sistema brilho <N|+N|-N>" >&2; exit 2; }
+      case $sign in
+        +) simba-brightness-display "+$n%" >/dev/null 2>&1 ;;
+        -) simba-brightness-display "$n%-" >/dev/null 2>&1 ;;
+        *) simba-brightness-display "$n%" >/dev/null 2>&1 ;;
+      esac
+    fi
+    echo "Brilho: $(brightness_now)%"
+    ;;
+  bateria) simba-battery-status ;;
+  wifi)
+    case ${2:-status} in
+      status) echo "Wi-Fi: $(wifi_now)" ;;
+      liga) nmcli radio wifi on && echo "Wi-Fi ligado." ;;
+      desliga) nmcli radio wifi off && echo "Wi-Fi desligado." ;;
+      redes) # strongest first, one line per network, the connected one marked with *
+        nmcli -t -f IN-USE,SIGNAL,SSID device wifi list --rescan auto |
+          awk -F: '$3!="" && !seen[$3]++ {printf "%03d|%s%s (%s%%)\n", $2, ($1=="*")?"* ":"  ", $3, $2}' |
+          sort -rn | cut -d'|' -f2 | head -12 ;;
+      conectar)
+        [[ -n $3 ]] || { echo "uso: dr-sistema wifi conectar \"<rede>\"" >&2; exit 2; }
+        nmcli connection up id "$3" >/dev/null 2>&1 && echo "Conectado em $3." ||
+          { echo "Não consegui conectar em '$3' (só redes já salvas; senha nova tem que ser pelo menu)." >&2; exit 1; }
+        ;;
+    esac
+    ;;
+  bluetooth)
+    case ${2:-status} in
+      status) echo "Bluetooth: $(bt_now)" ;;
+      liga) simba-bluetooth-power on >/dev/null 2>&1 || bluetoothctl power on >/dev/null; echo "Bluetooth: $(bt_now)" ;;
+      desliga) simba-bluetooth-power off >/dev/null 2>&1 || bluetoothctl power off >/dev/null; echo "Bluetooth: $(bt_now)" ;;
+      dispositivos) bluetoothctl devices 2>/dev/null | cut -d' ' -f3- | grep . || echo "Nenhum dispositivo pareado." ;;
+      conectar | desconectar)
+        dev=$(bt_device "$3"); [[ -n $dev ]] || { echo "Nenhum dispositivo pareado com nome '$3'." >&2; exit 5; }
+        bluetoothctl power on >/dev/null 2>&1
+        if [[ $2 == conectar ]]; then
+          timeout 15 bluetoothctl connect "${dev%% *}" >/dev/null 2>&1 && echo "Conectado: ${dev#* }" || { echo "Não conectou em ${dev#* } (está ligado e perto?)." >&2; exit 1; }
+        else
+          bluetoothctl disconnect "${dev%% *}" >/dev/null 2>&1 && echo "Desconectado: ${dev#* }"
+        fi
+        ;;
+    esac
+    ;;
+  nao-perturbe | não-perturbe)
+    case ${2:-status} in
+      liga) simba-shell notifications setDnd on >/dev/null ;;
+      desliga) simba-shell notifications setDnd off >/dev/null ;;
+    esac
+    simba-shell -q simba.indicators refresh >/dev/null 2>&1
+    echo "Não perturbe: $(dnd_now)"
+    ;;
+  luz-noturna)
+    st=$(night_now)
+    case ${2:-status} in
+      liga) [[ $st == desligada ]] && simba-toggle-nightlight >/dev/null 2>&1 ;;
+      desliga) [[ $st == ligada ]] && simba-toggle-nightlight >/dev/null 2>&1 ;;
+    esac
+    sleep 0.3
+    echo "Luz noturna: $(night_now)"
+    ;;
+  energia)
+    case $(norm "${2:-status}") in
+      econom*) p=power-saver ;; equilib* | normal) p=balanced ;; desempenho | performance | maximo) p=performance ;;
+      *) p="" ;;
+    esac
+    [[ -n $p ]] && simba-powerprofiles-set autodetect "$p" >/dev/null 2>&1
+    echo "Perfil de energia: $(simba-powerprofiles-list --active-state | awk '$2==1{print $1}')"
+    ;;
+  tema)
+    case ${2:-atual} in
+      atual) echo "Tema atual: $(simba-theme-current)" ;;
+      lista) simba-theme-list ;;
+      *)
+        want=$(norm "${*:2}")
+        theme=$(simba-theme-list | while read -r t; do [[ $(norm "$t") == "$want" ]] && { echo "$t"; break; }; done)
+        [[ -n $theme ]] || theme=$(simba-theme-list | while read -r t; do [[ $(norm "$t") == *"$want"* ]] && { echo "$t"; break; }; done)
+        [[ -n $theme ]] || { echo "Tema '${*:2}' não existe. Temas: $(simba-theme-list | paste -sd, -)" >&2; exit 5; }
+        simba-theme-set "$theme" >/dev/null 2>&1 && echo "Tema aplicado: $theme"
+        ;;
+    esac
+    ;;
+  papel-de-parede | wallpaper) simba-theme-bg-next >/dev/null 2>&1 && echo "Papel de parede trocado." ;;
+  print)
+    out="$(xdg-user-dir PICTURES)/Screenshot $(date '+%Y-%m-%d %H-%M-%S').png"
+    grim "$out" && echo "Print salvo: $out"
+    ;;
+  bloquear) setsid -f simba-system-lock >/dev/null 2>&1; echo "Tela bloqueada." ;;
+  suspender) confirmed "$@"; setsid -f systemctl suspend; echo "Suspendendo." ;;
+  reiniciar) confirmed "$@"; setsid -f simba-system-reboot; echo "Reiniciando." ;;
+  desligar) confirmed "$@"; setsid -f simba-system-shutdown; echo "Desligando." ;;
+  sair) confirmed "$@"; setsid -f simba-system-logout; echo "Saindo da sessão." ;;
+  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

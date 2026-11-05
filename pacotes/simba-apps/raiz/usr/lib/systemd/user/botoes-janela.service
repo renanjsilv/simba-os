@@ -1,0 +1,13 @@
+[Unit]
+Description=Botões discretos de minimizar/maximizar/fechar nas janelas (Quickshell)
+Documentation=file://%h/.config/quickshell/botoes-janela/shell.qml
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/qs -c botoes-janela -n
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

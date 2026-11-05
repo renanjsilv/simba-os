@@ -1,0 +1,9 @@
+#!/bin/bash
+
+# simba:summary=Atualiza as chaves de assinatura do Arch Linux
+
+set -e
+
+echo -e "\e[32m\nAtualizando as chaves de assinatura do Arch\e[0m"
+sudo env SIMBA_UPDATE_PACMAN=1 pacman -Sy --needed --noconfirm archlinux-keyring >/dev/null 2> >(grep -vE '^(warning|aviso): archlinux-keyring-[^ ]+ ' >&2)
+echo "Chaves em dia"

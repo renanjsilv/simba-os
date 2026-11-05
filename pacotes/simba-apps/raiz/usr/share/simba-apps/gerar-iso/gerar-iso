@@ -1,0 +1,26 @@
+#!/bin/bash
+# Atalho do menu "Gerar ISO": abre o gerador num terminal e pede a senha.
+BUILD="$(dirname "$(readlink -f "$0")")/gerar-iso-build"
+
+if [ "${1:-}" != --no-terminal ]; then
+  exec xdg-terminal-exec --app-id=TUI.float --title="Gerar ISO" -e "$0" --no-terminal
+fi
+
+cat <<'EOF'
+Gerar ISO — clone deste sistema
+───────────────────────────────
+Cria uma ISO instalável com este sistema exatamente como está:
+pacotes, tradução, atalhos, ajustes e configurações.
+
+Fica de fora: arquivos pessoais, senhas e logins salvos, Wi-Fi,
+histórico do Claude Code, ID do AnyDesk.
+
+A ISO é salva em /mnt/dados/gerar-iso/ (~9–11 GB, 20–60 min).
+EOF
+echo
+read -rp "Continuar? [s/N] " a
+if [[ $a =~ ^[sS]$ ]]; then
+  sudo "$BUILD"
+  echo
+  read -rp "Pressione Enter para fechar..." _
+fi

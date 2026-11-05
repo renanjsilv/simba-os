@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# simba:summary=Control the Simba menu (toggle / summon / close / refresh)
+# simba:args=[toggle|summon|close|refresh|ping] [route]
+# simba:examples=simba menu | simba menu toggle system | simba menu summon style.theme | simba menu refresh
+
+# Thin wrapper around the standard plugin IPC surface. The menu is the
+# first-party `simba.menu` plugin; routes are passed as JSON payload.
+
+set -euo pipefail
+
+verb="${1-toggle}"
+route="${2-root}"
+
+menu_payload() {
+  jq -nc --arg menu "$1" '{ menu: $menu }'
+}
+
+case "$verb" in
+  toggle)
+    exec simba-shell shell toggle simba.menu "$(menu_payload "$route")"
+    ;;
+  summon)
+    exec simba-shell shell summon simba.menu "$(menu_payload "$route")"
+    ;;
+  close)
+    exec simba-shell shell hide simba.menu
+    ;;
+  refresh | ping)
+    exec simba-shell shell call simba.menu "$verb" "{}"
+    ;;
+  -h | --help | help)
+    cat <<USAGE
+Usage: simba menu [verb] [route]
+
+Verbs:
+  toggle [route]   Open the menu at <route>, or close it if already open. Default verb.
+  summon [route]   Always open the menu (no close-if-visible toggle).
+  close            Close the menu if it is visible.
+  refresh          Re-parse the menu JSONC files.
+  ping             Health check.
+
+Route is an item id (e.g. setup.power) or alias (e.g. power). Defaults to
+"root", which opens the top-level menu.
+USAGE
+    exit 0
+    ;;
+  *)
+    echo "simba-menu: unknown verb '$verb'. Try 'simba menu --help'." >&2
+    exit 2
+    ;;
+esac

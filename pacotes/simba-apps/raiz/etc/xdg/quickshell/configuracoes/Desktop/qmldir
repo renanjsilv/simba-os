@@ -1,0 +1,8 @@
+module qs.Desktop
+AreaDeTrabalho 1.0 AreaDeTrabalho.qml
+Superficie 1.0 Superficie.qml
+Icone 1.0 Icone.qml
+MenuContexto 1.0 MenuContexto.qml
+CartaoMenu 1.0 CartaoMenu.qml
+Renomear 1.0 Renomear.qml
+Propriedades 1.0 Propriedades.qml

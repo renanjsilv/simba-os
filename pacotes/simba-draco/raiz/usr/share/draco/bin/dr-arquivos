@@ -1,0 +1,132 @@
+#!/bin/bash
+# dr-arquivos: folders and files by spoken name.
+#
+#   dr-arquivos pasta "<nome>"              open a folder in Files: downloads, documentos, imagens,
+#                                           músicas, vídeos, pessoal, ou qualquer pasta pelo nome
+#   dr-arquivos recentes [tipo] [n]         newest files (default: Downloads, Documents, Pictures, Videos, Music)
+#   dr-arquivos abrir-recente [tipo]        open the newest file of that type
+#   dr-arquivos buscar "<nome>" [tipo]      find files by name anywhere in home (newest first)
+#   dr-arquivos abrir "<caminho>"           open a file or folder with its default app
+#   dr-arquivos organizar [pasta] [--aplicar]
+#       sort the loose files of a folder (default Downloads) into subfolders by type.
+#       Without --aplicar it only shows the plan. Files are moved, never overwritten.
+#
+# tipo: pdf | imagem | video | audio | documento | planilha | apresentacao | compactado | instalador
+# Exit 4 = several folders match (prints them), 5 = nothing found.
+
+declare -A EXT=(
+  [pdf]="pdf"
+  [imagem]="jpg jpeg png gif webp heic heif bmp svg avif tiff"
+  [video]="mp4 mkv webm mov avi m4v"
+  [audio]="mp3 m4a ogg opus wav flac aac"
+  [documento]="doc docx odt rtf txt md"
+  [planilha]="xls xlsx ods csv"
+  [apresentacao]="ppt pptx odp"
+  [compactado]="zip rar 7z tar gz xz zst bz2"
+  [instalador]="exe msi deb rpm appimage iso pkg"
+)
+declare -A FOLDER=([pdf]=PDFs [imagem]=Imagens [video]=Vídeos [audio]=Músicas [documento]=Documentos
+  [planilha]=Planilhas [apresentacao]=Apresentações [compactado]=Compactados [instalador]=Instaladores)
+
+norm() { iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null <<<"$1" | tr 'A-Z' 'a-z'; }
+
+type_key() { # spoken type -> key of EXT
+  case $(norm "$1") in
+    pdf*) echo pdf ;; imag* | foto* | print* | captura*) echo imagem ;; vid*) echo video ;;
+    audio* | musica* | som*) echo audio ;; doc* | texto*) echo documento ;; planilha* | excel*) echo planilha ;;
+    apresenta* | slide*) echo apresentacao ;; compact* | zip* | rar*) echo compactado ;;
+    instal* | programa* | iso*) echo instalador ;; "") echo "" ;; *) echo "?" ;;
+  esac
+}
+
+ext_args() { # fd -e flags for a type key
+  local e
+  for e in ${EXT[$1]}; do printf -- '-e\n%s\n' "$e"; done
+}
+
+xdg_folder() {
+  case $(norm "$1") in
+    download* | baixad*) xdg-user-dir DOWNLOAD ;;
+    document*) xdg-user-dir DOCUMENTS ;;
+    image* | foto* | picture*) xdg-user-dir PICTURES ;;
+    music* | musica*) xdg-user-dir MUSIC ;;
+    video*) xdg-user-dir VIDEOS ;;
+    "pasta pessoal" | pessoal | home | inicio) echo "$HOME" ;;
+    "area de trabalho" | desktop) xdg-user-dir DESKTOP ;;
+    *) return 1 ;;
+  esac
+}
+
+list_newest() { # list_newest <n> <dirs...> (with fd filters in $filters)
+  local n=$1; shift
+  fd --type f --hidden --exclude '.*' "${filters[@]}" . "$@" -X stat -c '%Y|%s|%n' 2>/dev/null |
+    sort -t'|' -k1,1nr | head -n "$n" |
+    while IFS='|' read -r ts size path; do
+      printf '%s | %s | %s\n' "$(date -d "@$ts" '+%d/%m %H:%M')" "$(numfmt --to=iec "$size")" "$path"
+    done
+}
+
+open_path() {
+  setsid -f xdg-open "$1" >/dev/null 2>&1
+  echo "Abrindo: $1"
+}
+
+DEFAULT_DIRS=("$(xdg-user-dir DOWNLOAD)" "$(xdg-user-dir DOCUMENTS)" "$(xdg-user-dir PICTURES)" "$(xdg-user-dir VIDEOS)" "$(xdg-user-dir MUSIC)")
+
+case $1 in
+  pasta)
+    [[ -n $2 ]] || { echo "uso: dr-arquivos pasta \"<nome>\"" >&2; exit 2; }
+    if dir=$(xdg_folder "${*:2}"); then open_path "$dir"; exit 0; fi
+    mapfile -t found < <(fd --type d --ignore-case --max-depth 6 --exclude node_modules --exclude Steam \
+      --exclude .cache "^$(sed 's/[][\.*^$(){}?+|/]/\\&/g' <<<"${*:2}")$" "$HOME" 2>/dev/null | head -10)
+    ((${#found[@]})) || mapfile -t found < <(fd --type d --ignore-case --max-depth 6 --exclude node_modules \
+      --exclude Steam --exclude .cache --fixed-strings "${*:2}" "$HOME" 2>/dev/null | head -10)
+    case ${#found[@]} in
+      0) echo "Nenhuma pasta chamada '${*:2}'." >&2; exit 5 ;;
+      1) open_path "${found[0]%/}" ;;
+      *) echo "Várias pastas combinam com '${*:2}':" >&2; printf '  - %s\n' "${found[@]%/}" >&2; exit 4 ;;
+    esac
+    ;;
+  recentes | abrir-recente)
+    key=$(type_key "$2"); [[ $key == "?" ]] && { echo "Tipo desconhecido: $2" >&2; exit 2; }
+    filters=(); [[ -n $key ]] && mapfile -t filters < <(ext_args "$key")
+    n=${3:-8}; [[ $1 == abrir-recente ]] && n=1
+    out=$(list_newest "$n" "${DEFAULT_DIRS[@]}")
+    [[ -n $out ]] || { echo "Nenhum arquivo${2:+ do tipo $2} encontrado." >&2; exit 5; }
+    if [[ $1 == abrir-recente ]]; then open_path "${out##* | }"; else echo "$out"; fi
+    ;;
+  buscar)
+    [[ -n $2 ]] || { echo "uso: dr-arquivos buscar \"<nome>\" [tipo]" >&2; exit 2; }
+    key=$(type_key "$3"); filters=(--ignore-case --fixed-strings --exclude node_modules --exclude .cache --exclude Steam "$2")
+    [[ -n $key && $key != "?" ]] && mapfile -t -O "${#filters[@]}" filters < <(ext_args "$key")
+    out=$(fd --type f "${filters[@]}" "$HOME" -X stat -c '%Y|%s|%n' 2>/dev/null | sort -t'|' -k1,1nr | head -10 |
+      while IFS='|' read -r ts size path; do printf '%s | %s | %s\n' "$(date -d "@$ts" '+%d/%m/%Y')" "$(numfmt --to=iec "$size")" "$path"; done)
+    [[ -n $out ]] && echo "$out" || { echo "Nada encontrado com '$2'." >&2; exit 5; }
+    ;;
+  abrir)
+    [[ -e $2 ]] || { echo "Não existe: $2" >&2; exit 1; }
+    open_path "$2"
+    ;;
+  organizar)
+    dir=$(xdg-user-dir DOWNLOAD); apply=0
+    for a in "${@:2}"; do [[ $a == --aplicar ]] && apply=1 || dir=$(xdg_folder "$a" || echo "$a"); done
+    [[ -d $dir ]] || { echo "Pasta não encontrada: $dir" >&2; exit 1; }
+    declare -A count=()
+    total=0
+    while IFS= read -r -d '' f; do
+      name=${f##*/}; ext=$(norm "${name##*.}")
+      [[ $name == *.part || $name == *.crdownload || $name != *.* ]] && continue
+      (($(date +%s) - $(stat -c %Y "$f") < 120)) && continue # may still be downloading
+      target=""
+      for k in "${!EXT[@]}"; do [[ " ${EXT[$k]} " == *" $ext "* ]] && target=${FOLDER[$k]}; done
+      [[ -n $target ]] || continue
+      count[$target]=$((${count[$target]:-0} + 1)); total=$((total + 1))
+      if ((apply)); then mkdir -p "$dir/$target" && mv -n -- "$f" "$dir/$target/"; fi
+    done < <(find "$dir" -maxdepth 1 -type f -print0)
+    ((total)) || { echo "Nada para organizar em $dir."; exit 0; }
+    ((apply)) && echo "Organizei $total arquivo(s) em $dir:" || echo "Plano para $dir ($total arquivo(s); nada foi movido ainda):"
+    for k in "${!count[@]}"; do echo "  $k/: ${count[$k]}"; done
+    ((apply)) || echo "Para executar: dr-arquivos organizar \"$dir\" --aplicar"
+    ;;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

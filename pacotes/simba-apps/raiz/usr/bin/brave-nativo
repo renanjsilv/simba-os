@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+"""brave-nativo — inicia o Brave; "--app=URL" vira o web app INSTALADO, se houver.
+
+Janelas "brave --app=URL" (o jeito do simba-launch-webapp) pedem a barra de título do
+compositor: o Chromium só desenha minimizar/maximizar/fechar próprios em janela normal e em
+web app instalado (PWA / "Criar atalho… › Abrir como janela"). Então, quando o site já está
+instalado no perfil, este wrapper troca "--app=URL" por "--app-id=<id>" (mesma janela de app,
+com os botões nativos do Brave). Sem app instalado, nada muda (fica a barra do compositor).
+
+Usado como Exec de ~/.local/share/applications/brave-browser.desktop (cópia da do sistema),
+que o simba-launch-webapp lê para achar o navegador. Diagnóstico: brave-nativo --listar
+"""
+import os, struct, sys
+
+PERFIL = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "BraveSoftware/Brave-Browser")
+BRAVE = "/usr/bin/brave"
+
+
+# ── leitura mínima do LevelDB do Chromium (Sync Data/LevelDB guarda os web apps) ──────────
+def snappy(d):
+    out = bytearray(); i = 0
+    n = s = 0
+    while True:  # tamanho (varint)
+        b = d[i]; i += 1; n |= (b & 0x7F) << s; s += 7
+        if b < 0x80: break
+    while i < len(d):
+        t = d[i]; i += 1; k = t & 3
+        if k == 0:
+            ln = t >> 2
+            if ln >= 60:
+                nb = ln - 59; ln = int.from_bytes(d[i:i + nb], "little"); i += nb
+            ln += 1; out += d[i:i + ln]; i += ln; continue
+        if k == 1:
+            ln = ((t >> 2) & 7) + 4; off = ((t >> 5) << 8) | d[i]; i += 1
+        elif k == 2:
+            ln = (t >> 2) + 1; off = int.from_bytes(d[i:i + 2], "little"); i += 2
+        else:
+            ln = (t >> 2) + 1; off = int.from_bytes(d[i:i + 4], "little"); i += 4
+        for _ in range(ln): out.append(out[-off])
+    return bytes(out)
+
+
+def varint(d, i):
+    n = s = 0
+    while True:
+        b = d[i]; i += 1; n |= (b & 0x7F) << s; s += 7
+        if b < 0x80: return n, i
+
+
+def entradas_bloco(b):
+    """pares (chave, valor) de um bloco de tabela .ldb"""
+    if len(b) < 4: return
+    nrest = struct.unpack("<I", b[-4:])[0]
+    fim = len(b) - 4 - 4 * nrest; i = 0; chave = b""
+    while i < fim:
+        comp, i = varint(b, i); ncomp, i = varint(b, i); nval, i = varint(b, i)
+        chave = chave[:comp] + b[i:i + ncomp]; i += ncomp
+        yield chave[:-8] if len(chave) >= 8 else chave, b[i:i + nval]; i += nval
+
+
+def ler_ldb(caminho):
+    d = open(caminho, "rb").read()
+    if len(d) < 48: return
+    rodape = d[-48:]
+    def handle(x, i):
+        o, i = varint(x, i); t, i = varint(x, i); return o, t, i
+    _, _, i = handle(rodape, 0); io, it, _ = handle(rodape, i)
+    def bloco(o, t):
+        bruto = d[o:o + t]; tipo = d[o + t]
+        return snappy(bruto) if tipo == 1 else bruto
+    for _, v in entradas_bloco(bloco(io, it)):
+        o, t, _ = handle(v, 0)
+        yield from entradas_bloco(bloco(o, t))
+
+
+def ler_log(caminho):
+    d = open(caminho, "rb").read(); i = 0; reg = b""
+    while i + 7 <= len(d):
+        if 32768 - (i % 32768) < 7:  # resto do bloco de 32 KiB é enchimento
+            i = (i // 32768 + 1) * 32768; continue
+        tam = struct.unpack("<H", d[i + 4:i + 6])[0]; tipo = d[i + 6]
+        dado = d[i + 7:i + 7 + tam]; i += 7 + tam
+        if tipo == 1: yield from lote(dado)
+        elif tipo == 2: reg = dado
+        elif tipo == 3: reg += dado
+        elif tipo == 4: yield from lote(reg + dado); reg = b""
+        elif tipo == 0 and tam == 0: i = (i // 32768 + 1) * 32768
+
+
+def lote(r):
+    """registros de um WriteBatch: put (1) / delete (0)"""
+    if len(r) < 12: return
+    n = struct.unpack("<I", r[8:12])[0]; i = 12
+    for _ in range(n):
+        if i >= len(r): return
+        t = r[i]; i += 1
+        lk, i = varint(r, i); k = r[i:i + lk]; i += lk
+        if t == 1:
+            lv, i = varint(r, i); v = r[i:i + lv]; i += lv
+            yield k, v
+        else:
+            yield k, None
+
+
+def campos(pb):
+    """campos de nível 1 de uma mensagem protobuf: lista (número, bytes|int)"""
+    i = 0; r = []
+    try:
+        while i < len(pb):
+            chave, i = varint(pb, i); num, tipo = chave >> 3, chave & 7
+            if tipo == 0: v, i = varint(pb, i)
+            elif tipo == 2: ln, i = varint(pb, i); v = pb[i:i + ln]; i += ln
+            elif tipo == 1: v = pb[i:i + 8]; i += 8
+            elif tipo == 5: v = pb[i:i + 4]; i += 4
+            else: break
+            r.append((num, v))
+    except IndexError:
+        pass
+    return r
+
+
+def textos(pb, prof=0):
+    """todas as strings que parecem URL dentro do protobuf (qualquer profundidade)"""
+    for num, v in campos(pb):
+        if isinstance(v, bytes):
+            if v[:4] in (b"http", b"brav", b"chro"):
+                yield num, v.decode("utf-8", "replace")
+            elif prof < 3:
+                yield from textos(v, prof + 1)
+
+
+def web_apps(perfil="Default"):
+    """{app_id: [urls (start_url, escopo, manifest id...)]} dos web apps instalados"""
+    base = os.path.join(PERFIL, perfil, "Sync Data", "LevelDB")
+    apps = {}
+    if not os.path.isdir(base): return apps
+    arquivos = sorted(os.listdir(base))
+    # .ldb (mais velhos) primeiro, .log por último: o mais novo vale
+    ordem = [a for a in arquivos if a.endswith(".ldb")] + [a for a in arquivos if a.endswith(".log")]
+    for a in ordem:
+        try:
+            it = ler_ldb(os.path.join(base, a)) if a.endswith(".ldb") else ler_log(os.path.join(base, a))
+            for k, v in it:
+                if not k.startswith(b"web_apps-dt-"): continue
+                aid = k[len(b"web_apps-dt-"):].decode(errors="replace")
+                if len(aid) != 32 or not aid.isalpha(): continue
+                if v is None: apps.pop(aid, None); continue
+                apps[aid] = [u for _, u in textos(v) if u.startswith("http")]
+        except Exception:
+            continue
+    return apps
+
+
+def normal(u):
+    u = u.split("#")[0]
+    if "://" in u: esq, resto = u.split("://", 1)
+    else: esq, resto = "https", u
+    host, _, cam = resto.partition("/")
+    host = host.lower()
+    if host.startswith("www."): host = host[4:]
+    return host, "/" + cam
+
+
+def app_para(url, perfil="Default"):
+    """app instalado cuja URL (início/escopo) tem o mesmo host e é prefixo do caminho"""
+    h, c = normal(url)
+    melhor, tam = None, -1
+    for aid, urls in web_apps(perfil).items():
+        for u in urls:
+            hu, cu = normal(u)
+            if hu != h: continue
+            pref = cu if cu.endswith("/") else cu.rsplit("/", 1)[0] + "/"
+            if (c + "/").startswith(pref) or c == cu:
+                if len(pref) > tam: melhor, tam = aid, len(pref)
+    return melhor
+
+
+def esconder_duplicados():
+    """O Brave cria brave-<id>-Default.desktop ao instalar um web app; se já existe o atalho do
+    sistema para o mesmo site (Exec com --app=URL), o do Brave fica escondido do menu."""
+    apl = os.path.expanduser("~/.local/share/applications")
+    try: nomes = os.listdir(apl)
+    except OSError: return
+    hosts = set()
+    for n in nomes:
+        if not n.endswith(".desktop") or n.startswith("brave-"): continue
+        try:
+            for l in open(os.path.join(apl, n), errors="replace"):
+                if l.startswith("Exec=") and "http" in l:
+                    for tok in l.split():
+                        tok = tok.strip('"').split("=", 1)[-1]
+                        if tok.startswith("http"): hosts.add(normal(tok)[0])
+        except OSError: pass
+    for aid, urls in web_apps().items():
+        if not any(normal(u)[0] in hosts for u in urls): continue
+        f = os.path.join(apl, f"brave-{aid}-Default.desktop")
+        try: txt = open(f).read()
+        except OSError: continue
+        if "\nNoDisplay=true" in txt: continue
+        txt = txt.replace("[Desktop Entry]\n", "[Desktop Entry]\nNoDisplay=true\n", 1)
+        open(f, "w").write(txt)
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:1] == ["--listar"]:
+        for aid, urls in web_apps().items(): print(aid, " ".join(sorted(set(urls))))
+        return
+    perfil = "Default"
+    for a in args:
+        if a.startswith("--profile-directory="): perfil = a.split("=", 1)[1]
+    global PERFIL
+    for a in args:
+        if a.startswith("--user-data-dir="): PERFIL = os.path.expanduser(a.split("=", 1)[1])
+    novos = []
+    for a in args:
+        if a.startswith("--app="):
+            aid = None
+            try: aid = app_para(a[6:], perfil)
+            except Exception: aid = None
+            if aid:
+                novos += ["--profile-directory=" + perfil, "--app-id=" + aid]
+                continue
+        novos.append(a)
+    if "--user-data-dir" not in " ".join(args):
+        try: esconder_duplicados()
+        except Exception: pass
+    os.execv(BRAVE, [BRAVE] + novos)
+
+
+if __name__ == "__main__":
+    main()

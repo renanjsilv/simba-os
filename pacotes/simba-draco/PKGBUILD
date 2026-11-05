@@ -1,0 +1,20 @@
+# Simba OS — Draco, o assistente de voz ("Draco, …" ou segure F10). O pacote traz o código;
+# o ambiente Python, as vozes e o modelo do Whisper ficam em ~/.local/share/draco e são
+# preparados na primeira vez por `draco preparar` (também chamado sozinho pelo servidor de voz).
+pkgname=simba-draco
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Simba OS: Draco, assistente de voz (palavra de ativação, Whisper, vozes Piper/Edge, Claude Code)"
+arch=('any')
+url="https://github.com/SIMBA_GH_USER/simba-os"
+license=('MIT')
+options=('!debug' '!strip')
+depends=('simba-apps' 'python' 'tesseract' 'tesseract-data-eng' 'pipewire' 'ffmpeg' 'grim' 'wtype')
+optdepends=('voxtype: transcrição local alternativa'
+            'tesseract-data-por: leitura de tela em português')
+install=simba-draco.install
+
+package() {
+  cp -a "$startdir/raiz/." "$pkgdir/"
+  install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,0 +1,82 @@
+#!/bin/bash
+# dr-maps: Google Maps (Simba web app), opened straight at the right page by URL.
+#
+#   dr-maps rota "<destino>" [--de "<origem>"] [--modo carro|ape|transporte|bike|moto]
+#       open the route (origin: your current location unless --de) and print the
+#       estimated times read from the screen (per transport mode + suggested routes)
+#   dr-maps buscar "<lugar ou tipo de lugar>"     e.g. "farmácia perto de mim", "MASP"
+#   dr-maps abrir | fechar | esconder
+
+DIR="$(dirname "$0")"
+CLASS='^brave-(www\.)?maps\.google\.com' # the web app only
+BASE=https://maps.google.com/maps         # keep the maps.google.com host: it decides the window class
+export TESSDATA_PREFIX="/usr/share/draco/tessdata"
+RUN="${XDG_RUNTIME_DIR:-/tmp}/draco"
+
+uri() { jq -rn --arg q "$1" '$q|@uri'; }
+
+open_url() {
+  local a
+  a=$("$DIR/dr-win" app "$CLASS" "$1") || { echo "O Google Maps não abriu." >&2; exit 1; }
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$a\" })" >/dev/null
+  [[ $(hyprctl activewindow -j | jq -r .fullscreen) == 0 ]] &&
+    hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized" })' >/dev/null
+}
+
+ocr() { # ocr <x> <y> <w> <h> <scale> <psm>
+  grim -g "$1,$2 ${3}x$4" -s "$5" "$RUN/maps-ocr.png" && tesseract "$RUN/maps-ocr.png" - --psm "$6" -l por 2>/dev/null
+}
+
+# Clean the usual OCR slips in durations. A "1" right before "min" comes out as
+# i/í/T/l ("1imin" is 11 min, "2imin" is 21 min); "O" next to digits is a zero.
+fix_times() {
+  sed -E 's/([0-9])O/\10/g; s/O([0-9])/0\1/g; s/([0-9])[iíìTlI|] ?min/\11min/g; s/([0-9]) ?min/\1 min/g; s/([0-9]) ?h ?([0-9]+) min/\1 h \2 min/g'
+}
+
+read_route() {
+  local x y w h tabs modes=(carro moto transporte "a pé" bicicleta) i=0 t
+  read -r x y w h < <(hyprctl clients -j | jq -r --arg p "$CLASS" '[.[] | select(.class | test($p))][0] | "\(.at[0]) \(.at[1]) \(.size[0]) \(.size[1])"')
+  # wait for the route to load (the transport tabs show minutes)
+  for i in $(seq 1 20); do
+    tabs=$(ocr $((x + 120)) $((y + 67)) 310 16 3 7 | fix_times) # the minutes under the mode icons
+    [[ $tabs =~ [0-9]+\ min ]] && break
+    sleep 0.5
+  done
+  echo "Tempo por meio de transporte:"
+  i=0
+  for t in $(grep -oE '[0-9]+ h [0-9]+ min|[0-9]+ min|[0-9]+ h' <<<"$tabs" | tr ' ' '_'); do
+    echo "  ${modes[i]}: ${t//_/ }"; i=$((i + 1))
+  done
+  echo "Rotas sugeridas:"
+  ocr $((x + 72)) $((y + 340)) 400 280 2 4 | fix_times | grep -E 'via|[0-9] min|km' |
+    sed -E 's/^[^a-zA-Z0-9]*E +//; s/^[^a-zA-Z0-9]+//; s/^/  /' | head -8
+}
+
+case $1 in
+  rota | tempo)
+    [[ -n $2 ]] || { echo "uso: dr-maps rota \"<destino>\" [--de \"<origem>\"] [--modo carro]" >&2; exit 2; }
+    dest=$2; origin=""; mode=driving; shift 2
+    while (($#)); do
+      case $1 in
+        --de) origin=$2; shift 2 ;;
+        --modo)
+          case $2 in carro) mode=driving ;; ape | "a pé" | pe) mode=walking ;; transporte | onibus | ônibus | metro | metrô) mode=transit ;;
+            bike | bicicleta) mode=bicycling ;; moto) mode=two-wheeler ;; esac
+          shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    open_url "$BASE/dir/?api=1&destination=$(uri "$dest")${origin:+&origin=$(uri "$origin")}&travelmode=$mode"
+    echo "Rota aberta até $dest${origin:+ saindo de $origin}."
+    read_route
+    ;;
+  buscar)
+    [[ -n $2 ]] || { echo "uso: dr-maps buscar \"<lugar>\"" >&2; exit 2; }
+    open_url "$BASE/search/?api=1&query=$(uri "${*:2}")"
+    echo "Busca aberta no Maps: ${*:2}"
+    ;;
+  abrir) open_url "https://maps.google.com"; echo "Google Maps aberto." ;;
+  fechar) "$DIR/dr-win" close "$CLASS" ;;
+  esconder) "$DIR/dr-win" hide "$CLASS" ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

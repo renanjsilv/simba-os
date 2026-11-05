@@ -1,0 +1,13 @@
+REPO='[simba-os]
+SigLevel = Required DatabaseRequired
+Server = https://github.com/SIMBA_GH_USER/simba-os/releases/download/repo'
+
+_ativar() {
+  pacman-key --populate simba >/dev/null 2>&1 || pacman-key --populate simba
+  if ! grep -q '^\[simba-os\]' /etc/pacman.conf; then
+    printf '\n# Atualizações do Simba OS (apps, Draco, sistema base) — pacote simba-keyring\n%s\n' "$REPO" >>/etc/pacman.conf
+    echo ":: repositório [simba-os] ativado em /etc/pacman.conf"
+  fi
+}
+post_install() { _ativar; }
+post_upgrade() { _ativar; }

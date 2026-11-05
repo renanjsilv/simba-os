@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# simba:summary=Detect ASUS Zenbook UX5406AA series laptops on Intel Panther Lake.
+
+simba-hw-match "ux5406aa" && simba-hw-intel-ptl

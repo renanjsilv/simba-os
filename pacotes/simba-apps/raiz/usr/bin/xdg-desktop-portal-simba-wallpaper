@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+# Backend do portal Wallpaper: "Definir como plano de fundo" (Nautilus etc.)
+# chama simba-theme-bg-set, que só cria um symlink — a imagem não é movida.
+
+import subprocess
+from urllib.parse import unquote, urlparse
+
+import dbus
+import dbus.service
+from dbus.mainloop.glib import DBusGMainLoop
+from gi.repository import GLib
+
+BUS_NAME = "org.freedesktop.impl.portal.desktop.simba"
+OBJECT_PATH = "/org/freedesktop/portal/desktop"
+IFACE = "org.freedesktop.impl.portal.Wallpaper"
+
+
+class Wallpaper(dbus.service.Object):
+    @dbus.service.method(IFACE, in_signature="osssa{sv}", out_signature="u")
+    def SetWallpaperURI(self, handle, app_id, parent_window, uri, options):
+        parsed = urlparse(str(uri))
+        path = unquote(parsed.path) if parsed.scheme in ("", "file") else None
+        if not path:
+            return dbus.UInt32(2)
+        result = subprocess.run(["simba-theme-bg-set", path])
+        return dbus.UInt32(0 if result.returncode == 0 else 2)
+
+    @dbus.service.method(dbus.PROPERTIES_IFACE, in_signature="ss", out_signature="v")
+    def Get(self, interface, prop):
+        if interface == IFACE and prop == "version":
+            return dbus.UInt32(1)
+        raise dbus.exceptions.DBusException("Unknown property", name="org.freedesktop.DBus.Error.UnknownProperty")
+
+    @dbus.service.method(dbus.PROPERTIES_IFACE, in_signature="s", out_signature="a{sv}")
+    def GetAll(self, interface):
+        return {"version": dbus.UInt32(1)} if interface == IFACE else {}
+
+
+DBusGMainLoop(set_as_default=True)
+bus = dbus.SessionBus()
+name = dbus.service.BusName(BUS_NAME, bus)
+Wallpaper(bus, OBJECT_PATH)
+GLib.MainLoop().run()

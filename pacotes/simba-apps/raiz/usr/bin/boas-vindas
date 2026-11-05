@@ -1,0 +1,8 @@
+#!/bin/bash
+# boas-vindas [--primeira-vez]: tela de boas-vindas do Simba OS (~/.local/share/boas-vindas).
+# --primeira-vez: só abre se ~/.local/state/simba/boas-vindas-vista não existir (autostart).
+if [[ $1 == --primeira-vez ]]; then
+  [[ -e $HOME/.local/state/simba/boas-vindas-vista ]] && exit 0
+  sleep "${BOAS_VINDAS_ATRASO:-3}"   # deixa a barra e o papel de parede subirem primeiro
+fi
+exec python3 "/usr/share/simba-apps/boas-vindas/app.py" "$@"

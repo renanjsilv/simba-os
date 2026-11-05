@@ -1,0 +1,8 @@
+NAME="Simba OS"
+PRETTY_NAME="Simba OS"
+ID=simba
+ID_LIKE=arch
+BUILD_ID="1.0.0"
+VERSION_ID="1.0.0"
+ANSI_COLOR="38;2;158;206;106"
+LOGO=simba

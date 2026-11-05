@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# simba:summary=Match the Dell XPS 13 DX13260 with an Intel Panther Lake GPU.
+
+simba-hw-match "DX13260" && simba-hw-intel-ptl

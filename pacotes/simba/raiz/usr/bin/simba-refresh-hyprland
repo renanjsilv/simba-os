@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# simba:summary=Overwrite all the user Hyprland Lua configs in ~/.config/hypr with the Simba defaults.
+
+simba-refresh-config hypr/.luarc.json
+simba-refresh-config hypr/autostart.lua
+simba-refresh-config hypr/bindings.lua
+simba-refresh-config hypr/input.lua
+simba-refresh-config hypr/looknfeel.lua
+simba-refresh-config hypr/hyprland.lua
+simba-refresh-config hypr/monitors.lua
+
+mkdir -p ~/.local/state/simba/toggles/hypr
+cp "$SIMBA_PATH/default/hypr/toggles/flags.lua" ~/.local/state/simba/toggles/hypr/

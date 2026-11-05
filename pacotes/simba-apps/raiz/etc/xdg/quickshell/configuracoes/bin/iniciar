@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+"""Ajudante do menu Iniciar (Configurações › Iniciar/Iniciar.qml).
+
+    iniciar recentes [n]        JSON: arquivos recentes (recently-used.xbel), mais novos primeiro
+    iniciar usar <desktop-id>   conta um uso do app (para "Mais usados")
+    iniciar uso                 JSON: {desktop-id: {n, ultimo}}
+    iniciar loja <termo>        JSON: apps do Flathub (catálogo local da Loja) não instalados
+    iniciar arquivos <termo>    JSON: arquivos da pasta pessoal com o termo no nome (plocate)
+    iniciar icones <nome>...    JSON: nome do ícone → arquivo no tema de ícones ativo
+                                (o Quickshell não enxerga o tema do sistema)
+"""
+import json
+import os
+import sys
+import time
+import urllib.parse
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+HOME = Path.home()
+XBEL = HOME / ".local/share/recently-used.xbel"
+USO = HOME / ".local/state/configuracoes/iniciar-uso.json"
+NS = {"mime": "http://www.freedesktop.org/standards/shared-mime-info"}
+
+
+def icone_mime(mime, pasta):
+    if pasta:
+        return "folder"
+    return mime.replace("/", "-") if mime else "text-x-generic"
+
+
+def recentes(n):
+    if not XBEL.exists():
+        return []
+    try:
+        raiz = ET.parse(XBEL).getroot()
+    except ET.ParseError:
+        return []
+    vistos, lista = set(), []
+    for b in raiz.findall("bookmark"):
+        href = b.get("href", "")
+        if not href.startswith("file://"):
+            continue
+        caminho = urllib.parse.unquote(href[7:])
+        if caminho in vistos or not os.path.exists(caminho):
+            continue
+        # Fora: arquivos de sistema/ocultos (ex.: ~/.config/..., /tmp)
+        if "/." in caminho or caminho.startswith("/tmp/"):
+            continue
+        vistos.add(caminho)
+        m = b.find(".//mime:mime-type", NS)
+        mime = m.get("type", "") if m is not None else ""
+        quando = b.get("visited") or b.get("modified") or b.get("added") or ""
+        pasta = os.path.isdir(caminho)
+        lista.append({
+            "nome": os.path.basename(caminho.rstrip("/")) or caminho,
+            "caminho": caminho,
+            "pasta": str(Path(caminho).parent).replace(str(HOME), "~", 1),
+            "mime": mime,
+            "icone": icone_mime(mime, pasta),
+            "quando": quando,
+        })
+    lista.sort(key=lambda x: x["quando"], reverse=True)
+    return lista[:n]
+
+
+def ler_uso():
+    try:
+        return json.loads(USO.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+# ── Loja: índice do catálogo (appstream do Flathub), refeito quando ele muda ──
+APPSTREAM = Path("/var/lib/flatpak/appstream/flathub/x86_64/active")
+INDICE_LOJA = HOME / ".cache/configuracoes/loja-indice.json"
+
+
+def _norm(t):
+    import unicodedata
+    return unicodedata.normalize("NFKD", t.lower()).encode("ascii", "ignore").decode()
+
+
+def indice_loja():
+    xml = APPSTREAM / "appstream.xml"
+    if not xml.exists():
+        return []
+    marca = xml.stat().st_mtime
+    try:
+        d = json.loads(INDICE_LOJA.read_text())
+        if d.get("marca") == marca:
+            return d["apps"]
+    except (OSError, ValueError, KeyError):
+        pass
+    apps = []
+    XL = "{http://www.w3.org/XML/1998/namespace}lang"
+    for _, el in ET.iterparse(str(xml), events=("end",)):
+        if el.tag != "component":
+            continue
+        if el.get("type") in ("desktop", "desktop-application"):
+            aid = (el.findtext("id") or "").removesuffix(".desktop")
+            def txt(tag, nativo_primeiro=False):
+                pt = en = None
+                for x in el.findall(tag):
+                    lang = x.get(XL)
+                    if lang in ("pt_BR", "pt-BR"):
+                        pt = x.text
+                    elif lang is None:
+                        en = x.text
+                if nativo_primeiro:
+                    return (en or pt or "").strip()
+                return (pt or en or "").strip()
+            # nome = marca do app (sem tradução: "GIMP", não "Programa de…"); resumo em pt
+            nome, resumo = txt("name", True), txt("summary")
+            ic = ""
+            for tam in ("128x128", "64x64"):
+                f = APPSTREAM / "icons" / tam / f"{aid}.png"
+                if f.exists():
+                    ic = str(f)
+                    break
+            kw = " ".join((k.text or "") for k in el.iter("keyword"))
+            if aid and nome:
+                apps.append({"id": aid, "nome": nome, "resumo": resumo, "icone": ic,
+                             "busca": _norm(f"{nome} {resumo} {kw} {aid}")})
+        el.clear()
+    INDICE_LOJA.parent.mkdir(parents=True, exist_ok=True)
+    INDICE_LOJA.write_text(json.dumps({"marca": marca, "apps": apps}, ensure_ascii=False))
+    return apps
+
+
+def loja(termo, n=4):
+    t = _norm(termo.strip())
+    if len(t) < 2:
+        return []
+    instalados = set()
+    for base in (Path("/var/lib/flatpak/app"), HOME / ".local/share/flatpak/app"):
+        if base.is_dir():
+            instalados.update(x.name for x in base.iterdir())
+    res = []
+    for a in indice_loja():
+        if a["id"] in instalados:
+            continue
+        nome = _norm(a["nome"])
+        p = 100 if nome.startswith(t) else 70 if (" " + t) in nome else 50 if t in nome else 10 if t in a["busca"] else 0
+        if p:
+            res.append((p, a))
+    res.sort(key=lambda x: (-x[0], len(x[1]["nome"])))
+    return [{k: a[k] for k in ("id", "nome", "resumo", "icone")} for _, a in res[:n]]
+
+
+def arquivos(termo, n=6):
+    import subprocess
+    t = termo.strip()
+    if len(t) < 3:
+        return []
+    try:
+        out = subprocess.run(["plocate", "-i", "-b", "-l", "200", "--", t], capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    h = str(HOME) + "/"
+    res = []
+    for linha in out.splitlines():
+        if not linha.startswith(h) or "/." in linha[len(h) - 1:] or not os.path.exists(linha):
+            continue
+        p = Path(linha)
+        res.append({"caminho": linha, "nome": p.name, "pasta": str(p.parent).replace(str(HOME), "~", 1),
+                    "pastaSim": p.is_dir()})
+        if len(res) >= n:
+            break
+    return res
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    if a[0] == "recentes":
+        print(json.dumps(recentes(int(a[1]) if len(a) > 1 else 12), ensure_ascii=False))
+    elif a[0] == "usar" and len(a) > 1:
+        u = ler_uso()
+        e = u.get(a[1], {"n": 0, "ultimo": 0})
+        e["n"] += 1
+        e["ultimo"] = int(time.time())
+        u[a[1]] = e
+        USO.parent.mkdir(parents=True, exist_ok=True)
+        tmp = USO.with_suffix(".tmp")
+        tmp.write_text(json.dumps(u))
+        tmp.replace(USO)
+    elif a[0] == "icones":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import temaicones
+        print(json.dumps(temaicones.resolver([n for n in a[1:] if n and not n.startswith("/")]), ensure_ascii=False))
+    elif a[0] == "loja":
+        print(json.dumps(loja(" ".join(a[1:])), ensure_ascii=False))
+    elif a[0] == "arquivos":
+        print(json.dumps(arquivos(" ".join(a[1:])), ensure_ascii=False))
+    elif a[0] == "uso":
+        print(json.dumps(ler_uso()))
+    else:
+        print(__doc__, file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

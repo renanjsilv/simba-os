@@ -1,0 +1,20 @@
+#!/bin/bash
+
+# simba:summary=Cycle to the next media source and transfer playback when the current source is playing
+# simba:args=[next|previous]
+# simba:examples=simba audio source switch | simba-audio-source-switch previous
+
+direction="${1:-next}"
+
+case "$direction" in
+  next)
+    simba-shell media sourceSwitch
+    ;;
+  previous)
+    simba-shell media sourceSwitchPrevious
+    ;;
+  *)
+    echo "Usage: simba-audio-source-switch [next|previous]" >&2
+    exit 1
+    ;;
+esac

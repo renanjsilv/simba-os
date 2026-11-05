@@ -1,0 +1,26 @@
+# Simba OS — apps próprios: Configurações, Menu Iniciar, Explorador de Arquivos, Gerenciador de
+# Tarefas, Transcrever, Boas-vindas, Gerar ISO, Conta (backup no Drive), módulos da barra, tela de
+# bloqueio, sistema de idiomas (catálogos), atualização ("Atualizar tudo") e utilitários.
+pkgname=simba-apps
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Simba OS: apps e ferramentas próprios (Configurações, Explorador, Gerenciador de Tarefas…)"
+arch=('any')
+url="https://github.com/SIMBA_GH_USER/simba-os"
+license=('MIT')
+options=('!debug' '!strip')
+depends=('simba' 'quickshell' 'python' 'python-gobject' 'gtk4' 'libadwaita' 'jq' 'curl' 'yay'
+         'pacman-contrib' 'wl-clipboard' 'libnotify'
+         # plugin de janelas (compilado por usuário contra o Hyprland instalado)
+         'gcc' 'make' 'pkgconf')
+optdepends=('rclone: nuvens no Explorador e backup da Conta no Google Drive'
+            'flatpak: Loja de Apps'
+            'fwupd: atualização de firmware em "Atualizar tudo"'
+            'localsend: enviar arquivos para o celular'
+            'simba-draco: assistente de voz Draco')
+install=simba-apps.install
+
+package() {
+  cp -a "$startdir/raiz/." "$pkgdir/"
+  install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

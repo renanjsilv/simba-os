@@ -1,0 +1,89 @@
+#!/bin/bash
+# Parte com root do app Gerar ISO (o app chama com pkexec e lê a saída linha a linha).
+#
+#   gerar-iso-root construir <arquivo-cancelar> [sistema|pessoal|distribuivel] [logins 0|1] [nome do sistema]
+#   gerar-iso-root gravar <iso> <dispositivo> <verificar 0|1> <arquivo-cancelar>
+#
+# Marcadores para o app: @@ETAPA, @@ISO (vindos do gerar-iso-build), @@TOTAL <bytes>,
+# @@FASE <gravando|sincronizando|verificando>, @@ERRO <texto>, @@FIM <código>.
+# Cancelar: o app cria <arquivo-cancelar> (no runtime do usuário); este script
+# encerra o grupo de processos e o gerar-iso-build limpa os snapshots.
+set -uo pipefail
+SRC="$(dirname "$(readlink -f "$0")")"
+erro() { echo "@@ERRO $*"; echo "@@FIM 1"; exit 1; }
+
+vigiar() {  # $1 pid do grupo, $2 arquivo de cancelar
+  while kill -0 "$1" 2>/dev/null; do
+    if [ -e "$2" ]; then
+      echo "@@CANCELANDO"
+      kill -TERM -- "-$1" 2>/dev/null || kill -TERM "$1" 2>/dev/null
+      return
+    fi
+    sleep 0.5
+  done
+}
+
+usuario=""
+[ -n "${PKEXEC_UID:-}" ] && usuario=$(id -nu "$PKEXEC_UID" 2>/dev/null)
+
+case "${1:-}" in
+construir)
+  cancelar=${2:?arquivo de cancelar} modo=${3:-sistema} logins=${4:-0} nome=${5:-Simba OS}
+  case $modo in sistema|pessoal|distribuivel) ;; *) erro "tipo de ISO inválido: $modo" ;; esac
+  [ "$logins" = 1 ] || logins=0
+  nome=$(printf '%s' "$nome" | tr -d "\n'\"\\\$\`" | cut -c1-40)
+  setsid env GERAR_ISO_GUI=1 SUDO_USER="$usuario" GERAR_ISO_MODO="$modo" GERAR_ISO_LOGINS="$logins" \
+    GERAR_ISO_NOME="${nome:-Simba OS}" "$SRC/gerar-iso-build" 2>&1 &
+  pid=$!
+  vigiar "$pid" "$cancelar" &
+  wait "$pid"; rc=$?
+  echo "@@FIM $rc"
+  exit "$rc"
+  ;;
+gravar)
+  iso=${2:?iso} dev=${3:?dispositivo} verificar=${4:-0} cancelar=${5:?arquivo de cancelar}
+  [ -f "$iso" ] || erro "a imagem não existe: $iso"
+  [ -b "$dev" ] || erro "$dev não é um disco"
+  [ "$(lsblk -dno TYPE "$dev")" = disk ] || erro "$dev não é um disco inteiro"
+  tran=$(lsblk -dno TRAN "$dev" | tr -d ' ') rm=$(lsblk -dno RM "$dev" | tr -d ' ')
+  [ "$tran" = usb ] || [ "$rm" = 1 ] || erro "$dev não é um pendrive/disco removível"
+  # Nunca o disco do sistema: nada montado em / /boot /home /usr /var dele
+  for alvo in / /boot /home /usr /var; do
+    origem=$(findmnt -no SOURCE "$alvo" 2>/dev/null) || continue
+    pai=$(lsblk -nso NAME "$origem" 2>/dev/null | tail -1)
+    [ -n "$pai" ] && [ "/dev/$pai" = "$dev" ] && erro "$dev contém o sistema em uso"
+  done
+  tam_iso=$(stat -c %s "$iso")
+  [ "$(lsblk -dbno SIZE "$dev")" -gt "$tam_iso" ] || erro "o pendrive é menor que a imagem"
+  # desmonta as partições do pendrive
+  for p in $(lsblk -lnpo NAME "$dev" | tail -n +2); do
+    umount "$p" 2>/dev/null || umount -l "$p" 2>/dev/null
+  done
+  echo "@@TOTAL $tam_iso"
+  echo "@@FASE gravando"
+  setsid dd if="$iso" of="$dev" bs=4M conv=fsync oflag=direct status=progress 2>&1 &
+  pid=$!
+  vigiar "$pid" "$cancelar" &
+  wait "$pid"; rc=$?
+  [ -e "$cancelar" ] && { echo "@@FIM 130"; exit 130; }
+  [ "$rc" = 0 ] || erro "a gravação falhou (dd saiu com $rc)"
+  echo "@@FASE sincronizando"
+  sync
+  blockdev --flushbufs "$dev" 2>/dev/null
+  if [ "$verificar" = 1 ]; then
+    echo "@@FASE verificando"
+    # lê de volta só o tamanho da imagem e compara
+    if cmp -n "$tam_iso" "$iso" "$dev" >/dev/null 2>&1; then
+      echo "@@VERIFICADO ok"
+    else
+      erro "a verificação encontrou diferenças — tente outro pendrive ou porta USB"
+    fi
+  fi
+  partprobe "$dev" 2>/dev/null
+  echo "@@FIM 0"
+  ;;
+*)
+  echo "uso: $0 construir <cancelar> | gravar <iso> <dispositivo> <verificar> <cancelar>" >&2
+  exit 2
+  ;;
+esac

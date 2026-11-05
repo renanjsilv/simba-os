@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome to Simba OS
+Name[pt_BR]=Boas-vindas ao Simba OS
+GenericName=System tour
+GenericName[pt_BR]=Apresentação do sistema
+Comment=Discover Simba OS: Google account, Draco, themes, store and office
+Comment[pt_BR]=Conheça os recursos do Simba OS: conta Google, Draco, temas, loja e escritório
+Exec=boas-vindas
+Icon=com.simba.BoasVindas
+Terminal=false
+NoDisplay=false
+Categories=System;Utility;
+Keywords=welcome;tour;introduction;getting started;
+Keywords[pt_BR]=boas-vindas;bem-vindo;welcome;tour;introdução;primeiros passos;
+StartupNotify=true
+StartupWMClass=com.simba.BoasVindas

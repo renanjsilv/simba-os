@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# simba:summary=Overwrite the user config for hyprsunset with the Simba default and restart the service.
+
+simba-refresh-config hypr/hyprsunset.conf
+simba-restart-hyprsunset

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# simba:summary=Enable, disable, or toggle the touch functionality of the screen
+# simba:args=[on|off|toggle]
+
+exec simba-toggle-input-device touchscreen "${1:-toggle}"

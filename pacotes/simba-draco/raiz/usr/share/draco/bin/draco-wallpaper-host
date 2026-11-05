@@ -1,0 +1,51 @@
+#!/bin/bash
+# Native messaging host: baixa a imagem recebida e define como papel de parede.
+export PATH="$HOME/.local/share/simba/bin:/usr/share/simba/bin:/usr/local/bin:/usr/bin:$PATH"
+len=$(head -c4 | od -An -tu4 | tr -d ' ')
+msg=$(head -c "$len")
+url=$(jq -r '.url // empty' <<<"$msg")
+dir="$HOME/Pictures/Wallpapers"
+mkdir -p "$dir"   # não existe num clone novo (a ISO não leva o conteúdo de ~/Pictures)
+ok=false
+if jq -e '.data' >/dev/null <<<"$msg"; then
+  # a extensão já baixou a foto com o login do navegador
+  tmp=$(mktemp "$dir/.dl-XXXXXX")
+  jq -r '.data' <<<"$msg" | base64 -d >"$tmp"
+  ext=$(file -b --mime-type "$tmp" | sed -n 's#^image/\(jpeg\|png\|webp\)$#\1#p')
+  if [[ -n $ext ]]; then
+    out="$dir/foto-$(date +%Y%m%d-%H%M%S).${ext/jpeg/jpg}"
+    mv "$tmp" "$out"
+    fit=$("/usr/share/draco/bin/draco-wallpaper-fit" "$out") || fit=$out
+    simba-theme-bg-set "$fit" && ok=true
+  fi
+  rm -f "$tmp"
+elif [[ $url == http* ]]; then
+  # fotos do Google: nunca usa a miniatura; pede o arquivo original (=d), senão o tamanho máximo (=s0)
+  urls=("$url")
+  if [[ $url == *googleusercontent.com* || $url == *usercontent.google.com* ]]; then
+    base=$(sed -E 's/\?.*$//; s/=[^/=]*$//' <<<"$url")
+    urls=("$base=d" "$base=s0")
+  fi
+  tmp=$(mktemp "$dir/.dl-XXXXXX")
+  ext=""
+  for u in "${urls[@]}"; do
+    # o original pode vir em HEIC/vídeo: nesse caso tenta o próximo formato
+    curl -fsSL -A "Mozilla/5.0" "$u" -o "$tmp" &&
+      ext=$(file -b --mime-type "$tmp" | sed -n 's#^image/\(jpeg\|png\|webp\)$#\1#p') && [[ -n $ext ]] && break
+    ext=""
+  done
+  if [[ -n $ext ]]; then
+    out="$dir/foto-$(date +%Y%m%d-%H%M%S).${ext/jpeg/jpg}"
+    mv "$tmp" "$out"
+    fit=$("/usr/share/draco/bin/draco-wallpaper-fit" "$out") || fit=$out
+    simba-theme-bg-set "$fit" && ok=true
+  fi
+  rm -f "$tmp"
+fi
+if $ok; then
+  simba-notification-send "Papel de parede definido" 2>/dev/null
+  printf '\x0b\x00\x00\x00{"ok":true}'
+else
+  simba-notification-send "Não consegui definir o papel de parede" 2>/dev/null
+  printf '\x0c\x00\x00\x00{"ok":false}'
+fi

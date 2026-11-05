@@ -1,0 +1,8 @@
+#!/bin/bash
+
+# simba:summary=Open Voxtype configuration
+
+set -e
+
+simba-launch-floating-terminal-with-presentation "voxtype configure"
+simba-restart-shell

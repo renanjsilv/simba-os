@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# simba:summary=Show the current time and date notification
+
+simba-notification-send -g  -u low "$(date +"%A %H:%M  ·  %d %B %Y  ·  Semana %V")"

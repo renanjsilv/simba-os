@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# simba:summary=Open HEY webmail and translate mailto links
+# simba:args=[url]
+
+url="$1"
+web_url="https://app.hey.com"
+
+# Handle mailto: URLs
+if [[ $url =~ ^mailto: ]]; then
+  email=$(echo "$url" | sed 's/mailto://')
+  web_url="https://app.hey.com/messages/new?to=$email"
+fi
+
+exec simba-launch-webapp "$web_url"

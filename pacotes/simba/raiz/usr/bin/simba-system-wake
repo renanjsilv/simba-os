@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# simba:summary=Wake displays and restore brightness after idle
+# simba:group=system
+# simba:name=wake
+# simba:examples=simba system wake
+
+simba-brightness-display on
+simba-brightness-keyboard restore
+simba-hyprland-monitor-clamshell >/dev/null 2>&1 || true

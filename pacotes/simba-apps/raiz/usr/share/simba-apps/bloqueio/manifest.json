@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "renan.lock",
+  "name": "My Lock Screen",
+  "version": "1.0.0",
+  "author": "Simba",
+  "description": "Quickshell session lock with separate password and fingerprint PAM flows.",
+  "simba": {
+    "capabilities": [
+      "authentication"
+    ],
+    "clonedFrom": "simba.lock"
+  },
+  "kinds": [
+    "service"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}

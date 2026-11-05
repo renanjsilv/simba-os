@@ -1,0 +1,17 @@
+[Unit]
+Description=Draco wake word ("Draco, ...") for the voice assistant
+Documentation=file:///usr/share/draco/wake.py
+PartOf=graphical-session.target
+After=graphical-session.target pipewire.service
+
+[Service]
+ExecStart=%h/.local/share/draco/venv/bin/python -I /usr/share/draco/wake.py
+Restart=on-failure
+RestartSec=3
+# keep it light: it runs all the time
+Nice=5
+Environment=OMP_WAIT_POLICY=PASSIVE
+CPUWeight=50
+
+[Install]
+WantedBy=graphical-session.target

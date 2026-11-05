@@ -1,0 +1,10 @@
+[Unit]
+Description=Backup da conta no Google Drive (conta sincronizar)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/conta sincronizar --silencioso
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1h

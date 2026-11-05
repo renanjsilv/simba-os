@@ -1,0 +1,32 @@
+[Desktop Entry]
+Type=Application
+Name=Settings
+Name[pt_BR]=Configurações
+GenericName=System settings
+GenericName[pt_BR]=Configurações do sistema
+Comment=Theme, wallpaper, displays, lock screen, keyboard, sound, network, power and more
+Comment[pt_BR]=Tema, papel de parede, telas, bloqueio, teclado, som, rede, energia e mais
+Exec=/usr/bin/configuracoes
+Icon=com.renan.Configuracoes
+Terminal=false
+Categories=Settings;
+Keywords=settings;preferences;control panel;theme;wallpaper;display;monitor;resolution;lock;keyboard;mouse;touchpad;sound;network;wifi;bluetooth;power;battery;notifications;shortcuts;
+Keywords[pt_BR]=configurações;ajustes;preferências;settings;tema;papel de parede;wallpaper;tela;monitor;resolução;bloqueio;teclado;mouse;touchpad;som;rede;wifi;bluetooth;energia;bateria;notificações;atalhos;
+StartupNotify=false
+StartupWMClass=com.renan.Configuracoes
+Actions=tela;personalizacao;projetar;
+
+[Desktop Action tela]
+Name=Display
+Name[pt_BR]=Tela
+Exec=/usr/bin/configuracoes tela
+
+[Desktop Action personalizacao]
+Name=Personalization
+Name[pt_BR]=Personalização
+Exec=/usr/bin/configuracoes personalizacao
+
+[Desktop Action projetar]
+Name=Project (Super+P)
+Name[pt_BR]=Projetar (Super+P)
+Exec=/usr/bin/configuracoes projetar

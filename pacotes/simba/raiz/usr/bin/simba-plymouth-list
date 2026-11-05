@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# simba:summary=List themes that can style the Plymouth boot screen
+# simba:examples=simba plymouth list
+
+{
+  find ~/.config/simba/themes/ -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -printf '%f\n' 2>/dev/null
+  find "$SIMBA_PATH/themes/" -mindepth 1 -maxdepth 1 -type d -printf '%f\n'
+} | sort -u | while read -r name; do
+  if [[ -f $(simba-theme-dir "$name")/preview-unlock.png ]]; then
+    echo "$name"
+  fi
+done

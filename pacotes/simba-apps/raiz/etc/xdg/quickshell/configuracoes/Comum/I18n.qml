@@ -1,0 +1,1 @@
+/usr/share/simba-apps/idiomas/qml/I18n.qml

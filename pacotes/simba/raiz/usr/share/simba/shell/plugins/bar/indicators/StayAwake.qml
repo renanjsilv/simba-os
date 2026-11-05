@@ -1,0 +1,20 @@
+import QtQuick 6.11
+import qs.Ui
+
+BarIndicator {
+  id: root
+
+  readonly property var idleService: bar?.shell?.firstPartyServiceFor("simba.idle")
+
+  active: idleService ? idleService.stayAwake : false
+  activeText: "󰅶"
+  inactiveText: "󰅶"
+  activeTooltipText: "Permitir bloqueio e proteção de tela"
+  inactiveTooltipText: "Manter acordado"
+
+  function toggle() {
+    if (root.idleService) root.idleService.setIdleEnabled(root.active)
+  }
+
+  onPressed: function() { root.toggle() }
+}

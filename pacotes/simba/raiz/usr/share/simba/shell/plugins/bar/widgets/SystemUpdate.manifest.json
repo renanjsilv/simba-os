@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "simba.system-update",
+  "name": "Simba update",
+  "version": "1.0.0",
+  "author": "Simba",
+  "description": "Indicates available Simba updates",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "SystemUpdate.qml"
+  },
+  "barWidget": {
+    "displayName": "Simba update",
+    "description": "Indicates available Simba updates",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

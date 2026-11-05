@@ -1,0 +1,86 @@
+#!/bin/bash
+# dr-app: open / focus / close apps by their spoken name ("navegador", "discord", "planilha"...).
+#
+#   dr-app abrir "<nome>"       focus it if it's already open (even in the background), else launch it
+#   dr-app novo "<nome>"        always launch a new window
+#   dr-app fechar "<nome>"      close its window
+#   dr-app esconder "<nome>"    send it to the background
+#   dr-app abertos              windows open now
+#   dr-app lista [filtro]       installed apps
+#
+# Exit 4 = ambiguous name (prints the candidates), 5 = no such app.
+# Aliases (navegador, arquivos, terminal, planilha, calculadora...) live in lib/apps.py.
+
+DIR="$(dirname "$0")"
+LIB="$DIR/../lib"
+
+resolve() { # sets id name launch window
+  local json rc
+  json=$(python3 "$LIB/apps.py" resolve "$1"); rc=$?
+  if ((rc != 0)); then
+    if ((rc == 4)); then echo "Mais de um app combina com '$1':" >&2; sed 's/^/  - /' <<<"$json" >&2
+    else echo "Não achei o app '$1'. Veja: dr-app lista" >&2; fi
+    exit "$rc"
+  fi
+  id=$(jq -r .id <<<"$json"); name=$(jq -r .name <<<"$json")
+  launch=$(jq -r .launch <<<"$json"); window=$(jq -r .window <<<"$json")
+}
+
+find_window() {
+  [[ -n $window ]] || return 1
+  hyprctl clients -j | jq -r --arg p "$window" '[.[] | select(.class | test($p; "i"))] | sort_by(.focusHistoryID) | .[0].address // empty' | grep .
+}
+
+start() {
+  if [[ $id == @* || $id == *" "* ]]; then
+    eval "setsid -f $launch" >/dev/null 2>&1
+  else
+    setsid -f uwsm-app -- "$id.desktop" >/dev/null 2>&1
+  fi
+  if [[ -n $window ]] && "$DIR/dr-win" wait "$window" 15 >/dev/null 2>&1; then
+    echo "$name aberto."
+  else
+    echo "$name iniciado (a janela pode levar alguns segundos)."
+  fi
+}
+
+case $1 in
+  abrir)
+    [[ -n $2 ]] || { echo "uso: dr-app abrir \"<nome>\"" >&2; exit 2; }
+    resolve "${*:2}"
+    if a=$(find_window); then
+      ws=$(hyprctl clients -j | jq -r --arg a "$a" '.[] | select(.address == $a) | .workspace.name')
+      if [[ $ws == special:* ]]; then
+        cur=$(hyprctl activeworkspace -j | jq -r .id)
+        hyprctl dispatch "hl.dsp.window.move({ workspace = \"$cur\", window = \"address:$a\" })" >/dev/null
+      fi
+      hyprctl dispatch "hl.dsp.focus({ window = \"address:$a\" })" >/dev/null
+      echo "$name já estava aberto; trouxe para a frente."
+    else
+      start
+    fi
+    ;;
+  novo)
+    [[ -n $2 ]] || { echo "uso: dr-app novo \"<nome>\"" >&2; exit 2; }
+    resolve "${*:2}"
+    start
+    ;;
+  fechar | esconder)
+    [[ -n $2 ]] || { echo "uso: dr-app $1 \"<nome>\"" >&2; exit 2; }
+    resolve "${*:2}"
+    a=$(find_window) || { echo "$name não está aberto."; exit 0; }
+    if [[ $1 == fechar ]]; then
+      hyprctl dispatch "hl.dsp.window.close({ window = \"address:$a\" })" >/dev/null
+      echo "$name fechado."
+    else
+      hyprctl dispatch "hl.dsp.window.move({ workspace = \"special:scratchpad\", follow = false, window = \"address:$a\" })" >/dev/null
+      echo "$name em segundo plano."
+    fi
+    ;;
+  abertos)
+    hyprctl clients -j | jq -r '.[] | select(.class != "org.simba.agent") |
+      "\(.class) | \(.title) | \(if (.workspace.name | startswith("special")) then "segundo plano" else "workspace \(.workspace.name)" end)"'
+    ;;
+  lista) python3 "$LIB/apps.py" list "${*:2}" ;;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

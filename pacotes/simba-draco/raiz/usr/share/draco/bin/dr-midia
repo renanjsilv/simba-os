@@ -1,0 +1,91 @@
+#!/bin/bash
+# dr-midia: control whatever is playing (Spotify, YouTube in Brave, mpv...) over MPRIS.
+#
+#   dr-midia status                 every player: state, artist - title
+#   dr-midia pausar                 pause everything that is playing
+#   dr-midia continuar              resume what was paused last (by dr-midia) or the first paused player
+#   dr-midia alternar | proxima | anterior
+#   dr-midia avancar <seg> | voltar <seg>
+#   dr-midia volume <0-100>         player volume (for system volume use wpctl)
+#   --player <spotify|brave|mpv>    target one player instead of the active one
+#
+# "brave" is YouTube and any other site playing in the browser/web apps.
+
+STATE="${XDG_RUNTIME_DIR:-/tmp}/draco/last-paused-player"
+mkdir -p "${STATE%/*}"
+
+only=""
+args=()
+while (($#)); do
+  if [[ $1 == --player ]]; then only=$2; shift 2; else args+=("$1"); shift; fi
+done
+set -- "${args[@]}"
+
+players() {
+  gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+    --method org.freedesktop.DBus.ListNames |
+    grep -oE "org\.mpris\.MediaPlayer2\.[A-Za-z0-9._-]+" | grep -i -- "${only:-.}"
+}
+call() { gdbus call --session --dest "$1" --object-path /org/mpris/MediaPlayer2 --method "${@:2}" 2>/dev/null; }
+prop() { call "$1" org.freedesktop.DBus.Properties.Get org.mpris.MediaPlayer2.Player "$2"; }
+state() { prop "$1" PlaybackStatus | grep -oE "Playing|Paused|Stopped"; }
+name() { sed -E 's/org\.mpris\.MediaPlayer2\.//; s/\.instance[0-9]+//' <<<"$1"; }
+
+describe() {
+  local meta artist title
+  meta=$(prop "$1" Metadata)
+  artist=$(grep -oP "'xesam:artist': <\['\K[^']*" <<<"$meta")
+  title=$(grep -oP "'xesam:title': <'\K[^']*" <<<"$meta")
+  echo "$(name "$1"): $(state "$1") - ${artist:+$artist - }$title"
+}
+
+# The player to act on: the one playing, else the last one we paused, else the first.
+active() {
+  local p all
+  all=$(players)
+  for p in $all; do [[ $(state "$p") == Playing ]] && { echo "$p"; return; }; done
+  p=$(cat "$STATE" 2>/dev/null)
+  grep -qx "$p" <<<"$all" && { echo "$p"; return; }
+  head -1 <<<"$all"
+}
+
+need_player() { [[ -n $1 ]] || { echo "Nada tocando (nenhum player aberto)." >&2; exit 1; }; }
+
+case $1 in
+  status)
+    all=$(players)
+    [[ -z $all ]] && { echo "Nenhum player aberto."; exit 0; }
+    for p in $all; do describe "$p"; done
+    ;;
+  pausar)
+    n=0
+    for p in $(players); do
+      if [[ $(state "$p") == Playing ]]; then call "$p" org.mpris.MediaPlayer2.Player.Pause >/dev/null; echo "$p" >"$STATE"; n=$((n + 1)); fi
+    done
+    ((n)) && echo "Pausado." || echo "Nada estava tocando."
+    ;;
+  continuar | alternar | proxima | próxima | anterior)
+    p=$(active); need_player "$p"
+    case $1 in
+      continuar) m=Play ;; alternar) m=PlayPause ;; anterior) m=Previous ;; *) m=Next ;;
+    esac
+    if [[ $m == Next && $(prop "$p" CanGoNext) != *true* ]]; then
+      echo "$(name "$p") não aceita 'próxima' por aqui (no YouTube use: dr-youtube proximo)." >&2; exit 1
+    fi
+    call "$p" org.mpris.MediaPlayer2.Player.$m >/dev/null
+    sleep 0.4
+    describe "$p"
+    ;;
+  avancar | avançar | voltar)
+    p=$(active); need_player "$p"
+    s=${2:-10}; [[ $1 == voltar ]] && s=-$s
+    call "$p" org.mpris.MediaPlayer2.Player.Seek "$((s * 1000000))" >/dev/null && echo "Pulei ${s}s."
+    ;;
+  volume)
+    p=$(active); need_player "$p"
+    v=$(awk -v v="$2" 'BEGIN{printf "%.2f", v/100}')
+    call "$p" org.freedesktop.DBus.Properties.Set org.mpris.MediaPlayer2.Player Volume "<$v>" >/dev/null &&
+      echo "Volume de $(name "$p"): $2%"
+    ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

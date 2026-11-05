@@ -1,0 +1,137 @@
+#!/bin/bash
+# simba-idioma — troca o idioma do sistema entre português (Brasil) e inglês.
+#
+#   simba-idioma pt_BR       tradução pt-BR do Simba + LANG=pt_BR.UTF-8
+#   simba-idioma en_US       arquivos originais (inglês) + LANG=en_US.UTF-8
+#   simba-idioma --status    mostra o idioma atual
+#   simba-idioma --reaplicar depois de atualizar o Simba: reaplica a tradução
+#                              (se o sistema está em pt-BR) às versões novas
+#
+# A tradução fica em /usr/share/simba-idioma:
+#   VERSAO   versão do pacote simba em que en/ e pt_BR/ foram gerados
+#   en/      arquivos originais do pacote (mesmos caminhos a partir de /)
+#   pt_BR/   os mesmos arquivos, traduzidos
+# Os arquivos do Simba são editados no lugar (não há cópias nem overrides).
+#
+# Use --root DIR para agir num sistema montado (instalador da ISO).
+set -euo pipefail
+
+ROOT=
+while [[ ${1:-} == --root ]]; do ROOT=${2%/}; shift 2; done
+PACK="$ROOT/usr/share/simba-idioma"
+
+die()  { printf 'simba-idioma: %s\n' "$*" >&2; exit 1; }
+info() { printf '%s\n' "$*"; }
+
+[[ $(id -u) == 0 ]] || die "rode com sudo."
+[[ -d $PACK/en && -d $PACK/pt_BR ]] || die "pacote de tradução não encontrado em $PACK."
+
+pkg_version() { pacman ${ROOT:+--root "$ROOT"} -Q simba 2>/dev/null | awk '{print $2}'; }
+pack_version() { cat "$PACK/VERSAO" 2>/dev/null; }
+files() { (cd "$PACK/en" && find . -type f | sed 's|^\./||' | sort); }
+
+current_lang() {
+  local l
+  l=$(sed -n 's/^LANG=//p' "$ROOT/etc/locale.conf" 2>/dev/null | tr -d '"')
+  [[ $l == pt_BR* ]] && echo pt_BR || echo en_US
+}
+
+set_locale() {
+  local lang=$1
+  grep -q "^${lang}.UTF-8 UTF-8" "$ROOT/etc/locale.gen" || {
+    sed -i "s/^#\s*${lang}.UTF-8 UTF-8/${lang}.UTF-8 UTF-8/" "$ROOT/etc/locale.gen"
+    if [[ -n $ROOT ]]; then arch-chroot "$ROOT" locale-gen >/dev/null; else locale-gen >/dev/null; fi
+  }
+  if grep -q '^LANG=' "$ROOT/etc/locale.conf" 2>/dev/null; then
+    sed -i "s/^LANG=.*/LANG=${lang}.UTF-8/" "$ROOT/etc/locale.conf"
+  else
+    echo "LANG=${lang}.UTF-8" >> "$ROOT/etc/locale.conf"
+  fi
+}
+
+# Copia o conjunto (en ou pt_BR) por cima dos arquivos do Simba.
+install_set() {
+  local set=$1 f n=0
+  while IFS= read -r f; do
+    [[ -f $ROOT/$f ]] || continue
+    cmp -s "$PACK/$set/$f" "$ROOT/$f" && continue
+    cat "$PACK/$set/$f" > "$ROOT/$f"
+    n=$((n + 1))
+  done < <(files)
+  info "$n arquivo(s) do Simba ajustados ($set)."
+}
+
+# Depois de um update: os arquivos voltaram a ser os originais (novos). Reaplica a
+# diferença en -> pt_BR antiga em cada um e renova o pacote de tradução.
+reapply() {
+  local new old f tmp ok=0 fail=0 same=0
+  new=$(pkg_version); old=$(pack_version)
+  tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' RETURN
+  mkdir -p "$tmp/en" "$tmp/pt_BR"
+  while IFS= read -r f; do
+    if [[ ! -f /$f ]]; then
+      info "  removido no Simba $new: /$f"
+      continue
+    fi
+    mkdir -p "$tmp/en/$(dirname "$f")" "$tmp/pt_BR/$(dirname "$f")"
+    if cmp -s "$PACK/pt_BR/$f" "/$f"; then
+      # ainda traduzido (não mudou no update): mantém
+      cp -p "$PACK/en/$f" "$tmp/en/$f"; cp -p "/$f" "$tmp/pt_BR/$f"; same=$((same + 1)); continue
+    fi
+    cp -p "/$f" "$tmp/en/$f"
+    cp -p "/$f" "$tmp/pt_BR/$f"
+    # diff sai com 1 quando há diferença (sempre, numa tradução): com pipefail,
+    # "diff | patch" contava como falha mesmo com o patch aplicado.
+    diff -u "$PACK/en/$f" "$PACK/pt_BR/$f" > "$tmp/patch" || true
+    if patch -s -f --no-backup-if-mismatch -r - "$tmp/pt_BR/$f" < "$tmp/patch" >/dev/null 2>&1; then
+      cat "$tmp/pt_BR/$f" > "/$f"; ok=$((ok + 1))
+    else
+      cp -p "/$f" "$tmp/pt_BR/$f"   # fica em inglês
+      info "  não deu para traduzir automaticamente: /$f"; fail=$((fail + 1))
+    fi
+  done < <(files)
+  # Guarda a tradução anterior: o que ficou em inglês ainda pode ser refeito a partir dela.
+  rm -rf "$PACK.anterior"
+  mkdir -p "$PACK.anterior"
+  mv "$PACK/en" "$PACK/pt_BR" "$PACK.anterior/"
+  cp -p "$PACK/VERSAO" "$PACK.anterior/" 2>/dev/null || true
+  mv "$tmp/en" "$tmp/pt_BR" "$PACK/"
+  echo "$new" > "$PACK/VERSAO"
+  info "Tradução reaplicada (Simba $old -> $new): $ok atualizados, $same sem mudança, $fail ficaram em inglês."
+}
+
+restart_hint() {
+  [[ -n $ROOT ]] && return
+  info "Para ver tudo no novo idioma, saia da sessão e entre de novo (ou reinicie)."
+}
+
+case "${1:-}" in
+  pt_BR | pt | pt-BR | portugues | português)
+    if [[ $(pkg_version) == "$(pack_version)" ]]; then
+      install_set pt_BR
+    else
+      [[ -z $ROOT ]] || die "a tradução é do Simba $(pack_version), mas o instalado é $(pkg_version)."
+      reapply
+    fi
+    set_locale pt_BR; info "Idioma: português (Brasil)."; restart_hint ;;
+  en_US | en | english | ingles | inglês)
+    if [[ $(pkg_version) == "$(pack_version)" ]]; then install_set en; else info "Simba atualizado: os arquivos já estão no original."; fi
+    set_locale en_US; info "Language: English."; restart_hint ;;
+  --reaplicar)
+    [[ -z $ROOT ]] || die "--reaplicar não aceita --root."
+    if [[ $(pkg_version) == "$(pack_version)" ]]; then
+      [[ $(current_lang) == pt_BR ]] && install_set pt_BR
+      exit 0
+    fi
+    if [[ $(current_lang) == pt_BR ]]; then
+      reapply
+    else
+      # Sistema em inglês: nada a fazer agora; "simba-idioma pt_BR" reaplica
+      # a tradução guardada quando o português for escolhido.
+      info "Sistema em inglês; tradução do Simba $(pack_version) guardada para depois."
+    fi ;;
+  --status)
+    info "Idioma: $(current_lang)  ·  tradução do Simba $(pack_version)  ·  instalado $(pkg_version)" ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

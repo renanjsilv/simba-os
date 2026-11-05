@@ -1,0 +1,14 @@
+Simba Conta — backup do sistema
+=================================
+
+Esta pasta é criada e atualizada pelo app Configurações › Contas.
+Ela guarda suas configurações, papéis de parede, histórico (terminal e Brave),
+documentos e a lista de programas instalados.
+
+Para restaurar numa máquina formatada:
+  1. Instale o Simba e entre na área de trabalho.
+  2. Baixe o arquivo "Restaurar-Simba.sh" desta pasta.
+  3. No terminal:  bash ~/Downloads/Restaurar-Simba.sh
+  4. Entre com esta mesma conta Google quando o navegador abrir.
+
+Não apague as pastas "dados" / "dados-cripto", "ferramenta" e o arquivo meta.json.

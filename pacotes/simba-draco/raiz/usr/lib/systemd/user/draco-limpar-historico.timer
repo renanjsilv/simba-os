@@ -1,0 +1,9 @@
+[Unit]
+Description=Limpa o histórico do Draco a cada 5 minutos
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

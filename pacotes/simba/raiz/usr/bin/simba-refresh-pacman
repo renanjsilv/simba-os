@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# simba:summary=Restaura o pacman.conf e a lista de espelhos padrão do Simba OS (Arch Linux oficial)
+# simba:requires-sudo=true
+
+set -e
+
+sudo cp -f /etc/pacman.conf /etc/pacman.conf.bak
+sudo cp -f /etc/pacman.d/mirrorlist /etc/pacman.d/mirrorlist.bak
+
+sudo cp -f "$SIMBA_PATH/default/pacman/pacman.conf" /etc/pacman.conf
+sudo cp -f "$SIMBA_PATH/default/pacman/mirrorlist" /etc/pacman.d/mirrorlist
+
+simba-hook pre-refresh-pacman
+sudo env SIMBA_UPDATE_PACMAN=1 pacman -Syyuu --noconfirm

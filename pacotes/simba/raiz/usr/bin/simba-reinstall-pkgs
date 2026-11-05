@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# simba:summary=Reinstall all default Simba packages from the stable channel
+# simba:requires-sudo=true
+
+set -e
+
+# Reinstall all default Simba packages from the stable channel and downgrade any packages that are too new.
+
+# Set the package repository to the stable mirrors
+simba-refresh-pacman
+
+# Downgrade any packages to the stable setup
+sudo env SIMBA_UPDATE_PACMAN=1 pacman -Suu --noconfirm
+
+# Ensure all packages are installed
+mapfile -t packages < <(grep -v '^#' "$SIMBA_PATH/install/simba-base.packages" | grep -v '^$')
+sudo env SIMBA_UPDATE_PACMAN=1 pacman -Syu --noconfirm --needed "${packages[@]}"

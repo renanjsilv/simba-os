@@ -1,0 +1,35 @@
+#!/bin/bash
+# publicar — atualiza o repositório pacman do Simba OS no GitHub Releases (tag "repo"):
+# constrói o que mudou, assina, gera o banco (repo-add) e envia. As instalações recebem pelo
+# "Atualizar tudo" (pacman -Syu) através da seção [simba-os] do /etc/pacman.conf.
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+source "$R/ferramentas/config.sh"
+command -v gh >/dev/null || { echo "instale o GitHub CLI: sudo pacman -S github-cli" >&2; exit 1; }
+gh auth status >/dev/null 2>&1 || { echo "entre no GitHub antes: gh auth login" >&2; exit 1; }
+if [[ -z $GH_USER ]]; then
+  GH_USER=$(gh api user -q .login)
+  sed -i "s/^GH_USER=.*/GH_USER=\"\${SIMBA_GH_USER:-$GH_USER}\"/" "$R/ferramentas/config.sh"
+fi
+[[ -n $CHAVE ]] || { echo "crie a chave de assinatura antes: ferramentas/criar-chave" >&2; exit 1; }
+"$R/ferramentas/construir"
+cd "$R/dist"
+rm -f "$REPO_NOME".db* "$REPO_NOME".files*
+# só a versão mais nova de cada pacote entra no banco
+mais_novos=$(for p in "${PACOTES[@]}"; do ls -t "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | head -1; done)
+repo-add -s -k "$CHAVE" "$REPO_NOME.db.tar.zst" $mais_novos
+# o GitHub não guarda links: troca os links .db/.files por cópias
+for f in "$REPO_NOME".db "$REPO_NOME".files "$REPO_NOME".db.sig "$REPO_NOME".files.sig; do
+  [[ -L $f ]] && cp --remove-destination "$(readlink -f "$f")" "$f"
+done
+gh release view "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" >/dev/null 2>&1 || \
+  gh release create "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --title "Repositório de pacotes" \
+    --notes "Pacotes do Simba OS para o pacman. Não baixe à mão: use a seção [$REPO_NOME] do pacman.conf." --latest=false
+arquivos=($mais_novos $(for f in $mais_novos; do echo "$f.sig"; done) "$REPO_NOME".db "$REPO_NOME".db.sig "$REPO_NOME".files "$REPO_NOME".files.sig)
+gh release upload "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --clobber "${arquivos[@]}"
+# tira do release pacotes de versões antigas
+for a in $(gh release view "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --json assets -q '.assets[].name'); do
+  [[ $a == *.pkg.tar.zst* ]] || continue
+  printf '%s\n' "${arquivos[@]}" | grep -qxF "$a" || gh release delete-asset "$RELEASE_TAG" "$a" -R "$GH_USER/$GH_REPO" -y
+done
+echo "✓ publicado: https://github.com/$GH_USER/$GH_REPO/releases/tag/$RELEASE_TAG"

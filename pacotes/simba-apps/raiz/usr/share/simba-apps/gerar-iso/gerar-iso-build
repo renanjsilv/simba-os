@@ -1,0 +1,329 @@
+#!/bin/bash
+# gerar-iso-build — clona o sistema em execução numa ISO instalável.
+#
+#   1. snapshots btrfs (somente leitura) de / e /home
+#   2. squashfs de cada um, aplicando excluir-sistema.txt e excluir-home.txt
+#   3. ISO live (archiso/releng) com o instalador "instalar-clone"
+#   4. clone embutido na ISO em /clone (system.sqfs, home.sqfs, boot.tar, clone.env)
+#   5. opcional: grava a ISO num pendrive
+#
+# Uso: sudo /usr/share/simba-apps/gerar-iso/gerar-iso-build
+set -euo pipefail
+
+# Com GERAR_ISO_GUI=1 (app Gerar ISO), cada etapa também sai como "@@ETAPA <id> <texto>"
+# e o mksquashfs mostra a porcentagem; a gravação no pendrive fica com o app.
+GUI=${GERAR_ISO_GUI:-}
+# Tipo de ISO (app Gerar ISO):
+#   sistema       sistema + configurações, seu usuário e senha, sem arquivos pessoais (padrão)
+#   pessoal       + arquivos pessoais; GERAR_ISO_LOGINS=1 leva também senhas e logins
+#   distribuivel  para outras pessoas: nada pessoal, sem logins, sem a sua senha; o
+#                 instalador cria o usuário de quem instalar. GERAR_ISO_NOME = nome do sistema.
+MODO=${GERAR_ISO_MODO:-sistema}
+LOGINS=${GERAR_ISO_LOGINS:-0}
+NOME=${GERAR_ISO_NOME:-Simba OS}
+# GERAR_ISO_REUSAR=<iso>: refaz só o pendrive (sistema live, instalador e marca) e
+# reaproveita o clone (system.sqfs, home.sqfs, boot.tar, clone.env) de uma ISO já gerada.
+REUSAR=${GERAR_ISO_REUSAR:-}
+case $MODO in sistema|pessoal|distribuivel) ;; *) echo "modo inválido: $MODO" >&2; exit 2 ;; esac
+[ "$MODO" = pessoal ] || LOGINS=0
+etapa() { [ -n "$GUI" ] && printf '@@ETAPA %s %s\n' "$1" "$2"; return 0; }
+msg()  { printf '\n\e[1;34m==>\e[0m \e[1m%s\e[0m\n' "$*"; }
+info() { printf '    %s\n' "$*"; }
+warn() { printf '\e[1;33m  ! %s\e[0m\n' "$*"; }
+die()  { printf '\n\e[1;31mERRO: %s\e[0m\n' "$*" >&2; exit 1; }
+
+[ "$(id -u)" = 0 ] || die "rode com sudo."
+SRC="$(dirname "$(readlink -f "$0")")"
+OWNER="${SUDO_USER:-root}"
+
+if [ -n "$REUSAR" ]; then
+  [ -f "$REUSAR" ] || die "ISO para reaproveitar não encontrada: $REUSAR"
+  rm -f /tmp/gerar-iso-reusar.env
+  xorriso -osirrox on -indev "$REUSAR" -extract /clone/clone.env /tmp/gerar-iso-reusar.env >/dev/null 2>&1
+  [ -s /tmp/gerar-iso-reusar.env ] || die "$REUSAR não tem um clone (/clone/clone.env)."
+  # shellcheck disable=SC1091
+  MODO=$(. /tmp/gerar-iso-reusar.env; echo "${MODO:-sistema}")
+  [ -n "${GERAR_ISO_NOME:-}" ] || NOME=$(. /tmp/gerar-iso-reusar.env; echo "${NOME_SISTEMA:-$NOME}")
+  [ "$NOME" = Simba ] && NOME="Simba OS"
+fi
+[ "$(findmnt -no FSTYPE /)" = btrfs ] || die "a raiz não é btrfs."
+[ "$(findmnt -no FSTYPE /home)" = btrfs ] || die "/home não é btrfs."
+# Escolha de idioma no instalador: precisa do pacote de tradução atualizado.
+if [ -x /usr/bin/simba-idioma ]; then
+  /usr/bin/simba-idioma --reaplicar >/dev/null || warn "simba-idioma --reaplicar falhou."
+else
+  warn "pacote de idioma não instalado: o instalador só vai trocar o LANG."
+fi
+
+# ---------------------------------------------------------------- destino
+if mountpoint -q /mnt/dados; then OUTBASE=/mnt/dados/gerar-iso; else OUTBASE=/var/tmp/gerar-iso; fi
+mkdir -p "$OUTBASE"
+# a pasta é do usuário: senão ele não consegue apagar as ISOs (apagar depende da pasta)
+[ "$OWNER" != root ] && chown "$OWNER:" "$OUTBASE" 2>/dev/null || true
+STAMP=$(date +%Y%m%d-%H%M)
+WORK="$OUTBASE/.work-$STAMP"
+SLUG=$(printf '%s' "$NOME" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
+SLUG=${SLUG:-sistema}
+case $MODO in
+  pessoal)      ISO="$OUTBASE/$SLUG-backup-$STAMP.iso" ;;
+  distribuivel) ISO="$OUTBASE/$SLUG-$STAMP.iso" ;;
+  *)            ISO="$OUTBASE/$SLUG-clone-$STAMP.iso" ;;
+esac
+
+USED=$(df --output=used -B1 / | tail -1)
+[ -n "$REUSAR" ] && USED=$(( $(stat -c %s "$REUSAR") * 2 ))
+AVAIL=$(df --output=avail -B1 "$OUTBASE" | tail -1)
+NEED=$((USED + 10 * 1024 ** 3))
+[ "$AVAIL" -ge "$NEED" ] || die "espaço insuficiente em $OUTBASE (precisa de ~$((NEED / 1024 ** 3)) GB livres)."
+
+# ---------------------------------------------------------------- origem
+ROOT_SRC=$(findmnt -no SOURCE /)
+ROOT_DEV=${ROOT_SRC%%[*}
+ROOT_SUBVOL=$(findmnt -no FSROOT /)
+HOME_SUBVOL=$(findmnt -no FSROOT /home)
+LUKS_DEV=$(cryptsetup status "$(basename "$ROOT_DEV")" 2>/dev/null | awk '$1 == "device:" {print $2}')
+[ -n "$LUKS_DEV" ] || die "a raiz não está num volume LUKS (esperado pelo instalador)."
+
+TOP="$WORK/top"
+cleanup() {
+  set +e
+  for s in root home; do
+    [ -d "$TOP/@gerar-iso-$s" ] && btrfs subvolume delete "$TOP/@gerar-iso-$s" >/dev/null
+  done
+  mountpoint -q "$TOP" && umount "$TOP"
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+# nada de sair calado: qualquer comando que derrube o script diz onde foi
+trap 'rc=$?; printf "\nERRO: o comando da linha %s falhou (código %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+
+printf '\e[1mGerar ISO — clone deste sistema\e[0m\n'
+info "Origem: $ROOT_DEV ($ROOT_SUBVOL e $HOME_SUBVOL)"
+info "Saída:  $ISO"
+info "Tipo:   $MODO$([ "$LOGINS" = 1 ] && echo ' (com senhas e logins)')"
+
+# ---------------------------------------------------------------- dependências
+etapa deps "Verificando dependências"
+msg "Verificando dependências (archiso, squashfs-tools, xorriso)"
+pacman -S --needed --noconfirm archiso squashfs-tools libisoburn >/dev/null
+
+if [ -n "$REUSAR" ]; then
+  etapa sistema "Reaproveitando o sistema de $(basename "$REUSAR")"
+  msg "Reaproveitando o clone de $REUSAR"
+  mkdir -p "$WORK"
+  xorriso -osirrox on -indev "$REUSAR" -extract /clone "$WORK/clone-antigo" >/dev/null 2>&1
+  chmod -R u+w "$WORK/clone-antigo"
+  for f in system.sqfs home.sqfs boot.tar clone.env; do mv "$WORK/clone-antigo/$f" "$WORK/$f"; done
+  sed -i "s/^NOME_SISTEMA=.*/NOME_SISTEMA='${NOME//\'/}'/" "$WORK/clone.env"
+else
+# ---------------------------------------------------------------- snapshots
+etapa snapshots "Tirando snapshots do sistema"
+msg "Tirando snapshots do sistema em execução"
+mkdir -p "$TOP"
+mount -o subvolid=5 "$ROOT_DEV" "$TOP"
+for s in root home; do
+  [ -d "$TOP/@gerar-iso-$s" ] && btrfs subvolume delete "$TOP/@gerar-iso-$s" >/dev/null
+done
+# o do sistema é gravável: só a cópia é ajustada abaixo (o sistema em uso não muda)
+btrfs subvolume snapshot "$TOP$ROOT_SUBVOL" "$TOP/@gerar-iso-root" >/dev/null
+btrfs subvolume snapshot -r "$TOP$HOME_SUBVOL" "$TOP/@gerar-iso-home" >/dev/null
+SNAP_ROOT="$TOP/@gerar-iso-root"
+SNAP_HOME="$TOP/@gerar-iso-home"
+
+# Loja (Flatpak): leva o Bazaar e os runtimes que ele usa, sem os drivers de vídeo
+# desta máquina (GL/VAAPI da NVIDIA, ~0,9 GB). Na máquina de destino a atualização
+# diária da Loja instala o driver certo para a placa dela.
+if [ -d "$SNAP_ROOT/var/lib/flatpak/repo" ]; then
+  etapa loja "Preparando a Loja de apps"
+  msg "Loja: tirando da cópia os drivers de vídeo específicos desta máquina"
+  # A cópia é tratada como instalação "--user" de um HOME falso: com --system o
+  # flatpak pode passar pelo flatpak-system-helper, que age no /var/lib/flatpak REAL.
+  FPX=$(mktemp -d); ln -s "$SNAP_ROOT/var/lib/flatpak" "$FPX/flatpak"
+  fpc() { XDG_DATA_HOME="$FPX" flatpak --user "$@"; }
+  mapfile -t drivers < <(fpc list --runtime --columns=ref 2>/dev/null | grep -Ei '\.(GL|GL32|VAAPI)\.nvidia')
+  if [ ${#drivers[@]} -gt 0 ]; then
+    fpc uninstall -y --noninteractive "${drivers[@]}" >/dev/null 2>&1 || warn "não deu para tirar ${drivers[*]} da cópia"
+  fi
+  fpc uninstall -y --noninteractive --unused >/dev/null 2>&1 || true
+  rm -rf "$FPX"
+  info "Loja na ISO: $(du -sh "$SNAP_ROOT/var/lib/flatpak" | cut -f1)"
+fi
+
+# ---------------------------------------------------------------- exclusões
+patterns() { { grep -vE '^\s*(#|$)' "$1" || true; } | sed 's/[[:space:]]*$//'; }
+
+patterns "$SRC/excluir-sistema.txt" > "$WORK/excl-system"
+[ "$LOGINS" = 1 ] || patterns "$SRC/excluir-sistema-logins.txt" >> "$WORK/excl-system"
+
+listas_home=("$SRC/excluir-home.txt")
+[ "$MODO" = pessoal ] || listas_home+=("$SRC/excluir-pessoal.txt")
+[ "$LOGINS" = 1 ] || listas_home+=("$SRC/excluir-logins.txt")
+[ "$MODO" = distribuivel ] && listas_home+=("$SRC/excluir-distribuivel.txt")
+
+: > "$WORK/excl-home"
+for d in "$SNAP_HOME"/*/; do
+  u=$(basename "$d")
+  # Distribuível: só a pasta de quem gerou (vira o modelo do usuário novo)
+  if [ "$MODO" = distribuivel ] && [ "$u" != "$OWNER" ]; then
+    echo "$u" >> "$WORK/excl-home"
+    continue
+  fi
+  for l in "${listas_home[@]}"; do patterns "$l"; done | sed "s|^|$u/|" >> "$WORK/excl-home"
+  # mise: só as versões em uso (alvos de latest/global/lts); as antigas ficam fora
+  for t in "$d".local/share/mise/installs/*/; do
+    [ -d "$t" ] || continue
+    # (if em vez de "&&": com set -e + pipefail, o último [ -L ] falso derrubava o script)
+    usados=$(for l in "$t"latest "$t"global "$t"lts "$t"lts-*; do if [ -L "$l" ]; then readlink -f "$l"; fi; done | sort -u)
+    [ -n "$usados" ] || continue   # sem links: não dá para saber qual está em uso
+    for v in "$t"*/; do
+      v=${v%/}; [ -L "$v" ] && continue
+      grep -qxF "$(readlink -f "$v")" <<<"$usados" && continue
+      echo "$u/${v#"$d"}" >> "$WORK/excl-home"
+    done
+  done
+  # ~/.cache inteiro, exceto o runtime fixado do Hydra (umu)
+  for c in "$d".cache/* "$d".cache/.[!.]*; do
+    [ -e "$c" ] || continue
+    [ "$(basename "$c")" = umu ] && continue
+    echo "$u/.cache/$(basename "$c")" >> "$WORK/excl-home"
+  done
+done
+
+# Distribuível: a ISO não leva a sua senha nem o nome deste computador
+: > "$WORK/pseudo-system"
+if [ "$MODO" = distribuivel ]; then
+  for f in shadow shadow- gshadow gshadow-; do
+    [ -f "/etc/$f" ] || continue
+    echo "etc/$f" >> "$WORK/excl-system"
+    # senha do usuário bloqueada ("!"): o instalador define a de quem instalar
+    awk -F: -v OFS=: -v u="$OWNER" '$1 == u { $2 = "!" } { print }' "/etc/$f" > "$WORK/$f"
+    printf 'etc/%s f 600 0 0 cat %s\n' "$f" "$WORK/$f" >> "$WORK/pseudo-system"
+  done
+  echo etc/hostname >> "$WORK/excl-system"
+  echo simba > "$WORK/hostname"
+  printf 'etc/hostname f 644 0 0 cat %s\n' "$WORK/hostname" >> "$WORK/pseudo-system"
+fi
+
+# ---------------------------------------------------------------- squashfs
+# xz + filtro BCJ x86 em blocos de 1 MiB: ~10–15% menor que zstd -15 (128 KiB).
+# Só pesa na hora de gerar; o instalador descompacta uma vez só (unsquashfs).
+# GERAR_ISO_RAPIDA=1 volta para zstd (gera bem mais rápido, ISO maior).
+if [ -n "${GERAR_ISO_RAPIDA:-}" ]; then
+  SQ_OPTS=(-comp zstd -Xcompression-level 15 -noappend -wildcards)
+else
+  SQ_OPTS=(-comp xz -Xbcj x86 -b 1M -noappend -wildcards)
+fi
+[ -n "$GUI" ] && SQ_OPTS+=(-progress)
+etapa sistema "Compactando o sistema"
+msg "Compactando o sistema (system.sqfs)"
+PSEUDO=()
+[ -s "$WORK/pseudo-system" ] && PSEUDO=(-pf "$WORK/pseudo-system")
+mksquashfs "$SNAP_ROOT" "$WORK/system.sqfs" "${SQ_OPTS[@]}" -ef "$WORK/excl-system" "${PSEUDO[@]}"
+etapa pessoal "Compactando as pastas pessoais"
+msg "Compactando as configurações das pastas pessoais (home.sqfs)"
+mksquashfs "$SNAP_HOME" "$WORK/home.sqfs" "${SQ_OPTS[@]}" -ef "$WORK/excl-home"
+
+btrfs subvolume delete "$SNAP_ROOT" "$SNAP_HOME" >/dev/null
+umount "$TOP"
+
+etapa boot "Copiando a partição de boot"
+msg "Copiando a partição de boot (ESP)"
+# Sem os kernels dos snapshots deste PC (/<machine-id>/limine_history): os
+# snapshots não vão no clone, e o instalador gera um machine-id novo.
+# Sem os segredos do systemd em /loader (random-seed, boot-secret-mixin, credencial
+# do TPM): são de cada máquina e o systemd os recria no primeiro boot.
+MACHINE_ID=$(cat /etc/machine-id)
+tar -C /boot --exclude="./$MACHINE_ID" --exclude=./limine.conf.old --exclude=./limine.conf.bak \
+  --exclude=./loader/random-seed --exclude=./loader/boot-secret-mixin --exclude=./loader/credentials \
+  -cf "$WORK/boot.tar" .
+
+# Dados que o instalador usa para trocar a identidade dos discos
+cat > "$WORK/clone.env" <<EOF
+# Gerado por gerar-iso-build em $(date '+%F %T')
+CLONE_DATE='$(date '+%F %T')'
+OLD_HOSTNAME='$([ "$MODO" = distribuivel ] && echo simba || cat /etc/hostname)'
+MODO='$MODO'
+NOME_SISTEMA='${NOME//\'/}'
+OLD_USER='$OWNER'
+OLD_MACHINE_ID='$MACHINE_ID'
+OLD_FS_UUID='$(findmnt -no UUID /)'
+OLD_ESP_UUID='$(findmnt -no UUID /boot)'
+OLD_LUKS_UUID='$(cryptsetup luksUUID "$LUKS_DEV")'
+OLD_PARTUUID='$(blkid -s PARTUUID -o value "$LUKS_DEV")'
+ROOT_SUBVOL='${ROOT_SUBVOL#/}'
+HOME_SUBVOL='${HOME_SUBVOL#/}'
+NEED_BYTES=$(( ($(stat -c %s "$WORK/system.sqfs") + $(stat -c %s "$WORK/home.sqfs")) * 3 + 16 * 1024 ** 3 ))
+EOF
+fi   # REUSAR
+
+# ---------------------------------------------------------------- marca
+etapa marca "Preparando a identidade visual"
+msg "Identidade visual: $NOME"
+ESTILO=$(cat "$SRC/marca/estilo" 2>/dev/null || echo caricatura)
+"$SRC/marca/gerar-pacote" "$NOME" "$ESTILO" "$WORK/marca" >/dev/null
+if [ -f "$SRC/marca/gato-pixel.txt" ]; then
+  "$SRC/marca/logo-terminal" "$SRC/marca/gato-pixel.txt" 0 "$WORK/marca/logo.ans"
+else
+  "$SRC/marca/logo-terminal" "$WORK/marca/logo.png" 40 "$WORK/marca/logo.ans"
+fi
+install -m755 "$SRC/marca/aplicar" "$WORK/marca/aplicar"
+rm -f "$WORK/marca/nome.png"
+
+# ---------------------------------------------------------------- ISO live
+etapa live "Montando o sistema de instalação"
+msg "Montando o pendrive de instalação (archiso) — baixa ~1 GB de pacotes na primeira vez"
+PROFILE="$WORK/profile"
+cp -r /usr/share/archiso/configs/releng "$PROFILE"
+
+"$SRC/perfil-live" "$PROFILE" "$NOME" "$WORK/marca" "$OWNER"
+
+mkarchiso -v -w "$WORK/archiso-work" -o "$WORK/out" "$PROFILE"
+BASE_ISO=$(ls "$WORK"/out/*.iso)
+rm -rf "$WORK/archiso-work"
+
+# ---------------------------------------------------------------- clone na ISO
+etapa embutir "Embutindo o clone na ISO"
+msg "Embutindo o clone na ISO"
+VOLID=$(xorriso -indev "$BASE_ISO" -pvd_info 2>/dev/null | awk -F': ' '/^Volume Id/ {print $2}')
+xorriso -indev "$BASE_ISO" -outdev "$ISO" -volid "$VOLID" \
+  -compliance iso_9660_level=3 \
+  -map "$WORK/system.sqfs" /clone/system.sqfs \
+  -map "$WORK/home.sqfs" /clone/home.sqfs \
+  -map "$WORK/boot.tar" /clone/boot.tar \
+  -map "$WORK/clone.env" /clone/clone.env \
+  -map "$WORK/marca" /clone/marca \
+  -map "$SRC/instalar-clone" /clone/instalar-clone \
+  -boot_image any replay
+chown "$OWNER:" "$ISO" 2>/dev/null || true
+
+msg "ISO pronta"
+info "$ISO ($(du -h "$ISO" | cut -f1))"
+if [ -n "$GUI" ]; then
+  printf '@@ISO %s\n' "$ISO"
+  exit 0
+fi
+
+# ---------------------------------------------------------------- pendrive
+mapfile -t USB < <(lsblk -dpno NAME,TRAN | awk '$2 == "usb" {print $1}')
+if [ ${#USB[@]} -eq 0 ]; then
+  info "Nenhum pendrive conectado. Para gravar depois:"
+  info "  sudo dd if='$ISO' of=/dev/sdX bs=4M conv=fsync oflag=direct status=progress"
+  exit 0
+fi
+
+echo
+echo "Pendrives conectados:"
+lsblk -dpno NAME,SIZE,MODEL "${USB[@]}" | sed 's/^/    /'
+read -rp "Gravar a ISO em qual pendrive? (ex.: ${USB[0]}, Enter para pular): " DEV
+[ -z "$DEV" ] && exit 0
+printf '%s\n' "${USB[@]}" | grep -qx "$DEV" || die "$DEV não é um dos pendrives listados."
+[ "$(lsblk -dbno SIZE "$DEV")" -gt "$(stat -c %s "$ISO")" ] || die "o pendrive é menor que a ISO."
+read -rp "TODO o conteúdo de $DEV será apagado. Digite APAGAR para continuar: " OK
+[ "$OK" = APAGAR ] || { info "Gravação cancelada."; exit 0; }
+
+umount "$DEV"?* 2>/dev/null || true
+msg "Gravando em $DEV"
+dd if="$ISO" of="$DEV" bs=4M conv=fsync oflag=direct status=progress
+sync
+msg "Pendrive pronto. Dê boot por ele (modo UEFI) na máquina de destino."

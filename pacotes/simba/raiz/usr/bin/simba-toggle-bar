@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# simba:summary=Toggle bar visibility without killing the Simba shell
+# simba:args=[toggle|on|off]
+# simba:examples=simba toggle bar | simba toggle bar off | simba toggle bar on
+
+simba-toggle bar-off "${1:-toggle}"
+
+# The shell's watch on the toggles directory can miss flag changes that land in
+# quick succession, stranding the bar off screen until the shell restarts.
+# Nudge the bar to re-read the flag; quiet best-effort so the toggle still
+# works when the shell is not up.
+simba-shell -q simba.bar syncHidden

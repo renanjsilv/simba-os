@@ -1,0 +1,6 @@
+#!/bin/bash
+# simba:summary=Launch the clipboard manager
+# simba:group=menu
+# simba:examples=simba menu clipboard
+
+simba-shell shell toggle simba.clipboard

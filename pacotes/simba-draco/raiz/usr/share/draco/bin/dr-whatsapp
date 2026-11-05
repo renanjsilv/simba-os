@@ -1,0 +1,225 @@
+#!/bin/bash
+# dr-whatsapp: drive the WhatsApp web app (Simba webapp in Brave) by keyboard + OCR.
+#
+#   dr-whatsapp enviar "<contato>" "<mensagem>" [--fundo]
+#       searches the name, reads the result list, picks the chat, confirms the
+#       conversation header by OCR, then pastes and sends. Never sends to a chat
+#       it couldn't confirm.
+#   dr-whatsapp anotar "<texto>"        send to the "Anotações" chat (Renan's notes)
+#   dr-whatsapp contatos "<busca>"      list the chats/contacts the search finds
+#   dr-whatsapp abrir "<contato>"       open the chat; prints a screenshot path to read it
+#   dr-whatsapp enviar-aqui "<mensagem>"  send into the chat open right now
+#   dr-whatsapp print                   screenshot of the WhatsApp window
+#
+# Exit codes: 0 ok | 1 failure | 3 couldn't confirm the opened chat (nothing sent)
+#             4 ambiguous name: prints the candidates | 5 nobody found: prints what the search showed
+
+DR_WIN="$(dirname "$0")/dr-win"
+DR_KEY="$(dirname "$0")/dr-key"
+LIB="$(dirname "$0")/../lib"
+CLASS='^brave-web\.whatsapp\.com' # the web app only
+NOTES_CHAT="Anotações"
+RUN="${XDG_RUNTIME_DIR:-/tmp}/draco"
+export TESSDATA_PREFIX="/usr/share/draco/tessdata" # has por + eng
+mkdir -p "$RUN"
+
+background=0
+args=()
+for a in "$@"; do [[ $a == --fundo ]] && background=1 || args+=("$a"); done
+set -- "${args[@]}"
+
+# Geometry of the WhatsApp window: sets x y w h.
+geometry() {
+  read -r x y w h < <(hyprctl clients -j |
+    jq -r '[.[] | select(.class | test("whatsapp"; "i"))][0] | "\(.at[0]) \(.at[1]) \(.size[0]) \(.size[1])"')
+}
+
+# One OCR process per command (model loads once): requests go through FIFOs on
+# fds 7/8, which subshells inherit. Call ocr_start in the main shell first.
+ocr_start() {
+  [[ -n $OCR_PID ]] && return
+  local d
+  d=$(mktemp -d "$RUN/ocr.XXXXXX")
+  mkfifo "$d/in" "$d/out"
+  python3 "$LIB/ocr_server.py" <"$d/in" >"$d/out" 2>/dev/null &
+  OCR_PID=$!
+  exec 7>"$d/in" 8<"$d/out"
+  rm -f "$d/in" "$d/out"
+  rmdir "$d"
+  trap 'kill $OCR_PID 2>/dev/null' EXIT
+}
+
+# ocr <x> <y> <w> <h> [plain|green] [psm]: read text from a screen region
+# (green: keep only bright/green text, i.e. chat names).
+ocr() {
+  local img="$RUN/wa-ocr.png" line
+  grim -g "$1,$2 ${3}x$4" -s 2 "$img" || return 1
+  printf '%s\t%s\t%s\n' "$img" "${6:-6}" "${5:-plain}" >&7
+  while IFS= read -r line <&8; do
+    [[ $line == @@OCR_END@@ ]] && break
+    printf '%s\n' "$line"
+  done
+}
+
+# Open (or focus) WhatsApp maximized, waiting until the chat list has loaded.
+ensure_open() {
+  local fresh=0 i
+  if ! "$DR_WIN" find "$CLASS" >/dev/null; then
+    fresh=1
+    setsid -f uwsm-app -- simba-launch-webapp https://web.whatsapp.com/ >/dev/null 2>&1
+    "$DR_WIN" wait "$CLASS" 20 >/dev/null || { echo "WhatsApp não abriu" >&2; exit 1; }
+  fi
+  "$DR_WIN" focus "$CLASS" >/dev/null || exit 1
+  [[ $(hyprctl activewindow -j | jq -r .fullscreen) == 0 ]] &&
+    hyprctl dispatch 'hl.dsp.window.fullscreen({ mode = "maximized" })' >/dev/null
+  sleep 0.25
+  ((fresh)) || return 0
+  for i in $(seq 1 60); do # up to ~30s for WhatsApp Web to load
+    geometry
+    [[ $(ocr $((x + 70)) $((y + 12)) 240 44) == *WhatsApp* ]] && { sleep 0.5; return 0; }
+    sleep 0.3
+  done
+  echo "WhatsApp não terminou de carregar" >&2
+  exit 1
+}
+
+# Type <term> into the search box and confirm by OCR that it landed there (the
+# focus shortcut is sometimes swallowed right after closing a chat).
+search() {
+  local attempt
+  for attempt in 1 2 3; do
+    # 1: close whatever is open and focus the box; 2: the box usually has focus
+    # by now, just retype; 3: start over, slower.
+    if ((attempt == 2)); then
+      "$DR_KEY" ctrl+a -t "$1"
+    else
+      "$DR_KEY" Escape -s 150 Escape -s 150 ctrl+alt+slash -s $((attempt == 1 ? 350 : 1200)) ctrl+a -t "$1"
+    fi
+    sleep 0.2
+    geometry
+    ocr $((x + 120)) $((y + 68)) 290 38 plain 7 | python3 "$LIB/wa_match.py" same "$1" && return 0
+  done
+  echo "Não consegui digitar na busca do WhatsApp. Print: $("$DR_WIN" shot "$CLASS")" >&2
+  return 1
+}
+
+# Names currently shown in the search results (white/green text only, so
+# message previews, dates and section titles are dropped).
+result_names() {
+  geometry
+  local hh=$((h - 175))
+  ((hh > 430)) && hh=430 # the top ~6 results are enough, and OCR is faster
+  ocr $((x + 140)) $((y + 170)) 300 $hh green 4
+}
+
+header_is() {
+  geometry
+  ocr $((x + w * 34 / 100)) "$y" $((w * 45 / 100)) 40 | python3 "$LIB/wa_match.py" same "$1"
+}
+
+# first_is <name> <ocr list>: is <name> the first result?
+first_is() {
+  python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import wa_match as m
+names = m.clean_names(sys.stdin.read().splitlines())
+sys.exit(0 if names and m.same(sys.argv[2], names[0]) else 1)' "$LIB" "$1" <<<"$2"
+}
+
+# Search, choose the chat, open it and confirm. Prints the chosen name.
+open_chat() {
+  local term=$1 names chosen rc i
+  ensure_open
+  search "$term" || return 1
+  # The filtered list takes a moment to replace the normal chat list: poll it
+  # until it shows the person (or settles on "ambiguous"/"not found").
+  local prev=""
+  for i in 1 2 3 4 5 6; do
+    sleep 0.35
+    names=$(result_names)
+    chosen=$(python3 "$LIB/wa_match.py" pick "$term" <<<"$names"); rc=$?
+    ((rc == 0)) && break
+    [[ $rc == 4 && $names == "$prev" ]] && break # same ambiguous list twice: it's settled
+    prev=$names
+  done
+  if ((rc != 0)); then
+    "$DR_KEY" Escape
+    if ((rc == 4)); then
+      echo "Mais de uma conversa combina com '$term'. Nada foi enviado. Opções:" >&2
+    else
+      echo "Não achei '$term' no WhatsApp. Nada foi enviado. A busca mostrou:" >&2
+    fi
+    sed 's/^/  - /' <<<"$chosen" >&2
+    return "$rc"
+  fi
+  # Return opens the first result; if the chosen chat is further down, search
+  # its full name so it comes first.
+  if ! first_is "$chosen" "$names"; then
+    search "$chosen" || return 1
+    for i in 1 2 3 4 5 6; do
+      sleep 0.35
+      names=$(result_names)
+      first_is "$chosen" "$names" && break
+    done
+  fi
+  "$DR_KEY" Return
+  for i in 1 2 3 4 5 6; do
+    sleep 0.3
+    header_is "$chosen" && { echo "$chosen"; return 0; }
+  done
+  echo "Abri uma conversa, mas não confirmei que é '$chosen'. Nada foi enviado." >&2
+  echo "Print: $("$DR_WIN" shot "$CLASS")" >&2
+  echo "Se for a conversa certa, use: dr-whatsapp enviar-aqui \"<mensagem>\"" >&2
+  return 3
+}
+
+send_here() {
+  "$DR_KEY" -t "$1" -s 350 Return
+}
+
+send_to() {
+  local chat
+  chat=$(open_chat "$1") || exit $?
+  send_here "$2"
+  ((background)) && "$DR_WIN" hide "$CLASS" >/dev/null
+  echo "Mensagem enviada para $chat."
+}
+
+case $1 in
+  enviar | anotar | contatos | abrir) ocr_start ;;
+esac
+
+case $1 in
+  enviar)
+    [[ -n $2 && -n $3 ]] || { echo "uso: dr-whatsapp enviar \"<contato>\" \"<mensagem>\"" >&2; exit 2; }
+    send_to "$2" "$3"
+    ;;
+  anotar)
+    [[ -n $2 ]] || { echo "uso: dr-whatsapp anotar \"<texto>\"" >&2; exit 2; }
+    send_to "$NOTES_CHAT" "${*:2}"
+    ;;
+  contatos)
+    [[ -n $2 ]] || { echo "uso: dr-whatsapp contatos \"<busca>\"" >&2; exit 2; }
+    ensure_open
+    search "$2" || exit 1
+    sleep 1.5
+    python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import wa_match; print("\n".join(wa_match.clean_names(sys.stdin.read().splitlines())) or "nenhum resultado")' "$LIB" <<<"$(result_names)"
+    "$DR_KEY" Escape
+    ;;
+  abrir)
+    [[ -n $2 ]] || { echo "uso: dr-whatsapp abrir \"<contato>\"" >&2; exit 2; }
+    chat=$(open_chat "$2") || exit $?
+    echo "Conversa com '$chat' aberta."
+    echo "Print: $("$DR_WIN" shot "$CLASS")"
+    ;;
+  enviar-aqui)
+    [[ -n $2 ]] || { echo "uso: dr-whatsapp enviar-aqui \"<mensagem>\"" >&2; exit 2; }
+    "$DR_WIN" focus "$CLASS" >/dev/null || exit 1
+    send_here "$2"
+    echo "Mensagem enviada na conversa aberta."
+    ;;
+  print)
+    "$DR_WIN" focus "$CLASS" >/dev/null || exit 1
+    sleep 0.2
+    "$DR_WIN" shot "$CLASS"
+    ;;
+  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

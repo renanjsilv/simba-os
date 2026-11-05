@@ -1,0 +1,61 @@
+#!/bin/bash
+# configuracoes: the Configurações app (~/.config/quickshell/configuracoes).
+#
+#   configuracoes [página [chave]]   open the settings window (optionally on a page:
+#                                    inicio personalizacao janelas tela barra area
+#                                    bloqueio entrada som rede bluetooth energia
+#                                    notificacoes atalhos apps sistema)
+#   configuracoes projetar           Super+P display mode switcher
+#   configuracoes menu               desktop right-click menu at the cursor
+#   configuracoes menu-iniciar [abrir|fechar]  Start menu (Super+Space; default: toggle)
+#   configuracoes fechar             close the settings window
+#   configuracoes iniciar            start the background process (autostart does this)
+#   configuracoes reiniciar          restart it
+#
+# One long-running Quickshell process hosts the window, Super+P and the desktop
+# layer. Commands are appended to $XDG_RUNTIME_DIR/configuracoes/cmd, which the
+# process watches (milliseconds, versus ~260 ms for `qs ipc call`).
+RUN="${XDG_RUNTIME_DIR:-/tmp}/configuracoes"
+CMD="$RUN/cmd"
+mkdir -p "$RUN"
+# o arquivo precisa existir antes do Quickshell abrir: ele não vigia arquivos inexistentes
+[ -e "$CMD" ] || : >"$CMD"
+
+pid_vivo() {
+  local pid
+  pid=$(cat "$RUN/pid" 2>/dev/null)
+  [[ -n $pid && $(cat "/proc/$pid/comm" 2>/dev/null) == qs ]] && grep -q 'configuracoes' "/proc/$pid/cmdline" 2>/dev/null
+}
+
+pronto() { qs -c configuracoes ipc call configuracoes estado >/dev/null 2>&1; }
+
+iniciar() {
+  pid_vivo && return 0
+  # a janela tem botões próprios (Janela.qml): sem a moldura padrão do Qt por cima
+  QT_WAYLAND_DISABLE_WINDOWDECORATION=1 qs -c configuracoes -n -d >/dev/null 2>&1
+  for _ in $(seq 1 60); do
+    pronto && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
+enviar() {
+  [[ $(stat -c %s "$CMD" 2>/dev/null || echo 0) -gt 100000 ]] && : >"$CMD"
+  jq -cn --arg s "$(date +%s%N)" --arg c "$1" '{s: $s, c: $c, a: $ARGS.positional}' --args -- "${@:2}" >>"$CMD"
+}
+
+case "${1:-}" in
+  iniciar) iniciar ;;
+  reiniciar)
+    pid=$(cat "$RUN/pid" 2>/dev/null)
+    pid_vivo && kill "$pid" && sleep 0.5
+    iniciar
+    ;;
+  projetar) iniciar && enviar projetar ;;
+  menu) iniciar && enviar menu "" -1 -1 ;;
+  menu-iniciar) iniciar && enviar menu-iniciar "${2:-alternar}" ;;
+  fechar) pid_vivo && enviar fechar ;;
+  -h | --help | ajuda) sed -n '2,16p' "$0" ;;
+  *) iniciar && enviar abrir "${1:-}" "${2:-}" ;;
+esac

@@ -1,0 +1,1000 @@
+#!/usr/bin/env python3
+"""conta — conta Google para levar o sistema para uma máquina formatada.
+
+Faz backup das configurações, papéis de parede, histórico (terminal e Brave),
+documentos e da lista de programas instalados numa pasta "Simba Conta" do
+Google Drive (via rclone, escopo drive.file: o app só enxerga o que ele mesmo
+criou) e restaura tudo numa instalação nova.
+
+  conta status                      JSON com o estado (para a interface)
+  conta entrar [--cripto SENHA]     instala o rclone se faltar, abre o login do Google no navegador
+  conta sair                        esquece o login (os dados no Drive ficam)
+  conta sincronizar [--silencioso]  envia o backup agora
+  conta restaurar [--sim] [--sem-pacotes]   traz tudo do Drive para esta máquina
+  conta pacotes                     instala os programas que faltam (abre um terminal)
+  conta auto liga|desliga           sincronização automática (a cada 2 h e 10 min após ligar)
+  conta categoria <id> liga|desliga escolhe o que entra no backup
+  conta tamanho                     estima o tamanho do backup local
+
+Variáveis para teste: CONTA_RCLONE (binário), CONTA_REMOTO (remoto já configurado,
+ex. "teste:" para um remoto local), CONTA_HOME (pasta pessoal alternativa).
+"""
+import datetime
+import fcntl
+import fnmatch
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from pathlib import Path
+import sys as _sys, os as _os  # noqa: E401
+_sys.path.insert(0, _os.path.expanduser("/usr/share/simba-apps/idiomas"))
+from simba_i18n import t as _t, DECIMAL as _DEC  # noqa: E402  (traduções: /usr/share/simba-apps/idiomas)
+
+HOME = Path(os.environ.get("CONTA_HOME") or Path.home())
+CFG_DIR = HOME / ".config/conta"
+CFG = CFG_DIR / "config.json"
+ESTADO = HOME / ".local/state/conta/estado.json"
+# Criado pelo instalador da ISO (gerar-iso/instalar-clone): na primeira
+# inicialização abre Configurações › Contas com as boas-vindas (conta-boas-vindas).
+BOAS_VINDAS = HOME / ".local/state/conta/boas-vindas"
+# Foto da conta Google; ~/.face aponta para ela (avatar de Configurações, do
+# menu Iniciar e da tela de login) — só se ~/.face não existir ou já for nosso.
+# Existe = não oferecer o login nas instalações pela ISO (vai junto na ISO, pois
+# ~/.local/share/conta entra nela; quem instala decide pelas Configurações).
+SEM_BOAS_VINDAS = HOME / ".local/share/conta/sem-boas-vindas"
+FOTO = HOME / ".local/state/conta/foto.jpg"
+FACE = HOME / ".face"
+CACHE = HOME / ".cache/conta"
+EXTRA = CACHE / "extra"
+FERRAMENTA = Path(__file__).resolve()
+RUN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+TRAVA = RUN / "conta.lock"
+NOME_REMOTO = "conta-gdrive"
+NOME_CRIPTO = "conta-cripto"
+PASTA = "Simba Conta"
+
+CATEGORIAS = {
+    "config": _t("Configurações e aplicativos"),
+    "imagens": _t("Papéis de parede e imagens"),
+    "historico": _t("Histórico do navegador e do terminal"),
+    "documentos": _t("Documentos e área de trabalho"),
+    "pacotes": _t("Lista de programas instalados"),
+    "segredos": _t("Chaves SSH e chaves de API (só com criptografia)"),
+}
+
+# Caminhos relativos à pasta pessoal por categoria (pastas entram inteiras,
+# menos o que casar com EXCLUIR).
+INCLUIR = {
+    "config": [
+        ".config", ".local/bin", ".local/state/simba",
+        ".local/share/applications", ".local/share/icons", ".local/share/fonts",
+        ".local/share/gerenciador-tarefas", ".local/share/temas-boot", ".local/share/transcrever",
+        ".local/share/conta", ".local/share/gerar-iso", ".local/share/anydesk-bridge",
+        ".local/share/simba-idioma", ".local/share/nautilus-python", ".local/share/aether",
+        ".local/share/draco", ".bashrc", ".bash_profile", ".XCompose", ".gitconfig",
+    ],
+    "imagens": [_t("Pictures"), _t("Wallpapers")],
+    "historico": [".bash_history", ".local/share/recently-used.xbel", ".local/share/fish/fish_history",
+                  ".zsh_history", ".python_history"],
+    "documentos": [_t("Documents"), _t("Área de trabalho"), _t("Desktop")],
+    "segredos": [".ssh", ".config/draco/chaves", ".config/draco/groq.key", ".local/share/draco/groq.key", ".gnupg"],
+}
+
+EXCLUIR = [
+    # navegadores (o histórico/favoritos do Brave vão à parte, copiados com segurança)
+    ".config/BraveSoftware", ".config/chromium", ".config/google-chrome", ".mozilla",
+    # grandes / regeneráveis / específicos da máquina
+    ".config/hydralauncher", ".config/rclone", ".config/pulse", ".config/Electron",
+    ".local/share/draco/venv", ".local/share/draco/wake-train", ".local/share/draco/voices",
+    ".local/share/draco/recordings", ".local/share/draco/logs", ".local/share/temas-boot/build",
+    ".config/draco/gravacoes",
+    "*/Cache", "*/cache", "*/Code Cache", "*/GPUCache", "*/CachedData", "*/Crashpad",
+    "*/__pycache__", "*.log", "*.pyc", "*/.git/objects",
+    # segredos ficam na categoria "segredos" (só com criptografia)
+    ".ssh", ".gnupg", ".config/draco/chaves", ".config/draco/groq.key", ".local/share/draco/groq.key",
+    ".local/share/keyrings", "*.sock.pid",
+    ".config/gh/hosts.yml",
+    ".local/share/conta/antes-da-restauracao", ".local/share/conta/brave-pendente",
+    # área de transferência e notificações guardam texto copiado (senhas, chaves de API)
+    ".local/state/simba/clipboard-history.json", ".local/state/simba/clipboard-images",
+    ".local/state/simba/notifications", ".local/state/simba/notifications.json",
+    # credenciais salvas de apps e modelos que se baixam de novo
+    ".config/spotify", ".local/share/draco/models/whisper",
+]
+MAX_ARQUIVO = 200 * 1024 * 1024  # arquivos maiores que isso ficam de fora
+
+BRAVE = HOME / ".config/BraveSoftware/Brave-Browser/Default"
+BRAVE_ARQS = ["History", "Bookmarks", "Favicons", "Top Sites", "Shortcuts"]
+
+
+# ── utilidades ───────────────────────────────────────────────────────────────
+def ler_json(p, padrao):
+    try:
+        return json.loads(Path(p).read_text())
+    except (OSError, ValueError):
+        return padrao
+
+
+def gravar_json(p, v):
+    p = Path(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(v, ensure_ascii=False, indent=2))
+    tmp.replace(p)
+
+
+def config():
+    c = ler_json(CFG, {})
+    c.setdefault("auto", True)
+    c.setdefault("cripto", False)
+    c.setdefault("categorias", {k: k != "segredos" for k in CATEGORIAS})
+    return c
+
+
+def salvar_config(c):
+    gravar_json(CFG, c)
+
+
+def estado():
+    return ler_json(ESTADO, {})
+
+
+def salvar_estado(**kw):
+    e = estado()
+    e.update(kw)
+    gravar_json(ESTADO, e)
+
+
+def avisar(titulo, corpo="", urgente=False):
+    if os.environ.get("CONTA_HOME"):
+        return
+    try:
+        subprocess.Popen(["notify-send", "-a", "Conta", "-i", "folder-remote", *(["-u", "critical"] if urgente else []),
+                          titulo, corpo], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+def rclone_bin():
+    for c in (os.environ.get("CONTA_RCLONE"), shutil.which("rclone")):
+        if c and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def rc(*args, check=True, capture=True, timeout=None, entrada=None):
+    exe = rclone_bin()
+    if not exe:
+        raise SystemExit(_t("rclone não instalado"))
+    r = subprocess.run([exe, *args], capture_output=capture, text=True, timeout=timeout, input=entrada)
+    if check and r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout or "").strip()[-800:] or f"rclone {args[0]} falhou")
+    return r
+
+
+def remoto_base():
+    """Remoto do Drive na pasta da conta (sem criptografia)."""
+    if os.environ.get("CONTA_REMOTO"):
+        r = os.environ["CONTA_REMOTO"]
+        return r + PASTA if r.endswith(":") else r.rstrip("/") + "/" + PASTA
+    return f"{NOME_REMOTO}:{PASTA}"
+
+
+def remoto_dados(c=None):
+    c = c or config()
+    if c.get("cripto"):
+        return f"{NOME_CRIPTO}:"
+    return remoto_base() + "/dados"
+
+
+def conectado():
+    if os.environ.get("CONTA_REMOTO"):
+        return True
+    if not rclone_bin():
+        return False
+    r = rc("listremotes", check=False)
+    return f"{NOME_REMOTO}:" in r.stdout.split()
+
+
+class Trava:
+    def __enter__(self):
+        self.f = open(TRAVA, "w")
+        try:
+            fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SystemExit(_t("já existe uma sincronização/restauração em andamento"))
+        return self
+
+    def __exit__(self, *a):
+        fcntl.flock(self.f, fcntl.LOCK_UN)
+        self.f.close()
+
+
+# ── seleção de arquivos ──────────────────────────────────────────────────────
+def _excluido(rel, extras=()):
+    for pad in (*EXCLUIR, *extras):
+        if "*" in pad:
+            # "*/Cache" casa com qualquer componente; "*.log" com o nome
+            if pad.startswith("*/"):
+                if pad[2:] in rel.split("/"):
+                    return True
+            elif fnmatch.fnmatch(os.path.basename(rel), pad):
+                return True
+        elif rel == pad or rel.startswith(pad + "/"):
+            return True
+    return False
+
+
+def listar_arquivos(c=None):
+    """Lista (relativa à pasta pessoal) do que vai para o Drive + tamanho total."""
+    c = c or config()
+    cats = [k for k, v in c["categorias"].items() if v and k in INCLUIR]
+    if "segredos" in cats and not c.get("cripto"):
+        cats.remove("segredos")
+    excl_extra = []
+    vistos, lista, total = set(), [], 0
+    for cat in cats:
+        liberar = INCLUIR["segredos"] if cat == "segredos" else []
+        for base in INCLUIR[cat]:
+            raiz = HOME / base
+            if not raiz.exists() or raiz.is_symlink() and not raiz.is_file():
+                continue
+            if raiz.is_file():
+                candidatos = [raiz]
+            else:
+                candidatos = []
+                for d, dirs, arqs in os.walk(raiz, followlinks=False):
+                    reld = os.path.relpath(d, HOME)
+                    dirs[:] = [x for x in dirs
+                               if not (_excluido(f"{reld}/{x}", excl_extra) and not _liberado(f"{reld}/{x}", liberar))]
+                    candidatos.extend(Path(d) / a for a in arqs)
+            for p in candidatos:
+                rel = os.path.relpath(p, HOME)
+                if rel in vistos:
+                    continue
+                if _excluido(rel, excl_extra) and not _liberado(rel, liberar):
+                    continue
+                try:
+                    st = p.lstat()
+                except OSError:
+                    continue
+                if not p.is_file() or p.is_symlink() or st.st_size > MAX_ARQUIVO:
+                    continue
+                vistos.add(rel)
+                lista.append(rel)
+                total += st.st_size
+    return sorted(lista), total
+
+
+def _liberado(rel, liberar):
+    return any(rel == b or rel.startswith(b + "/") for b in liberar)
+
+
+# ── extras: pacotes, Brave, estado do sistema ────────────────────────────────
+def preparar_extras(c, lista=()):
+    if EXTRA.exists():
+        shutil.rmtree(EXTRA)
+    (EXTRA / "pacotes").mkdir(parents=True)
+    # O Google Drive não guarda permissões: anota as que não são 0644 (executáveis,
+    # chaves 0600) e as pastas privadas, para reaplicar na restauração.
+    modos = {}
+    for rel in lista:
+        try:
+            m = (HOME / rel).stat().st_mode & 0o7777
+        except OSError:
+            continue
+        if m != 0o644:
+            modos[rel] = m
+    for d in (".ssh", ".gnupg", ".config/draco/chaves"):
+        if (HOME / d).is_dir():
+            modos[d] = (HOME / d).stat().st_mode & 0o7777
+    gravar_json(EXTRA / "modos.json", modos)
+    cats = c["categorias"]
+    if cats.get("pacotes"):
+        for nome, args in (("pacman.txt", ["pacman", "-Qqen"]), ("aur.txt", ["pacman", "-Qqem"])):
+            out = subprocess.run(args, capture_output=True, text=True).stdout
+            (EXTRA / "pacotes" / nome).write_text(out)
+        if shutil.which("flatpak"):
+            out = subprocess.run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True).stdout
+            (EXTRA / "pacotes" / "flatpak.txt").write_text(out)
+    if cats.get("historico") and BRAVE.is_dir():
+        dest = EXTRA / "brave"
+        dest.mkdir()
+        for a in BRAVE_ARQS:
+            src = BRAVE / a
+            if not src.exists():
+                continue
+            if a in ("History", "Favicons", "Top Sites", "Shortcuts") and shutil.which("sqlite3"):
+                # cópia consistente mesmo com o Brave aberto
+                r = subprocess.run(["sqlite3", f"file:{src}?mode=ro&immutable=1", f".backup '{dest / a}'"],
+                                   capture_output=True, text=True, timeout=60)
+                if r.returncode != 0:
+                    shutil.copy2(src, dest / a)
+            else:
+                shutil.copy2(src, dest / a)
+    unidades = subprocess.run(["systemctl", "--user", "list-unit-files", "--state=enabled", "--no-legend",
+                               "--type=service,timer,path"], capture_output=True, text=True).stdout
+    meus = [l.split()[0] for l in unidades.splitlines() if l.split() and (HOME / ".config/systemd/user" / l.split()[0]).exists()]
+    (EXTRA / "systemd-user-ativos.txt").write_text("\n".join(meus) + "\n")
+    tema = (HOME / ".local/state/simba/current/theme.name")
+    plymouth = ""
+    try:
+        plymouth = subprocess.run(["tema-boot", "atual"], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    meta = {
+        "data": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "maquina": socket.gethostname(),
+        "usuario": os.environ.get("USER", ""),
+        "tema": tema.read_text().strip() if tema.exists() else "",
+        "tema_boot": plymouth,
+        "cripto": bool(c.get("cripto")),
+    }
+    gravar_json(EXTRA / "meta.json", meta)
+    return meta
+
+
+# ── comandos ─────────────────────────────────────────────────────────────────
+def cmd_status(_a):
+    c = config()
+    e = estado()
+    lig = conectado()
+    timer = subprocess.run(["systemctl", "--user", "is-enabled", "conta-sync.timer"], capture_output=True, text=True).stdout.strip()
+    rodando = False
+    try:
+        with open(TRAVA, "w") as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_UN)
+    except BlockingIOError:
+        rodando = True
+    print(json.dumps({
+        "rclone": bool(rclone_bin()),
+        "conectado": lig,
+        "email": c.get("email", ""),
+        "nome": c.get("nome", ""),
+        "cripto": bool(c.get("cripto")),
+        "auto": timer == "enabled",
+        "categorias": c["categorias"],
+        "rotulos": CATEGORIAS,
+        "ultima": e.get("ultima", ""),
+        "resultado": e.get("resultado", ""),
+        "erro": e.get("erro", ""),
+        "tamanho": e.get("tamanho", 0),
+        "arquivos": e.get("arquivos", 0),
+        "progresso": e.get("progresso", ""),
+        "rodando": rodando,
+        "entrando": e.get("entrando", False),
+        "remoto_meta": e.get("remoto_meta", {}),
+        "precisa_decidir": e.get("precisa_decidir", False),
+        "link_login": e.get("link_login", ""),
+        "boas_vindas": BOAS_VINDAS.exists() and not SEM_BOAS_VINDAS.exists() and not lig,
+        "boas_vindas_iso": not SEM_BOAS_VINDAS.exists(),
+        "foto": str(FOTO) if lig and FOTO.exists() else "",
+    }, ensure_ascii=False))
+
+
+def instalar_rclone():
+    if rclone_bin():
+        return True
+    avisar(_t("Instalando o rclone"), _t("Confirme a senha de administrador para conectar ao Google Drive."))
+    r = subprocess.run(["pkexec", "pacman", "-S", "--needed", "--noconfirm", "rclone"], capture_output=True, text=True)
+    return r.returncode == 0 and bool(rclone_bin())
+
+
+def _token_acesso():
+    try:
+        dump = json.loads(rc("config", "dump").stdout)
+        tok = json.loads(dump[NOME_REMOTO]["token"])
+        return tok.get("access_token")
+    except Exception:
+        return None
+
+
+def descobrir_usuario():
+    """Nome e e-mail da conta Google (about.get do Drive com o token do rclone)."""
+    if os.environ.get("CONTA_REMOTO"):
+        return {"email": "teste@local", "nome": _t("Teste")}
+    rc("about", f"{NOME_REMOTO}:", check=False, timeout=60)  # renova o token se preciso
+    tok = _token_acesso()
+    if not tok:
+        return {}
+    req = urllib.request.Request("https://www.googleapis.com/drive/v3/about?fields=user",
+                                 headers={"Authorization": f"Bearer {tok}"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            u = json.load(r).get("user", {})
+        return {"email": u.get("emailAddress", ""), "nome": u.get("displayName", ""), "foto": u.get("photoLink", "")}
+    except Exception:
+        return {}
+
+
+def face_nosso():
+    return FACE.is_symlink() and os.readlink(FACE) == str(FOTO)
+
+
+def baixar_foto(link):
+    """Baixa a foto de perfil (256 px) e liga ~/.face a ela."""
+    if not link:
+        return False
+    link = re.sub(r"=s\d+(-c)?$", "", link) + "=s256-c"
+    FOTO.parent.mkdir(parents=True, exist_ok=True)
+    tmp = FOTO.with_suffix(".tmp")
+    try:
+        with urllib.request.urlopen(link, timeout=20) as r, open(tmp, "wb") as f:
+            f.write(r.read())
+        if tmp.stat().st_size < 100:
+            raise ValueError(_t("imagem vazia"))
+        tmp.replace(FOTO)
+    except Exception:  # noqa: BLE001
+        tmp.unlink(missing_ok=True)
+        return False
+    if face_nosso() or not (FACE.exists() or FACE.is_symlink()):
+        FACE.unlink(missing_ok=True)
+        FACE.symlink_to(FOTO)
+    return True
+
+
+def apagar_foto():
+    if face_nosso():
+        FACE.unlink()
+    FOTO.unlink(missing_ok=True)
+
+
+def cmd_foto(_a):
+    if not conectado():
+        return 1
+    u = descobrir_usuario()
+    return 0 if baixar_foto(u.get("foto", "")) else 1
+
+
+def configurar_cripto(senha):
+    obsc = rc("obscure", "-", entrada=senha).stdout.strip()
+    sal = rc("obscure", "-", entrada=senha[::-1] + "simba-conta").stdout.strip()
+    # Escrito direto no rclone.conf: nada de senha na linha de comando (visível no ps).
+    arq = Path(rc("config", "file").stdout.strip().splitlines()[-1])
+    arq.parent.mkdir(parents=True, exist_ok=True)
+    texto = arq.read_text() if arq.exists() else ""
+    texto = texto.rstrip("\n") + f"\n\n[{NOME_CRIPTO}]\ntype = crypt\nremote = {remoto_base()}/dados-cripto\n" \
+        f"password = {obsc}\npassword2 = {sal}\n"
+    arq.write_text(texto.lstrip("\n"))
+    os.chmod(arq, 0o600)
+
+
+def ler_senha(valor):
+    return sys.stdin.readline().rstrip("\n") if valor == "-" else valor
+
+
+def login_drive():
+    """rclone abre o navegador; o link também fica no estado (botão na interface)."""
+    import re
+    log = CACHE / "login.log"
+    CACHE.mkdir(parents=True, exist_ok=True)
+    with open(log, "w") as f:
+        p = subprocess.Popen([rclone_bin(), "config", "create", NOME_REMOTO, "drive", "scope=drive.file",
+                              "config_is_local=true"], stdout=f, stderr=subprocess.STDOUT, text=True)
+    fim = time.time() + 600
+    while p.poll() is None and time.time() < fim:
+        m = re.search(r"(http://127\.0\.0\.1:53682/auth\?state=\S+)", log.read_text(errors="replace"))
+        if m and estado().get("link_login") != m.group(1):
+            salvar_estado(link_login=m.group(1))
+        time.sleep(0.5)
+    if p.poll() is None:
+        p.kill()
+        return 1
+    return p.returncode
+
+
+def cmd_entrar(a):
+    if a.cripto == "-":
+        a.cripto = sys.stdin.readline().rstrip("\n")
+    salvar_estado(entrando=True, erro="", link_login="")
+    try:
+        if not instalar_rclone():
+            salvar_estado(entrando=False, erro=_t("Não foi possível instalar o rclone (senha cancelada?)."))
+            avisar(_t("Não foi possível entrar"), _t("O rclone não foi instalado."), True)
+            return 1
+        if not conectado():
+            # Abre o navegador no login do Google e espera a autorização.
+            r = login_drive()
+            if r != 0 or not conectado():
+                salvar_estado(entrando=False, erro=_t("Login cancelado ou não concluído."))
+                rc("config", "delete", NOME_REMOTO, check=False)
+                avisar(_t("Login não concluído"), _t("Tente de novo em Configurações › Contas."), True)
+                return 1
+        c = config()
+        u = descobrir_usuario()
+        baixar_foto(u.pop("foto", ""))
+        c.update({k: v for k, v in u.items() if v})
+        # Backup já existente nesta conta? Herda a criptografia dele.
+        meta = remoto_meta()
+        if meta.get("cripto") and not a.cripto:
+            c["cripto"] = True
+            salvar_config(c)
+            salvar_estado(entrando=False, remoto_meta=meta, erro=_t("Este backup é criptografado: informe a senha para restaurar."))
+            return 0
+        if a.cripto:
+            configurar_cripto(ler_senha(a.cripto))
+            c["cripto"] = True
+        salvar_config(c)
+        salvar_estado(entrando=False, remoto_meta=meta, link_login="")
+        if pode_enviar():
+            cmd_auto(type("A", (), {"modo": "liga"})())
+        else:
+            salvar_estado(precisa_decidir=True,
+                          erro=_t("Esta conta já tem um backup de %1. Restaure-o ou substitua-o.", meta.get('maquina', 'outra máquina')))
+        BOAS_VINDAS.unlink(missing_ok=True)
+        avisar(_t("Conta conectada"), c.get("email") or _t("Google Drive"))
+        return 0
+    except Exception as e:  # noqa: BLE001
+        salvar_estado(entrando=False, erro=str(e)[-300:])
+        return 1
+
+
+def cmd_senha(a):
+    """Define a senha de um backup criptografado já existente (máquina nova)."""
+    rc("config", "delete", NOME_CRIPTO, check=False)
+    configurar_cripto(ler_senha(a.senha))
+    try:
+        rc("lsf", remoto_dados(), "--max-depth", "1", timeout=120)
+        rc("cat", f"{remoto_dados()}/extra/meta.json", timeout=120)
+    except Exception:
+        rc("config", "delete", NOME_CRIPTO, check=False)
+        print(_t("senha incorreta"), file=sys.stderr)
+        return 1
+    c = config()
+    c["cripto"] = True
+    salvar_config(c)
+    salvar_estado(erro="")
+    return 0
+
+
+def remoto_meta():
+    try:
+        return json.loads(rc("cat", f"{remoto_base()}/meta.json", timeout=60).stdout)
+    except Exception:
+        return {}
+
+
+def cmd_sair(_a):
+    for n in (NOME_REMOTO, NOME_CRIPTO):
+        rc("config", "delete", n, check=False)
+    c = config()
+    for k in ("email", "nome"):
+        c.pop(k, None)
+    c["cripto"] = False
+    salvar_config(c)
+    apagar_foto()
+    subprocess.run(["systemctl", "--user", "disable", "--now", "conta-sync.timer"], capture_output=True)
+    salvar_estado(resultado="", erro="", remoto_meta={})
+    return 0
+
+
+_UNIDADE = {"B": "B", "KiB": "KB", "MiB": "MB", "GiB": "GB", "TiB": "TB"}
+
+
+def _legivel(linha):
+    """'2026/11/02 12:26:41 INFO  :  63.479 MiB / 69.206 MiB, 92%, 5.643 KiB/s, ETA 17m19s (xfr#…'
+    → '63 MB de 69 MB (92%) · faltam 17 min'"""
+    m = re.search(r"([\d.]+)\s*(\w?i?B)\s*/\s*([\d.]+)\s*(\w?i?B),\s*(\d+)%(?:.*?ETA\s*([\w-]+))?", linha)
+    if not m:
+        return linha.split("Transferred:")[-1].strip()[:90]
+    feito, u1, total, u2, pct, eta = m.groups()
+    def n(v, u):
+        v = f"{float(v):.1f}".replace(".", _DEC) if u in ("GiB", "TiB") else f"{float(v):.0f}"
+        return f"{v} {_UNIDADE.get(u, u)}"
+    txt = f"{n(feito, u1)} de {n(total, u2)} ({pct}%)"
+    # Muitos arquivos pequenos: no Drive o tempo depende mais da contagem que dos bytes.
+    x = re.search(r"xfr#(\d+)/(\d+)", linha)
+    if x:
+        return _t("%1 de %2 arquivos · %3", x.group(1), x.group(2), txt)
+    if eta and eta != "-":
+        h = re.search(r"(\d+)h", eta); mi = re.search(r"(\d+)m(?!s)", eta)
+        if h:
+            txt += _t(" · faltam %1 h %2 min", h.group(1), mi.group(1) if mi else 0)
+        elif mi:
+            txt += _t(" · faltam %1 min", mi.group(1))
+        else:
+            txt += _t(" · menos de 1 min")
+    return txt
+
+
+def _progresso(proc, rotulo):
+    ultimo = 0
+    for linha in proc.stderr:
+        linha = linha.strip()
+        if "Transferred:" in linha or "%" in linha and "ETA" in linha:
+            if time.time() - ultimo > 1:
+                salvar_estado(progresso=f"{rotulo}: {_legivel(linha)}")
+                ultimo = time.time()
+    return proc.wait()
+
+
+def publicar_ferramenta():
+    """Restaurador e a própria ferramenta, sem criptografia, na raiz da pasta."""
+    base = FERRAMENTA.parent
+    rc("copyto", str(base / "Restaurar-Simba.sh"), f"{remoto_base()}/Restaurar-Simba.sh")
+    rc("copyto", str(FERRAMENTA), f"{remoto_base()}/ferramenta/conta.py")
+    leia = base / _t("LEIA-ME.txt")
+    if leia.exists():
+        rc("copyto", str(leia), f"{remoto_base()}/LEIA-ME.txt")
+
+
+def pode_enviar():
+    """Uma máquina que nunca enviou nem restaurou não pode espelhar a pasta
+    pessoal (talvez vazia) por cima do backup existente de outra máquina."""
+    e = estado()
+    if e.get("ultima") or e.get("restaurado"):
+        return True
+    return not remoto_meta()
+
+
+def limpar_lixeira(dados):
+    """Apaga do Drive as pastas lixeira/<AAAAMMDD-HHMMSS> com mais de 30 dias.
+    Antes era `rclone delete --min-age 30d`, que percorria a lixeira inteira e
+    passava de 10 min (derrubando o backup). Agora só lista as pastas do topo.
+    Nunca faz o backup falhar."""
+    try:
+        r = rc("lsf", "--dirs-only", f"{dados}/lixeira", check=False, timeout=120)
+        limite = datetime.datetime.now() - datetime.timedelta(days=30)
+        for nome in r.stdout.split():
+            nome = nome.rstrip("/")
+            try:
+                data = datetime.datetime.strptime(nome, "%Y%m%d-%H%M%S")
+            except ValueError:
+                continue
+            if data < limite:
+                rc("purge", f"{dados}/lixeira/{nome}", check=False, timeout=300)
+    except Exception as e:  # noqa: BLE001
+        print(_t("limpeza da lixeira ignorada: %1", e), file=sys.stderr)
+
+
+def cmd_sincronizar(a):
+    if not conectado():
+        print(_t("não conectado"), file=sys.stderr)
+        return 0 if a.silencioso else 1  # timer de um clone ainda sem login: não é falha
+    if not a.substituir and not pode_enviar():
+        msg = _t("Já existe um backup nesta conta. Restaure-o primeiro (ou escolha substituí-lo).")
+        salvar_estado(resultado="erro", erro=msg, precisa_decidir=True)
+        if not a.silencioso:
+            avisar(_t("Backup não enviado"), msg, True)
+        print(msg, file=sys.stderr)
+        return 4
+    with Trava():
+        c = config()
+        salvar_estado(progresso=_t("Preparando…"), erro="")
+        try:
+            lista, total = listar_arquivos(c)
+            meta = preparar_extras(c, lista)
+            CACHE.mkdir(parents=True, exist_ok=True)
+            arq_lista = CACHE / "lista.txt"
+            arq_lista.write_text("\n".join(lista) + "\n")
+            comuns = ["--skip-links", "--stats", "2s", "--stats-one-line", "-v", "--transfers", "8",
+                      "--retries", "3", "--low-level-retries", "10"]
+            dados = remoto_dados(c)
+            # O que for apagado ou substituído no Drive vai para lixeira/<data> (30 dias).
+            lixeira = f"{dados}/lixeira/{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            p = subprocess.Popen([rclone_bin(), "sync", str(HOME), f"{dados}/home", "--files-from", str(arq_lista),
+                                  "--delete-excluded", "--backup-dir", lixeira, *comuns],
+                                 stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+            if _progresso(p, _t("Enviando arquivos")) != 0:
+                raise RuntimeError(_t("falha ao enviar os arquivos (veja a conexão)"))
+            p = subprocess.Popen([rclone_bin(), "sync", str(EXTRA), f"{dados}/extra", *comuns],
+                                 stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+            if _progresso(p, _t("Enviando extras")) != 0:
+                raise RuntimeError(_t("falha ao enviar histórico e lista de programas"))
+            rc("rcat", f"{remoto_base()}/meta.json", entrada=json.dumps(meta, ensure_ascii=False, indent=2))
+            limpar_lixeira(dados)
+            publicar_ferramenta()
+            agora = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+            salvar_estado(ultima=agora, resultado="ok", tamanho=total, arquivos=len(lista), progresso="", remoto_meta=meta,
+                          precisa_decidir=False)
+            if not a.silencioso:
+                avisar(_t("Backup concluído"), _t("%1 arquivos sincronizados com o Google Drive.", len(lista)))
+            return 0
+        except Exception as e:  # noqa: BLE001
+            salvar_estado(resultado="erro", erro=str(e)[-300:], progresso="")
+            avisar(_t("Falha no backup"), str(e)[-200:], True)
+            return 1
+
+
+def _brave_aberto():
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            try:
+                if Path(f"/proc/{d}/comm").read_text().strip() in ("brave", "brave-browser"):
+                    return True
+            except OSError:
+                pass
+    return False
+
+
+def cmd_restaurar(a):
+    if not conectado():
+        print(_t("não conectado"), file=sys.stderr)
+        return 1
+    c = config()
+    if c.get("cripto") and not os.environ.get("CONTA_REMOTO"):
+        if NOME_CRIPTO + ":" not in rc("listremotes").stdout.split():
+            print(_t("backup criptografado: defina a senha com `conta senha <senha>`"), file=sys.stderr)
+            return 2
+    if not a.sim and sys.stdin.isatty():
+        r = input(_t("Os arquivos atuais que forem substituídos vão para ~/.local/share/conta/antes-da-restauracao. Continuar? [s/N] "))
+        if r.strip().lower() not in ("s", "sim", "y"):
+            return 1
+    if not remoto_meta():
+        salvar_estado(resultado="erro", erro=_t("Nenhum backup encontrado nesta conta do Google Drive."))
+        print(_t("nenhum backup encontrado nesta conta"), file=sys.stderr)
+        return 3
+    with Trava():
+        dados = remoto_dados(c)
+        carimbo = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        guarda = HOME / ".local/share/conta/antes-da-restauracao" / carimbo
+        salvar_estado(progresso=_t("Baixando arquivos…"), erro="")
+        try:
+            p = subprocess.Popen([rclone_bin(), "copy", f"{dados}/home", str(HOME), "--backup-dir", str(guarda),
+                                  "--exclude", "/.local/share/conta/antes-da-restauracao/**",
+                                  "--stats", "2s", "--stats-one-line", "-v", "--transfers", "8"],
+                                 stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+            if _progresso(p, _t("Baixando arquivos")) != 0:
+                raise RuntimeError(_t("falha ao baixar os arquivos"))
+            ext = CACHE / "restaurar-extra"
+            if ext.exists():
+                shutil.rmtree(ext)
+            rc("copy", f"{dados}/extra", str(ext))
+            meta = ler_json(ext / "meta.json", {})
+            aplicar_modos(ler_json(ext / "modos.json", {}))
+            pendente = ""
+            # Histórico e favoritos do Brave
+            if (ext / "brave").is_dir():
+                if _brave_aberto():
+                    dest = HOME / ".local/share/conta/brave-pendente"
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(ext / "brave", dest)
+                    pendente = _t("Feche o Brave e rode `conta brave` para trazer o histórico e os favoritos.")
+                else:
+                    _restaurar_brave(ext / "brave", guarda)
+            # Serviços do usuário que estavam ativos
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+            for u in (ext / "systemd-user-ativos.txt").read_text().split() if (ext / "systemd-user-ativos.txt").exists() else []:
+                subprocess.run(["systemctl", "--user", "enable", u], capture_output=True)
+            # Tema do Simba
+            if meta.get("tema") and shutil.which("simba-theme-set") and not os.environ.get("CONTA_HOME"):
+                subprocess.run(["simba-theme-set", meta["tema"]], capture_output=True, timeout=120)
+            # Pacotes que faltam
+            faltando = pacotes_faltando(ext / "pacotes")
+            salvar_estado(progresso="", resultado="restaurado", precisa_decidir=False, pacotes_faltando=len(faltando["pacman"]) + len(faltando["aur"]),
+                          restaurado=carimbo)
+            corpo = _t("Configurações, papéis de parede e histórico restaurados.")
+            if faltando["pacman"] or faltando["aur"]:
+                corpo += _t(" Faltam %1 programas: Configurações › Contas › Instalar programas.", len(faltando['pacman']) + len(faltando['aur']))
+            if pendente:
+                corpo += " " + pendente
+            cmd_auto(type("A", (), {"modo": "liga"})())
+            avisar(_t("Restauração concluída"), corpo)
+            print(corpo)
+            if not a.sem_pacotes and a.sim and sys.stdin.isatty() and (faltando["pacman"] or faltando["aur"]):
+                instalar_pacotes(faltando, terminal_proprio=True)
+            if not os.environ.get("CONTA_HOME"):
+                subprocess.run(["hyprctl", "reload"], capture_output=True)
+                subprocess.Popen(["simba-restart-shell"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return 0
+        except Exception as e:  # noqa: BLE001
+            salvar_estado(resultado="erro", erro=str(e)[-300:], progresso="")
+            avisar(_t("Falha na restauração"), str(e)[-200:], True)
+            return 1
+
+
+def aplicar_modos(modos):
+    for rel, m in modos.items():
+        p = HOME / rel
+        if p.exists() and not p.is_symlink():
+            try:
+                os.chmod(p, int(m))
+            except OSError:
+                pass
+
+
+def _restaurar_brave(origem, guarda):
+    BRAVE.mkdir(parents=True, exist_ok=True)
+    (guarda / "brave").mkdir(parents=True, exist_ok=True)
+    for a in BRAVE_ARQS:
+        src = origem / a
+        if not src.exists():
+            continue
+        dst = BRAVE / a
+        if dst.exists():
+            shutil.copy2(dst, guarda / "brave" / a)
+        for sufixo in ("-journal", "-wal", "-shm"):
+            Path(str(dst) + sufixo).unlink(missing_ok=True)
+        shutil.copy2(src, dst)
+
+
+def cmd_brave(_a):
+    src = HOME / ".local/share/conta/brave-pendente"
+    if not src.is_dir():
+        print(_t("nada pendente"))
+        return 0
+    if _brave_aberto():
+        print(_t("feche o Brave antes"), file=sys.stderr)
+        return 1
+    _restaurar_brave(src, HOME / ".local/share/conta/antes-da-restauracao" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+    shutil.rmtree(src)
+    avisar(_t("Histórico do Brave restaurado"))
+    return 0
+
+
+def pacotes_faltando(pasta):
+    pasta = Path(pasta)
+    instalados = set(subprocess.run(["pacman", "-Qq"], capture_output=True, text=True).stdout.split())
+    repo = set(subprocess.run(["pacman", "-Slq"], capture_output=True, text=True).stdout.split())
+    ler = lambda n: [l.strip() for l in (pasta / n).read_text().splitlines() if l.strip()] if (pasta / n).exists() else []
+    pac = [p for p in ler("pacman.txt") if p not in instalados and p in repo]
+    aur = [p for p in ler("aur.txt") if p not in instalados]
+    fp = ler("flatpak.txt")
+    if fp and shutil.which("flatpak"):
+        tem = set(subprocess.run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True).stdout.split())
+        fp = [p for p in fp if p not in tem]
+    gravar_json(CACHE / "pacotes-faltando.json", {"pacman": pac, "aur": aur, "flatpak": fp})
+    return {"pacman": pac, "aur": aur, "flatpak": fp}
+
+
+def instalar_pacotes(f, terminal_proprio=False):
+    linhas = [_t("echo 'Instalando os programas da sua conta…'")]
+    if f["pacman"]:
+        # Primeiro tudo de uma vez; se algo conflitar, um por um (o resto continua).
+        lista = " ".join(f["pacman"])
+        linhas.append(f"sudo pacman -S --needed {lista} || for p in {lista}; do sudo pacman -S --needed --noconfirm \"$p\" || echo \"Falhou: $p\"; done")
+    if f["aur"] and shutil.which("yay"):
+        linhas.append("yay -S --needed " + " ".join(f["aur"]))
+    if f.get("flatpak"):
+        linhas.append("flatpak install -y flathub " + " ".join(f["flatpak"]))
+    linhas.append(_t("echo; echo 'Pronto. Pode fechar esta janela.'; read -r"))
+    script = CACHE / "instalar-pacotes.sh"
+    script.write_text("\n".join(linhas) + "\n")
+    if terminal_proprio:
+        return subprocess.call(["bash", str(script)])
+    subprocess.Popen(["xdg-terminal-exec", "--", "bash", str(script)], start_new_session=True)
+    return 0
+
+
+def cmd_pacotes(_a):
+    f = ler_json(CACHE / "pacotes-faltando.json", None)
+    if f is None:
+        ext = CACHE / "restaurar-extra" / "pacotes"
+        if not ext.exists():
+            print(_t("restaure a conta primeiro"), file=sys.stderr)
+            return 1
+        f = pacotes_faltando(ext)
+    if not (f["pacman"] or f["aur"] or f.get("flatpak")):
+        print(_t("nenhum programa faltando"))
+        return 0
+    return instalar_pacotes(f)
+
+
+SERVICO = """[Unit]
+Description=Backup da conta no Google Drive (conta sincronizar)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/conta sincronizar --silencioso
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1h
+"""
+TIMER = """[Unit]
+Description=Backup automático da conta no Google Drive
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=2h
+# relógio de parede: depois de suspender/hibernar o backup atrasado roda ao acordar
+OnCalendar=*-*-* 00/2:00:00
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
+"""
+
+
+def cmd_auto(a):
+    if os.environ.get("CONTA_HOME"):
+        return 0  # teste com pasta pessoal falsa: não mexe no systemd real
+    d = HOME / ".config/systemd/user"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "conta-sync.service").write_text(SERVICO)
+    (d / "conta-sync.timer").write_text(TIMER)
+    subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+    acao = ["enable", "--now"] if a.modo == "liga" else ["disable", "--now"]
+    subprocess.run(["systemctl", "--user", *acao, "conta-sync.timer"], capture_output=True)
+    c = config()
+    c["auto"] = a.modo == "liga"
+    salvar_config(c)
+    return 0
+
+
+def cmd_categoria(a):
+    if a.id not in CATEGORIAS:
+        print(_t("categoria desconhecida"), file=sys.stderr)
+        return 2
+    c = config()
+    c["categorias"][a.id] = a.modo == "liga"
+    salvar_config(c)
+    return 0
+
+
+def cmd_boas_vindas(a):
+    if a.acao == "mostrar":
+        return 0 if BOAS_VINDAS.exists() and not SEM_BOAS_VINDAS.exists() and not conectado() else 1
+    if a.acao in ("liga", "desliga"):
+        if a.acao == "liga":
+            SEM_BOAS_VINDAS.unlink(missing_ok=True)
+        else:
+            SEM_BOAS_VINDAS.parent.mkdir(parents=True, exist_ok=True)
+            SEM_BOAS_VINDAS.touch()
+            BOAS_VINDAS.unlink(missing_ok=True)
+        return 0
+    if a.acao == "marcar":
+        BOAS_VINDAS.parent.mkdir(parents=True, exist_ok=True)
+        BOAS_VINDAS.touch()
+    else:
+        BOAS_VINDAS.unlink(missing_ok=True)
+    return 0
+
+
+def cmd_tamanho(_a):
+    lista, total = listar_arquivos()
+    print(json.dumps({"arquivos": len(lista), "tamanho": total}))
+    return 0
+
+
+def main():
+    import argparse
+    ap = argparse.ArgumentParser(prog="conta", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("status").set_defaults(f=cmd_status)
+    p = sub.add_parser("entrar")
+    p.add_argument("--cripto", default="", help="senha do backup; '-' lê da entrada padrão")
+    p.set_defaults(f=cmd_entrar)
+    p = sub.add_parser("senha")
+    p.add_argument("senha")
+    p.set_defaults(f=cmd_senha)
+    sub.add_parser("sair").set_defaults(f=cmd_sair)
+    p = sub.add_parser("sincronizar")
+    p.add_argument("--silencioso", action="store_true")
+    p.add_argument("--substituir", action="store_true", help="envia mesmo havendo backup de outra máquina")
+    p.set_defaults(f=cmd_sincronizar)
+    p = sub.add_parser("restaurar")
+    p.add_argument("--sim", action="store_true")
+    p.add_argument("--sem-pacotes", action="store_true")
+    p.set_defaults(f=cmd_restaurar)
+    sub.add_parser("pacotes").set_defaults(f=cmd_pacotes)
+    sub.add_parser("brave").set_defaults(f=cmd_brave)
+    p = sub.add_parser("auto")
+    p.add_argument("modo", choices=["liga", "desliga"])
+    p.set_defaults(f=cmd_auto)
+    p = sub.add_parser("categoria")
+    p.add_argument("id")
+    p.add_argument("modo", choices=["liga", "desliga"])
+    p.set_defaults(f=cmd_categoria)
+    sub.add_parser("tamanho").set_defaults(f=cmd_tamanho)
+    sub.add_parser("foto", help="baixa a foto de perfil da conta Google").set_defaults(f=cmd_foto)
+    p = sub.add_parser("boas-vindas", help="tela da primeira inicialização (mostrar: código 0 se deve aparecer)")
+    p.add_argument("acao", choices=["mostrar", "marcar", "fechar", "liga", "desliga"],
+                   help="liga/desliga: oferecer o login no 1º boot das instalações pela ISO")
+    p.set_defaults(f=cmd_boas_vindas)
+    a = ap.parse_args()
+    return a.f(a) or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

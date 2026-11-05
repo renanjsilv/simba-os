@@ -1,0 +1,259 @@
+#!/bin/bash
+# ajudante: read-only queries for the Configurações app. Every subcommand prints JSON.
+#
+#   ajudante opcoes <hypr:option>...   {"general:gaps_in": 5, ...} (live values)
+#   ajudante temas                     installed Simba themes with palette + preview
+#   ajudante fundos                    wallpapers: current theme + user folders
+#   ajudante fontes                    monospace fonts Simba can switch to
+#   ajudante layouts                   XKB layouts   [{valor, rotulo}]
+#   ajudante variantes <layout>        XKB variants  [{valor, rotulo}]
+#   ajudante atalhos                   keybindings   [{teclas, acao}]
+#   ajudante sobre                     hardware / OS summary
+#   ajudante padroes                   default apps + installed candidates
+#   ajudante shell                     ~/.config/simba/shell.json (or the defaults)
+#   ajudante luz                       night light: running, temperature, schedule
+set -u
+
+opcoes() {
+  local k
+  for k in "$@"; do
+    printf '%s\t' "$k"
+    hyprctl -j getoption "$k" 2>/dev/null | tr -d '\n'
+    printf '\n'
+  done | jq -R -s -c '
+    split("\n") | map(select(length > 0) | split("\t") | select(.[1] | startswith("{"))
+      | {key: .[0], value: (.[1] | fromjson | (
+          if has("int") then .int
+          elif has("float") then .float
+          elif has("bool") then .bool
+          elif has("css") then (.css | split(" ") | .[0] | tonumber)
+          elif has("str") then (if .str == "[[EMPTY]]" then "" else .str end)
+          elif has("gradient") then .gradient
+          elif has("vec2") then .vec2
+          else null end))}) | from_entries'
+}
+
+temas() {
+  python3 - <<'PY'
+import json, os, re
+home = os.path.expanduser("~")
+dirs = ["/usr/share/simba/themes", os.path.join(home, ".config/simba/themes")]
+temas = {}
+for base in dirs:
+    if not os.path.isdir(base):
+        continue
+    for slug in sorted(os.listdir(base)):
+        d = os.path.join(base, slug)
+        if not os.path.isdir(d):
+            continue
+        t = temas.setdefault(slug, {"slug": slug, "cores": {}, "preview": "", "modo": "", "fundos": 0, "usuario": False})
+        if base != dirs[0]:
+            t["usuario"] = True
+        cf = os.path.join(d, "colors.toml")
+        if os.path.isfile(cf):
+            for line in open(cf, encoding="utf-8", errors="replace"):
+                m = re.match(r'\s*([A-Za-z0-9_-]+)\s*=\s*["\']?(#[0-9A-Fa-f]{6}|dark|light)', line)
+                if m:
+                    if m.group(1) == "mode":
+                        t["modo"] = m.group(2)
+                    else:
+                        t["cores"][m.group(1)] = m.group(2)
+        for nome in ("preview.png", "preview.jpg"):
+            p = os.path.join(d, nome)
+            if os.path.isfile(p):
+                t["preview"] = p
+        bg = os.path.join(d, "backgrounds")
+        if os.path.isdir(bg):
+            t["fundos"] = len([f for f in os.listdir(bg) if re.search(r"\.(jpe?g|png|webp|bmp|gif)$", f, re.I)])
+def nome(slug):
+    especiais = {"retro-82": "Retro 82"}
+    return especiais.get(slug, " ".join(w.capitalize() for w in slug.split("-")))
+def lum(h):
+    h = h.lstrip("#"); r, g, b = (int(h[i:i+2], 16) / 255 for i in (0, 2, 4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+out = []
+for slug, t in sorted(temas.items()):
+    c = t["cores"]
+    bgc = c.get("background") or c.get("color0") or "#000000"
+    if not t["modo"]:
+        t["modo"] = "light" if lum(bgc) > 0.5 else "dark"
+    t["nome"] = nome(slug)
+    out.append(t)
+print(json.dumps(out))
+PY
+}
+
+fundos() {
+  python3 - <<'PY'
+import json, os, re
+home = os.path.expanduser("~")
+cur = os.path.join(home, ".local/state/simba/current")
+try:
+    slug = open(os.path.join(cur, "theme.name")).read().strip()
+except OSError:
+    slug = ""
+try:
+    atual = os.path.realpath(os.path.join(cur, "background"))
+except OSError:
+    atual = ""
+img = re.compile(r"\.(jpe?g|png|webp|bmp|gif)$", re.I)
+grupos = []
+def add(titulo, pasta, origem):
+    if not os.path.isdir(pasta):
+        return
+    itens = []
+    for f in sorted(os.listdir(pasta)):
+        p = os.path.join(pasta, f)
+        if os.path.isfile(p) and img.search(f):
+            itens.append({"caminho": p, "real": os.path.realpath(p), "nome": os.path.splitext(f)[0]})
+    if itens:
+        grupos.append({"titulo": titulo, "pasta": pasta, "origem": origem, "itens": itens})
+add("Do tema", os.path.join(cur, "theme/backgrounds"), "tema")
+add("Seus papéis de parede para este tema", os.path.join(home, ".config/simba/backgrounds", slug), "usuario-tema")
+for sub in ("Pictures/Wallpapers", "Pictures/wallpapers", "Imagens/Papéis de parede", "Pictures"):
+    pasta = os.path.join(home, sub)
+    if os.path.isdir(pasta) and not any(g["pasta"] == pasta for g in grupos):
+        add("Suas imagens · ~/" + sub, pasta, "usuario")
+        break
+print(json.dumps({"atual": atual, "tema": slug, "grupos": grupos}))
+PY
+}
+
+fontes() {
+  simba-font-list 2>/dev/null | jq -R -s -c 'split("\n") | map(select(length > 0))'
+}
+
+layouts() {
+  awk '/^! layout/{f=1; next} /^!/{f=0} f && NF {k=$1; $1=""; sub(/^ +/, ""); printf "%s\t%s\n", k, $0}' \
+    /usr/share/X11/xkb/rules/evdev.lst | jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | {valor: .[0], rotulo: .[1], detalhe: .[0]})'
+}
+
+variantes() {
+  local l="${1:-us}"
+  awk -v l="$l" '/^! variant/{f=1; next} /^!/{f=0} f && NF && $2 == l":" {k=$1; $1=""; $2=""; sub(/^ +/, ""); printf "%s\t%s\n", k, $0}' \
+    /usr/share/X11/xkb/rules/evdev.lst | jq -R -s -c '[{valor: "", rotulo: "Padrão", detalhe: ""}] + (split("\n") | map(select(length > 0) | split("\t") | {valor: .[0], rotulo: .[1], detalhe: .[0]}))'
+}
+
+atalhos() {
+  simba-menu-keybindings --print 2>/dev/null | sed -E 's/[[:space:]]+→[[:space:]]+/\t/' |
+    jq -R -s -c 'split("\n") | map(select(length > 0) | split("\t") | select(length == 2) | {teclas: (.[0] | gsub("\\s+$"; "")), acao: .[1]})'
+}
+
+sobre() {
+  local cpu mem gpu kernel host os ver disk uptime_s model lang
+  cpu=$(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo | head -1 | sed -E 's/\(R\)|\(TM\)|CPU //g; s/ +/ /g')
+  mem=$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf "%d %d", t*1024, a*1024}' /proc/meminfo)
+  gpu=$(lspci 2>/dev/null | grep -Ei 'vga|3d|display' | cut -d: -f3- | sed -E 's/^ +//; s/ \(rev [^)]+\)//; s/Corporation //' | head -2 | paste -sd ';')
+  kernel=$(uname -r)
+  host=$(cat /proc/sys/kernel/hostname)
+  os=$(. /etc/os-release && echo "${PRETTY_NAME:-Arch Linux}")
+  ver=$(simba-version 2>/dev/null | head -1)
+  disk=$(df -B1 --output=size,avail / | tail -1)
+  uptime_s=$(cut -d. -f1 /proc/uptime)
+  model=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null; true)
+  vendor=$(cat /sys/devices/virtual/dmi/id/sys_vendor 2>/dev/null; true)
+  lang=$(sed -n 's/^LANG=//p' /etc/locale.conf 2>/dev/null | tr -d '"')
+  jq -n -c --arg cpu "$cpu" --arg mem "$mem" --arg gpu "$gpu" --arg kernel "$kernel" --arg host "$host" \
+    --arg os "$os" --arg ver "$ver" --arg disk "$disk" --arg up "$uptime_s" --arg model "$model" --arg vendor "$vendor" \
+    --arg lang "$lang" --arg nucleos "$(nproc)" --arg user "$USER" \
+    --arg nome "$(getent passwd "$USER" | cut -d: -f5 | cut -d, -f1)" \
+    --arg sessao "Hyprland $(hyprctl version -j 2>/dev/null | jq -r .tag)" '{
+      cpu: $cpu, nucleos: ($nucleos | tonumber), memTotal: ($mem | split(" ")[0] | tonumber), memLivre: ($mem | split(" ")[1] | tonumber),
+      gpu: ($gpu | split(";")), kernel: $kernel, host: $host, os: $os, simba: $ver,
+      discoTotal: ($disk | split(" ") | map(select(length > 0))[0] | tonumber),
+      discoLivre: ($disk | split(" ") | map(select(length > 0))[1] | tonumber),
+      uptime: ($up | tonumber), modelo: $model, fabricante: $vendor, idioma: $lang, usuario: $user, nome: $nome, sessao: $sessao }'
+}
+
+padroes() {
+  local b t e a
+  b=$(simba-default-browser 2>/dev/null)
+  t=$(simba-default-terminal 2>/dev/null)
+  e=$(simba-default-editor 2>/dev/null)
+  a=$(simba-default-agent 2>/dev/null)
+  present() { command -v "$1" >/dev/null 2>&1 && echo true || echo false; }
+  jq -n -c --arg b "$b" --arg t "$t" --arg e "$e" --arg a "$a" \
+    --argjson chromium "$(present chromium)" --argjson chrome "$(present google-chrome-stable)" --argjson brave "$(present brave)" \
+    --argjson braveo "$(present brave-origin)" --argjson edge "$(present microsoft-edge-stable)" --argjson firefox "$(present firefox)" \
+    --argjson zen "$(present zen-browser)" \
+    --argjson alacritty "$(present alacritty)" --argjson foot "$(present foot)" --argjson ghostty "$(present ghostty)" --argjson kitty "$(present kitty)" \
+    --argjson nvim "$(present nvim)" --argjson code "$(present code)" --argjson cursor "$(present cursor)" --argjson zed "$(present zeditor)" \
+    --argjson subl "$(present sublime_text)" --argjson helix "$(present helix)" --argjson vim "$(present vim)" --argjson emacs "$(present emacs)" \
+    --argjson claude "$(present claude)" --argjson codex "$(present codex)" --argjson gemini "$(present gemini)" --argjson opencode "$(present opencode)" \
+    --argjson copilot "$(present copilot)" --argjson crush "$(present crush)" --argjson grok "$(present grok)" --argjson pi "$(present pi)" \
+    --argjson omp "$(present omp)" --argjson muse "$(present muse)" --argjson cagent "$(present cursor-agent)" '{
+    navegador: { atual: $b, opcoes: ([
+      {valor:"chromium", rotulo:"Chromium", ok:$chromium}, {valor:"chrome", rotulo:"Google Chrome", ok:$chrome},
+      {valor:"brave", rotulo:"Brave", ok:$brave}, {valor:"brave-origin", rotulo:"Brave Origin", ok:$braveo},
+      {valor:"edge", rotulo:"Microsoft Edge", ok:$edge}, {valor:"firefox", rotulo:"Firefox", ok:$firefox}, {valor:"zen", rotulo:"Zen", ok:$zen}
+    ] | map(select(.ok))) },
+    terminal: { atual: $t, opcoes: ([
+      {valor:"alacritty", rotulo:"Alacritty", ok:$alacritty}, {valor:"foot", rotulo:"Foot", ok:$foot},
+      {valor:"ghostty", rotulo:"Ghostty", ok:$ghostty}, {valor:"kitty", rotulo:"Kitty", ok:$kitty}
+    ] | map(select(.ok))) },
+    editor: { atual: $e, opcoes: ([
+      {valor:"nvim", rotulo:"Neovim", ok:$nvim}, {valor:"code", rotulo:"VS Code", ok:$code}, {valor:"cursor", rotulo:"Cursor", ok:$cursor},
+      {valor:"zed", rotulo:"Zed", ok:$zed}, {valor:"sublime_text", rotulo:"Sublime Text", ok:$subl}, {valor:"helix", rotulo:"Helix", ok:$helix},
+      {valor:"vim", rotulo:"Vim", ok:$vim}, {valor:"emacs", rotulo:"Emacs", ok:$emacs}
+    ] | map(select(.ok))) },
+    agente: { atual: $a, opcoes: ([
+      {valor:"claude", rotulo:"Claude Code", ok:$claude}, {valor:"codex", rotulo:"Codex", ok:$codex}, {valor:"gemini", rotulo:"Gemini", ok:$gemini},
+      {valor:"opencode", rotulo:"OpenCode", ok:$opencode}, {valor:"copilot", rotulo:"Copilot", ok:$copilot}, {valor:"crush", rotulo:"Crush", ok:$crush},
+      {valor:"grok", rotulo:"Grok", ok:$grok}, {valor:"pi", rotulo:"Pi", ok:$pi}, {valor:"omp", rotulo:"omp", ok:$omp},
+      {valor:"muse", rotulo:"Muse Code", ok:$muse}, {valor:"cursor-agent", rotulo:"Cursor CLI", ok:$cagent}
+    ] | map(select(.ok))) }
+  }'
+}
+
+shell_json() {
+  local f="$HOME/.config/simba/shell.json"
+  [[ -f $f ]] || f="$SIMBA_PATH/config/simba/shell.json"
+  jq -c . "$f"
+}
+
+barra() {
+  local f="$HOME/.config/simba/shell.json" oculta=false
+  [[ -f $f ]] || f="$SIMBA_PATH/config/simba/shell.json"
+  simba-toggle-enabled bar-off 2>/dev/null && oculta=true
+  jq -c -n --argjson s "$(jq -c . "$f")" --argjson c "$(simba-plugin-catalog 2>/dev/null || echo '[]')" --argjson o "$oculta" '{
+    posicao: ($s.bar.position // "top"), transparente: ($s.bar.transparent // false), oculta: $o,
+    layout: { left: [($s.bar.layout.left // [])[] | .id], center: [($s.bar.layout.center // [])[] | .id], right: [($s.bar.layout.right // [])[] | .id] },
+    relogio: ([($s.bar.layout // {} | to_entries[] | .value[]) | select(.id == "simba.clock")][0].format // "HH:mm"),
+    catalogo: [ $c[] | select(.kinds | index("bar-widget")) | { id, nome: (.barWidget.displayName // .name), categoria: (.barWidget.category // ""), multiplo: (.barWidget.allowMultiple // false) } ]
+  }'
+}
+
+notificacoes() {
+  local d="$HOME/.local/state/simba/notifications/history"
+  if compgen -G "$d/*.json" >/dev/null; then
+    jq -s -c 'sort_by(.timestamp) | reverse | map({app, summary, body, glyph, timestamp})' "$d"/*.json
+  else
+    echo '[]'
+  fi
+}
+
+luz() {
+  local running=false temp=""
+  pgrep -x hyprsunset >/dev/null && running=true
+  if $running; then temp=$(hyprctl hyprsunset temperature 2>/dev/null | tr -dc '0-9'); fi
+  jq -n -c --argjson r "$running" --arg t "$temp" '{ativo: $r, temperatura: (if $t == "" then null else ($t | tonumber) end)}'
+}
+
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+  opcoes) opcoes "$@" ;;
+  temas) temas ;;
+  fundos) fundos ;;
+  fontes) fontes ;;
+  layouts) layouts ;;
+  variantes) variantes "$@" ;;
+  atalhos) atalhos ;;
+  sobre) sobre ;;
+  padroes) padroes ;;
+  shell) shell_json ;;
+  luz) luz ;;
+  barra) barra ;;
+  notificacoes) notificacoes ;;
+  *) sed -n '2,15p' "$0"; exit 1 ;;
+esac

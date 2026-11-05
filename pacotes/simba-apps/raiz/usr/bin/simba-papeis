@@ -1,0 +1,36 @@
+#!/bin/bash
+# simba-papeis — liga os papéis de parede do Simba OS (/usr/share/backgrounds/simba)
+# às pastas de fundos de cada tema (~/.config/simba/backgrounds/<tema>): temas
+# claros recebem os claros, escuros os escuros; os coloridos vão para todos.
+#   simba-papeis [tema]   sem tema: todos os temas instalados
+# Roda também no gancho theme-set (temas instalados depois).
+SRC=/usr/share/backgrounds/simba
+[ -d "$SRC" ] || SRC="$HOME/.local/share/simba/sistema/papeis"
+DST="$HOME/.config/simba/backgrounds"
+CLAROS="simba-traco-claro simba-dormindo simba-retrato-claro nevoa-clara dunas-claras topografia-clara montanhas simba-por-do-sol"
+ESCUROS="simba-lua simba-espiando simba-traco-escuro simba-patinhas simba-retrato-escuro aurora-escura dunas-escuras eclipse topografia-escura ondas simba-por-do-sol montanhas"
+claro() { # $1 = pasta do tema
+  local c; c=$(grep -E '^\s*background\s*=' "$1/colors.toml" 2>/dev/null | grep -o '#[0-9A-Fa-f]\{6\}' | head -1)
+  [ -n "$c" ] || return 1
+  python3 -c "import sys;h='$c'[1:];r,g,b=(int(h[i:i+2],16)/255 for i in (0,2,4));sys.exit(0 if .2126*r+.7152*g+.0722*b>.5 else 1)"
+}
+temas() {
+  if [ -n "${1:-}" ]; then
+    for b in "$HOME/.config/simba/themes" /usr/share/simba/themes; do [ -d "$b/$1" ] && { echo "$b/$1"; return; }; done
+  else
+    find /usr/share/simba/themes "$HOME/.config/simba/themes" -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+  fi
+}
+while read -r t; do
+  [ -n "$t" ] || continue
+  nome=$(basename "$t"); d="$DST/$nome"; mkdir -p "$d"
+  # tira links antigos do Simba (a lista pode mudar); arquivos da pessoa ficam
+  find "$d" -maxdepth 1 -type l -lname '*backgrounds/simba/*' -delete 2>/dev/null
+  find "$d" -maxdepth 1 -type l -lname '*simba/sistema/papeis/*' -delete 2>/dev/null
+  if claro "$t"; then lista=$CLAROS; else lista=$ESCUROS; fi
+  i=0
+  for p in $lista; do
+    [ -f "$SRC/$p.jpg" ] || continue
+    ln -sfn "$SRC/$p.jpg" "$d/$(printf '%02d' $i)-$p.jpg"; i=$((i + 1))
+  done
+done < <(temas "${1:-}")

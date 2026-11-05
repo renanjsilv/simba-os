@@ -1,0 +1,92 @@
+#!/bin/bash
+# testar-vm — máquina virtual para testar a ISO e as atualizações do Simba OS.
+#
+# Roda na sessão do usuário (qemu:///session, sem root): UEFI sem Secure Boot, TPM
+# emulado, virtio-gpu com 3D (virgl pela GPU Intel) para o Hyprland, rede do usuário.
+# As teclas vão para a VM (virsh send-key), nunca para a janela em foco do computador.
+#
+#   testar-vm criar <iso> [nome]     cria a VM (disco de 40 GB) com a ISO no drive de CD
+#   testar-vm ligar | desligar | forcar
+#   testar-vm tela [arquivo.png]     captura a tela da VM (padrão: /tmp/testar-vm.png)
+#   testar-vm tecla <tecla>...       ex.: KEY_ENTER, KEY_DOWN, "KEY_LEFTCTRL KEY_C" (combinação)
+#   testar-vm texto "<texto>"        digita (teclado us; acentos não)
+#   testar-vm ejetar                 tira a ISO (depois de instalar)
+#   testar-vm foto <nome> | voltar <nome> | fotos   snapshots do disco (teste de atualização)
+#   testar-vm porta                  porta local do SSH da VM (redirecionada para a 22 dela)
+#   testar-vm apagar                 apaga a VM e o disco
+set -euo pipefail
+
+VM=${TESTAR_VM:-simba-teste}
+C=(virsh -q -c qemu:///session)
+DISCOS=${TESTAR_VM_DIR:-/mnt/dados/vm}
+SSH_PORTA=${TESTAR_VM_SSH:-2222}
+
+die() { echo "testar-vm: $*" >&2; exit 1; }
+
+# texto → teclas do evdev (layout us)
+declare -A K=([" "]=KEY_SPACE ["-"]=KEY_MINUS ["="]=KEY_EQUAL ["."]=KEY_DOT [","]=KEY_COMMA ["/"]=KEY_SLASH
+  [";"]=KEY_SEMICOLON ["'"]=KEY_APOSTROPHE ["["]=KEY_LEFTBRACE ["]"]=KEY_RIGHTBRACE ["\\"]=KEY_BACKSLASH ["\`"]=KEY_GRAVE)
+declare -A S=(["_"]=KEY_MINUS ["+"]=KEY_EQUAL [">"]=KEY_DOT ["<"]=KEY_COMMA ["?"]=KEY_SLASH [":"]=KEY_SEMICOLON
+  ['"']=KEY_APOSTROPHE ["{"]=KEY_LEFTBRACE ["}"]=KEY_RIGHTBRACE ["|"]=KEY_BACKSLASH ["~"]=KEY_GRAVE
+  ["!"]=KEY_1 ["@"]=KEY_2 ["#"]=KEY_3 ["$"]=KEY_4 ["%"]=KEY_5 ["^"]=KEY_6 ["&"]=KEY_7 ["*"]=KEY_8 ["("]=KEY_9 [")"]=KEY_0)
+
+digitar() {
+  local s=$1 i c
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    if [[ $c =~ [a-z] ]]; then "${C[@]}" send-key "$VM" --codeset linux "KEY_${c^^}" >/dev/null
+    elif [[ $c =~ [A-Z] ]]; then "${C[@]}" send-key "$VM" --codeset linux KEY_LEFTSHIFT "KEY_$c" >/dev/null
+    elif [[ $c =~ [0-9] ]]; then "${C[@]}" send-key "$VM" --codeset linux "KEY_$c" >/dev/null
+    elif [[ -n ${K[$c]:-} ]]; then "${C[@]}" send-key "$VM" --codeset linux "${K[$c]}" >/dev/null
+    elif [[ -n ${S[$c]:-} ]]; then "${C[@]}" send-key "$VM" --codeset linux KEY_LEFTSHIFT "${S[$c]}" >/dev/null
+    else die "caractere sem tecla: '$c'"
+    fi
+    sleep 0.03
+  done
+}
+
+case ${1:-} in
+criar)
+  iso=${2:?uso: testar-vm criar <iso> [nome]}
+  [ -n "${3:-}" ] && VM=$3
+  [ -f "$iso" ] || die "ISO não encontrada: $iso"
+  mkdir -p "$DISCOS"
+  "${C[@]}" dominfo "$VM" >/dev/null 2>&1 && die "a VM $VM já existe (testar-vm apagar)"
+  virt-install --connect qemu:///session --name "$VM" --osinfo archlinux \
+    --memory 4096 --vcpus 4 --cpu host-passthrough \
+    --boot uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no \
+    --disk "path=$DISCOS/$VM.qcow2,size=40,format=qcow2,bus=virtio" \
+    --cdrom "$iso" \
+    --tpm emulator,model=tpm-crb,version=2.0 \
+    --video virtio,accel3d=yes \
+    --graphics spice,gl.enable=yes,listen=none,rendernode=/dev/dri/renderD128 \
+    --network "user,model=virtio,portForward0.proto=tcp,portForward0.range0.start=$SSH_PORTA,portForward0.range0.to=22" \
+    --sound default --noautoconsole
+  echo "VM $VM criada e ligada. Veja a tela com: testar-vm tela"
+  ;;
+ligar) "${C[@]}" start "$VM" ;;
+desligar) "${C[@]}" shutdown "$VM" ;;
+forcar) "${C[@]}" destroy "$VM" ;;
+tela)
+  f=${2:-/tmp/testar-vm.png}
+  t=$(mktemp --suffix=.ppm)
+  "${C[@]}" screenshot "$VM" "$t" >/dev/null
+  magick "$t" "$f" && rm -f "$t"
+  echo "$f"
+  ;;
+tecla) shift; "${C[@]}" send-key "$VM" --codeset linux "$@" >/dev/null ;;
+texto) digitar "${2:?texto}" ;;
+ejetar)
+  alvo=$("${C[@]}" domblklist "$VM" --details | awk '$2 == "cdrom" {print $3; exit}')
+  [ -n "$alvo" ] && "${C[@]}" change-media "$VM" "$alvo" --eject --config 2>/dev/null || true
+  ;;
+foto) "${C[@]}" snapshot-create-as "$VM" "${2:?nome}" --disk-only=no >/dev/null && echo "foto ${2} criada" ;;
+voltar) "${C[@]}" snapshot-revert "$VM" "${2:?nome}" ;;
+fotos) "${C[@]}" snapshot-list "$VM" ;;
+porta) echo "$SSH_PORTA" ;;
+apagar)
+  "${C[@]}" destroy "$VM" 2>/dev/null || true
+  "${C[@]}" undefine "$VM" --nvram --tpm --snapshots-metadata --remove-all-storage 2>/dev/null || true
+  ;;
+*) sed -n '2,20p' "$0"; exit 2 ;;
+esac

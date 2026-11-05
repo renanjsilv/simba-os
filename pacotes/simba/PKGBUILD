@@ -2,7 +2,7 @@
 # configurações padrão (/etc/skel), tradução (simba-idioma) e identidade do sistema.
 # Derivado do Omarchy (MIT, ver /usr/share/licenses/simba/omarchy-MIT.txt).
 pkgname=simba
-pkgver=1.1.0
+pkgver=1.1.1
 pkgrel=1
 pkgdesc="Simba OS: área de trabalho, ferramentas e configurações do sistema"
 arch=('any')

@@ -29,7 +29,19 @@ PanelWindow {
     var r = monitorH && monitorH.lastIpcObject ? monitorH.lastIpcObject.reserved : null
     return r && r.length === 4 ? r : [0, 26, 0, 0]
   }
-  Connections { target: Hyprland; function onRawEvent(ev) { if (ev.name === "monitoradded" || ev.name === "monitorremoved" || ev.name === "configreloaded") Hyprland.refreshMonitors() } }
+  // The reserved area changes when the bar restarts, moves or is resized, which Hyprland
+  // only signals as layer open/close: refresh on those too (debounced), plus a slow
+  // backstop. A stale value kept icons from being placed where the bar used to be.
+  Connections {
+    target: Hyprland
+    function onRawEvent(ev) {
+      if (["monitoradded", "monitoraddedv2", "monitorremoved", "monitorremovedv2", "configreloaded", "openlayer", "closelayer"].indexOf(ev.name) >= 0)
+        releReserva.restart()
+    }
+  }
+  Timer { id: releReserva; interval: 400; onTriggered: Hyprland.refreshMonitors() }
+  Timer { interval: 20000; running: true; repeat: true; onTriggered: Hyprland.refreshMonitors() }
+  Component.onCompleted: Hyprland.refreshMonitors()
 
   readonly property real x0: reservado[0] + 10
   readonly property real y0: reservado[1] + 10
@@ -46,9 +58,12 @@ PanelWindow {
     var resto = []
     area.itens.forEach(function(it) {
       var p = pos[it.nome]
-      if (p && p.c !== undefined && p.c < colunas && p.r < linhas && !ocupado[p.c + "," + p.r]) {
-        ocupado[p.c + "," + p.r] = true
-        res[it.caminho] = { x: x0 + p.c * cel.w, y: y0 + p.r * cel.h }
+      // a cell beyond the grid (bigger icons, smaller screen) sticks to the nearest edge
+      var pc = p && p.c !== undefined ? Math.min(p.c, colunas - 1) : -1
+      var pr = p && p.c !== undefined ? Math.min(p.r, linhas - 1) : -1
+      if (pc >= 0 && !ocupado[pc + "," + pr]) {
+        ocupado[pc + "," + pr] = true
+        res[it.caminho] = { x: x0 + pc * cel.w, y: y0 + pr * cel.h }
       } else if (p && p.x !== undefined && !area.grade && p.x < width - 20 && p.y < height - 20) {
         res[it.caminho] = { x: p.x, y: p.y }
       } else resto.push(it)
@@ -96,6 +111,20 @@ PanelWindow {
     id: raiz
     anchors.fill: parent
     focus: true
+
+    // Ctrl + scroll = bigger / smaller icons (anywhere on the desktop, icons included).
+    // Touchpads send small deltas: accumulate to one step per wheel notch (120).
+    property real rodaAcumulada: 0
+    WheelHandler {
+      target: null
+      acceptedModifiers: Qt.ControlModifier
+      enabled: sup.mostrarIcones
+      onWheel: function(ev) {
+        raiz.rodaAcumulada += ev.angleDelta.y
+        while (raiz.rodaAcumulada >= 120) { raiz.rodaAcumulada -= 120; sup.area.zoom(1) }
+        while (raiz.rodaAcumulada <= -120) { raiz.rodaAcumulada += 120; sup.area.zoom(-1) }
+      }
+    }
 
     // Delete = lixeira · F2 = renomear · Enter = abrir · Ctrl+A/C/X/V · Esc = limpar seleção
     Keys.onPressed: function(e) {

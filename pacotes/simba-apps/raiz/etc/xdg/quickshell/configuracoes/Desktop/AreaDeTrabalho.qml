@@ -30,7 +30,24 @@ Scope {
   function espiar(ms) { elevada = true; baixar.interval = Math.max(300, ms || 1500); baixar.restart() }
   Timer { id: baixar; onTriggered: a.elevada = false }
 
-  readonly property var celula: tamanho === "grande" ? { w: 118, h: 128, i: 64 } : (tamanho === "pequeno" ? { w: 82, h: 86, i: 32 } : { w: 98, h: 106, i: 48 })
+  // Icon size: one of the three presets, or any size in between set with Ctrl+scroll
+  // ("area.iconePx"; cleared when a preset is chosen in the menu or in Configurações).
+  readonly property var presets: ({ pequeno: 32, medio: 48, grande: 64 })
+  readonly property int iconePx: Preferencias.obter("area.iconePx", 0) || 0
+  readonly property int px: iconePx > 0 ? iconePx : (presets[tamanho] || 48)
+  // preset name that matches the current size ("" while a Ctrl+scroll size is in use)
+  readonly property string tamanhoNome: iconePx > 0 ? "" : tamanho
+  readonly property var celula: px === 64 ? { w: 118, h: 128, i: 64 } : (px === 32 ? { w: 82, h: 86, i: 32 }
+                                : (px === 48 ? { w: 98, h: 106, i: 48 } : { w: Math.round(px * 1.125 + 46), h: Math.round(px * 1.3 + 44), i: px }))
+  function definirTamanho(nome) { Preferencias.definir("area.iconePx", undefined); Preferencias.definir("area.tamanho", nome) }
+  // Ctrl+scroll: 8 px per step, 24–96 px; landing on a preset size selects that preset.
+  function zoom(passos) {
+    var novo = Math.max(24, Math.min(96, px + 8 * passos))
+    if (novo === px) return
+    var nome = Object.keys(presets).filter(function(k) { return presets[k] === novo })[0]
+    if (nome) definirTamanho(nome)
+    else Preferencias.definir("area.iconePx", novo)
+  }
 
   // The screen that shows icons: preference, else the monitor at 0,0, else the first.
   readonly property string telaIcones: {

@@ -35,9 +35,9 @@ Scope {
   function marca(v) { return v ? "check" : "" }
   readonly property var itensArea: [
     { id: "exibir", rotulo: I18n.t("Exibir"), glifo: Icones.viewGridOutline, sub: [
-      { id: "grande", rotulo: I18n.t("Ícones grandes"), glifo: Icones.viewGrid, radio: area && area.tamanho === "grande" },
-      { id: "medio", rotulo: I18n.t("Ícones médios"), glifo: Icones.viewGridOutline, radio: area && area.tamanho === "medio" },
-      { id: "pequeno", rotulo: I18n.t("Ícones pequenos"), glifo: Icones.dotsHorizontal, radio: area && area.tamanho === "pequeno" },
+      { id: "grande", rotulo: I18n.t("Ícones grandes"), glifo: Icones.viewGrid, radio: area && area.tamanhoNome === "grande" },
+      { id: "medio", rotulo: I18n.t("Ícones médios"), glifo: Icones.viewGridOutline, radio: area && area.tamanhoNome === "medio" },
+      { id: "pequeno", rotulo: I18n.t("Ícones pequenos"), glifo: Icones.dotsHorizontal, radio: area && area.tamanhoNome === "pequeno" },
       { separador: true },
       { id: "auto", rotulo: I18n.t("Organizar ícones automaticamente"), marcado: area && area.automatico },
       { id: "grade", rotulo: I18n.t("Alinhar ícones à grade"), marcado: area && area.grade },
@@ -96,7 +96,7 @@ Scope {
     var a = area
     var abrirCfg = function(p) { Navegacao.abrir(p) }
     switch (id) {
-    case "grande": case "medio": case "pequeno": Preferencias.definir("area.tamanho", id); break
+    case "grande": case "medio": case "pequeno": area.definirTamanho(id); break
     case "auto": Preferencias.definir("area.automatico", !a.automatico); if (!a.automatico) Preferencias.definir("area.posicoes", {}); break
     case "grade": Preferencias.definir("area.grade", !a.grade); break
     case "mostrar": Preferencias.definir("area.mostrarIcones", !a.mostrar); break

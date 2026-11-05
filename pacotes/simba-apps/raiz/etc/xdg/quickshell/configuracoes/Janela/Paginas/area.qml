@@ -91,8 +91,8 @@ Pagina {
       titulo: I18n.t("Tamanho dos ícones")
       Segmentado {
         opcoes: [{ valor: "pequeno", rotulo: I18n.t("Pequenos") }, { valor: "medio", rotulo: I18n.t("Médios") }, { valor: "grande", rotulo: I18n.t("Grandes") }]
-        atual: Preferencias.obter("area.tamanho", "medio")
-        onEscolhido: function(v) { Preferencias.definir("area.tamanho", v) }
+        atual: Preferencias.obter("area.iconePx", 0) ? "" : Preferencias.obter("area.tamanho", "medio")
+        onEscolhido: function(v) { Preferencias.definir("area.iconePx", undefined); Preferencias.definir("area.tamanho", v) }
       }
     }
     Linha {

@@ -26,23 +26,33 @@ SIMBA_CONHECE = {"pi", "omp", "opencode", "claude", "codex", "grok", "agy", "ope
                  "crush", "cursor-agent", "muse"}
 
 AGENTES = {
-    "claude":   {"nome": "Claude Code", "cmd": ["claude", "--permission-mode", "auto"], "prompt": ["--", "{p}"],
-                 "login": ["claude", "auth", "login"], "conta": [".claude/.credentials.json"]},
-    "codex":    {"nome": "Codex", "cmd": ["codex", "--approve-for-me"], "prompt": ["--", "{p}"],
-                 "login": ["codex", "login"], "conta": [".codex/auth.json"]},
     "agy":      {"nome": "Antigravity", "cmd": ["agy", "--dangerously-skip-permissions"],
-                 "prompt": ["--prompt-interactive", "{p}"], "login": ["agy"], "conta": [],
-                 "verifica": ["agy", "models"], "env": "GEMINI_API_KEY"},
-    "opencode": {"nome": "OpenCode", "cmd": ["opencode", "--auto"], "prompt": ["--prompt", "{p}"],
+                 "prompt": ["-p", "{p}"], "continue": ["--continue", "-p", "{p}"],
+                 "login": ["agy"], "conta": [], "verifica": ["agy", "models"], "env": "GEMINI_API_KEY"},
+    "claude":   {"nome": "Claude Code", "cmd": ["claude", "--permission-mode", "auto"],
+                 "prompt": ["-p", "{p}"], "continue": ["--continue", "-p", "{p}"],
+                 "login": ["claude", "auth", "login"], "conta": [".claude/.credentials.json"]},
+    "codex":    {"nome": "Codex", "cmd": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"],
+                 "prompt": ["{p}"], "continue": ["resume", "--last", "{p}"],
+                 "login": ["codex", "login"], "conta": [".codex/auth.json"]},
+    "opencode": {"nome": "OpenCode", "cmd": ["opencode", "run"],
+                 "prompt": ["{p}"], "continue": ["-c", "{p}"],
                  "login": ["opencode", "auth", "login"], "conta": [".local/share/opencode/auth.json"]},
-    "copilot":  {"nome": "GitHub Copilot", "cmd": ["copilot", "--allow-all"], "prompt": ["--interactive", "{p}"],
+    "copilot":  {"nome": "GitHub Copilot", "cmd": ["copilot", "--allow-all"],
+                 "prompt": ["-p", "{p}"], "continue": ["--continue", "-p", "{p}"],
                  "login": ["copilot"], "conta": [".copilot/config.json"]},
-    "cursor-agent": {"nome": "Cursor", "cmd": ["cursor-agent", "--yolo", "--trust"], "prompt": ["agent", "--", "{p}"],
+    "cursor-agent": {"nome": "Cursor", "cmd": ["cursor-agent", "--yolo", "--trust"],
+                     "prompt": ["agent", "-p", "{p}"], "continue": ["agent", "-p", "{p}"],
                      "login": ["cursor-agent", "login"], "conta": [".cursor/cli-config.json"]},
-    "grok":     {"nome": "Grok", "cmd": ["grok", "--permission-mode", "bypassPermissions"], "prompt": ["--", "{p}"],
+    "grok":     {"nome": "Grok", "cmd": ["grok", "--permission-mode", "bypassPermissions"],
+                 "prompt": ["--", "{p}"], "continue": ["--", "{p}"],
                  "login": ["grok"], "conta": []},
-    "crush":    {"nome": "Crush", "cmd": ["crush", "--yolo"], "prompt": None, "login": ["crush"], "conta": []},
-    "pi":       {"nome": "Pi", "cmd": ["pi"], "prompt": ["{p}"], "login": ["pi"], "conta": []},
+    "crush":    {"nome": "Crush", "cmd": ["crush", "run"],
+                 "prompt": ["{p}"], "continue": ["{p}"],
+                 "login": ["crush"], "conta": []},
+    "pi":       {"nome": "Pi", "cmd": ["pi"],
+                 "prompt": ["--", "{p}"], "continue": ["--", "{p}"],
+                 "login": ["pi"], "conta": []},
 }
 
 INSTALAR = {
@@ -87,6 +97,7 @@ class TerminalCleaner:
         self.atual = ""
 
     def feed(self, texto):
+        texto = texto.replace("\r\n", "\n")
         texto = ANSI_OSC.sub("", texto)
         texto = ANSI_OTHER.sub("", texto)
         i = 0

@@ -61,6 +61,13 @@ class TerminalCleaner:
             self.resto = m.group(0)
             texto = texto[:m.start()]
 
+        # Se terminar com \r, aguarda próximo chunk para checar se é \r\n
+        if texto.endswith("\r"):
+            self.resto = "\r" + self.resto
+            texto = texto[:-1]
+
+        # Converte newlines padrão de PTY/terminal (\r\n) para \n comum
+        texto = texto.replace("\r\n", "\n")
         texto = ANSI_OSC.sub("", texto)
         texto = ANSI_OTHER.sub("", texto)
 
@@ -193,6 +200,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.mestre_fd = None
         self.agente_atual = None
         self.usados = set()
+        self.conversas_iniciadas = set()
         self.anterior_passagem = None
         self.historico_tela = bytearray()
         self.inicio_agente = 0.0
@@ -402,6 +410,7 @@ class MainWindow(Adw.ApplicationWindow):
         )
         self.box_mensagens.append(self.status_page)
         self.usados.clear()
+        self.conversas_iniciadas.clear()
         self.anterior_passagem = None
         self.agente_atual = None
         self.ativo_assistente_view = None
@@ -482,14 +491,17 @@ class MainWindow(Adw.ApplicationWindow):
         # Cria a bolha de resposta do agente
         self._adicionar_bolha_assistente(agente)
 
-        # Prepara comando
+        # Prepara comando (modo print/turnos com histórico)
         info = M.AGENTES[agente]
         cmd = list(info["cmd"])
-        if pedido:
-            if info["prompt"]:
-                cmd += [x.replace("{p}", pedido) for x in info["prompt"]]
-            elif agente == "crush":
-                cmd = ["crush", "run", pedido]
+        continuar = (agente in self.conversas_iniciadas) and ("continue" in info)
+        args_template = info.get("continue") if continuar else info.get("prompt")
+        if pedido and args_template:
+            cmd += [x.replace("{p}", pedido) for x in args_template]
+        elif pedido:
+            cmd += [pedido]
+
+        self.conversas_iniciadas.add(agente)
 
         # PTY
         mestre, escravo = pty.openpty()
@@ -572,8 +584,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _aplicar_atualizacao_texto(self):
         self.atualizacao_pendente = False
         if self.ativo_assistente_buf and self.ativo_cleaner:
-            self.ativo_assistente_buf.set_text(self.ativo_cleaner.get_text())
-            self._scroll_para_fim()
+            txt = self.ativo_cleaner.get_text()
+            if txt.strip():
+                self.ativo_assistente_buf.set_text(txt)
+                self._scroll_para_fim()
 
     def _executar_troca_transparente(self, agente_antigo, cfg):
         M.encerrar(self.proc.pid)
@@ -634,7 +648,11 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _finalizar_resposta(self):
         if self.ativo_assistente_buf and self.ativo_cleaner:
-            self.ativo_assistente_buf.set_text(self.ativo_cleaner.get_text())
+            txt = self.ativo_cleaner.get_text()
+            if txt.strip():
+                self.ativo_assistente_buf.set_text(txt)
+            else:
+                self.ativo_assistente_buf.set_text(_t("(Concluído sem texto)"))
             self._scroll_para_fim()
         self.btn_parar.set_visible(False)
         self.btn_enviar.set_visible(True)
@@ -690,6 +708,7 @@ class MainWindow(Adw.ApplicationWindow):
         tv.set_hexpand(True)
         tv.add_css_class("msg-body")
         tv_buf = tv.get_buffer()
+        tv_buf.set_text(_t("Pensando..."))
 
         card.append(tv)
 

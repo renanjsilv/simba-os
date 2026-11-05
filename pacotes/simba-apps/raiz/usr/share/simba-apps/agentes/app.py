@@ -6,7 +6,9 @@ Codex, Grok, Copilot, etc.) em uma interface centralizada de chat.
 Quando o limite de uso de um agente é atingido, a conversa é continuada automaticamente
 no próximo agente de forma transparente, sem fechar a janela ou quebrar o fluxo.
 """
+import codecs
 from datetime import datetime
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -15,8 +17,10 @@ import re
 import select
 import shutil
 import signal
+import struct
 import subprocess
 import sys
+import termios
 import threading
 import time
 
@@ -34,67 +38,139 @@ import motor as M  # noqa: E402
 APP_ID = "com.simba.Agentes"
 HOME = Path.home()
 
+ANSI_CSI = re.compile(r"\x1b\[([0-9;?]*)([a-zA-Z])")
+ANSI_OSC = re.compile(r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
+ANSI_OTHER = re.compile(r"\x1b[()][0-9A-B]|\x1b[=>78]")
+
+
+class TerminalCleaner:
+    """Processa saídas de terminal VT100/ANSI, tratando spinners, cursores e rewrites."""
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.linhas = []
+        self.atual = ""
+        self.resto = ""
+
+    def feed(self, texto: str):
+        texto = self.resto + texto
+        self.resto = ""
+
+        # Preserva sequência de escape incompleta que tenha sido cortada no final do buffer
+        m = re.search(r"\x1b(\[[0-9;?]*[ -/]?)?$", texto)
+        if m:
+            self.resto = m.group(0)
+            texto = texto[:m.start()]
+
+        texto = ANSI_OSC.sub("", texto)
+        texto = ANSI_OTHER.sub("", texto)
+
+        with self._lock:
+            i = 0
+            n = len(texto)
+            while i < n:
+                if texto[i:i+2] == "\x1b[":
+                    m = ANSI_CSI.match(texto, i)
+                    if m:
+                        args, cmd = m.group(1), m.group(2)
+                        if cmd == "K":
+                            self.atual = ""
+                        elif cmd == "A":
+                            count = int(args) if args.isdigit() else 1
+                            for _ in range(count):
+                                if self.linhas:
+                                    self.atual = self.linhas.pop()
+                        elif cmd == "D":
+                            count = int(args) if args.isdigit() else 1
+                            self.atual = self.atual[:-count]
+                        elif cmd == "G":
+                            self.atual = ""
+                        i = m.end()
+                        continue
+                ch = texto[i]
+                if ch == "\r":
+                    self.atual = ""
+                elif ch == "\n":
+                    self.linhas.append(self.atual)
+                    self.atual = ""
+                elif ch == "\b":
+                    self.atual = self.atual[:-1]
+                else:
+                    self.atual += ch
+                i += 1
+
+    def get_text(self) -> str:
+        with self._lock:
+            res = self.linhas + ([self.atual] if self.atual else [])
+            return "\n".join(res)
+
+
+def definir_tamanho_pty(fd, linhas=40, colunas=100):
+    try:
+        ws = struct.pack("HHHH", linhas, colunas, 0, 0)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, ws)
+    except Exception:
+        pass
+
+
 CSS = """
-.chat-window {
+window.background, .chat-window, .chat-bg, .chat-scroll {
   background-color: @window_bg_color;
-}
-.chat-scroll {
-  background-color: transparent;
 }
 .msg-user {
   background-color: @accent_bg_color;
   color: @accent_fg_color;
-  border-radius: 16px 16px 4px 16px;
-  padding: 10px 14px;
-  margin-left: 72px;
+  border-radius: 18px 18px 4px 18px;
+  padding: 10px 16px;
+  margin-left: 80px;
+  box-shadow: 0 1px 3px alpha(#000, 0.12);
 }
 .msg-user label {
   color: @accent_fg_color;
+  font-size: 14px;
+  line-height: 1.4;
 }
 .msg-assistant {
   background-color: alpha(@window_fg_color, 0.05);
   border: 1px solid alpha(@window_fg_color, 0.10);
-  border-radius: 16px 16px 16px 4px;
-  padding: 12px 14px;
-  margin-right: 72px;
+  border-radius: 18px 18px 18px 4px;
+  padding: 14px 18px;
+  margin-right: 64px;
 }
 .msg-assistant-header {
   font-size: 13px;
-  font-weight: 600;
-  opacity: 0.85;
-  margin-bottom: 6px;
+  font-weight: 700;
+  opacity: 0.9;
+}
+.msg-body {
+  background-color: transparent;
+  font-size: 14px;
+  line-height: 1.45;
 }
 .msg-handover {
-  background-color: alpha(@warning_color, 0.14);
-  border: 1px solid alpha(@warning_color, 0.35);
+  background-color: alpha(@warning_color, 0.15);
+  border: 1px solid alpha(@warning_color, 0.40);
   color: @warning_color;
   border-radius: 20px;
-  padding: 8px 18px;
-  margin: 12px 0;
+  padding: 8px 20px;
+  margin: 10px 0;
   font-weight: 600;
   font-size: 13px;
 }
 .chat-input-card {
-  background-color: alpha(@window_fg_color, 0.04);
-  border: 1px solid alpha(@window_fg_color, 0.12);
-  border-radius: 14px;
-  padding: 6px 10px;
+  background-color: alpha(@window_fg_color, 0.05);
+  border: 1px solid alpha(@window_fg_color, 0.14);
+  border-radius: 24px;
+  padding: 4px 8px 4px 10px;
 }
 .chat-input-card:focus-within {
   border-color: @accent_bg_color;
-}
-.code-box {
-  background-color: alpha(@window_fg_color, 0.08);
-  border: 1px solid alpha(@window_fg_color, 0.10);
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin: 4px 0;
-  font-family: monospace;
+  box-shadow: 0 0 0 1px @accent_bg_color;
 }
 .btn-copiar {
   font-size: 12px;
-  padding: 2px 8px;
-  min-height: 26px;
+  padding: 3px 10px;
+  min-height: 28px;
+  margin-top: 4px;
 }
 .dir-pill {
   font-size: 12px;
@@ -106,8 +182,10 @@ CSS = """
 class MainWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title=_t("Agentes de IA"))
-        self.set_default_size(840, 680)
+        self.set_default_size(860, 680)
         self.set_size_request(480, 500)
+        self.add_css_class("chat-window")
+        self.add_css_class("chat-bg")
 
         # Estado da sessão
         self.work_dir = HOME / "Work" if (HOME / "Work").is_dir() else HOME
@@ -117,10 +195,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.usados = set()
         self.anterior_passagem = None
         self.historico_tela = bytearray()
-        self.cauda_buffer = ""
         self.inicio_agente = 0.0
         self.ativo_assistente_view = None
         self.ativo_assistente_buf = None
+        self.ativo_cleaner = None
+        self.atualizacao_pendente = False
         self.ignorar_limite_ate = 0.0
 
         self._construir_ui()
@@ -129,6 +208,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _construir_ui(self):
         # Toolbar View
         toolbar_view = Adw.ToolbarView()
+        toolbar_view.add_css_class("chat-bg")
         self.set_content(toolbar_view)
 
         # Header Bar
@@ -167,11 +247,11 @@ class MainWindow(Adw.ApplicationWindow):
         self.scroller.set_hexpand(True)
         self.scroller.add_css_class("chat-scroll")
 
-        self.box_mensagens = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
-        self.box_mensagens.set_margin_start(16)
-        self.box_mensagens.set_margin_end(16)
-        self.box_mensagens.set_margin_top(16)
-        self.box_mensagens.set_margin_bottom(16)
+        self.box_mensagens = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        self.box_mensagens.set_margin_start(20)
+        self.box_mensagens.set_margin_end(20)
+        self.box_mensagens.set_margin_top(20)
+        self.box_mensagens.set_margin_bottom(20)
         self.scroller.set_child(self.box_mensagens)
 
         # Banner de Boas-Vindas
@@ -186,9 +266,9 @@ class MainWindow(Adw.ApplicationWindow):
 
         # Barra Inferior de Entrada
         box_inferior = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        box_inferior.set_margin_start(16)
-        box_inferior.set_margin_end(16)
-        box_inferior.set_margin_bottom(12)
+        box_inferior.set_margin_start(20)
+        box_inferior.set_margin_end(20)
+        box_inferior.set_margin_bottom(16)
         box_inferior.set_margin_top(6)
 
         # Card de Entrada
@@ -198,32 +278,55 @@ class MainWindow(Adw.ApplicationWindow):
         scroll_txt = Gtk.ScrolledWindow()
         scroll_txt.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroll_txt.set_propagate_natural_height(True)
-        scroll_txt.set_max_content_height(140)
+        scroll_txt.set_min_content_height(36)
+        scroll_txt.set_max_content_height(130)
         scroll_txt.set_hexpand(True)
+        scroll_txt.set_valign(Gtk.Align.CENTER)
 
         self.text_input = Gtk.TextView()
         self.text_input.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
         self.text_input.set_accepts_tab(False)
+        self.text_input.set_top_margin(6)
+        self.text_input.set_bottom_margin(6)
+        self.text_input.set_left_margin(8)
+        self.text_input.set_right_margin(8)
         self.text_input_buf = self.text_input.get_buffer()
         scroll_txt.set_child(self.text_input)
-        card_input.append(scroll_txt)
 
-        # Botão Enviar
-        self.btn_enviar = Gtk.Button(icon_name="mail-send-symbolic")
-        self.btn_enviar.add_css_class("suggested-action")
-        self.btn_enviar.set_valign(Gtk.Align.END)
-        self.btn_enviar.set_tooltip_text(_t("Enviar (Enter)"))
-        self.btn_enviar.connect("clicked", lambda _: self._on_enviar())
-        card_input.append(self.btn_enviar)
+        # Placeholder com Overlay
+        overlay_input = Gtk.Overlay()
+        overlay_input.set_hexpand(True)
+        overlay_input.set_child(scroll_txt)
+
+        self.lbl_placeholder = Gtk.Label(label=_t("Escreva uma mensagem ou comando... (Enter envia, Shift+Enter quebra)"))
+        self.lbl_placeholder.set_halign(Gtk.Align.START)
+        self.lbl_placeholder.set_valign(Gtk.Align.CENTER)
+        self.lbl_placeholder.set_margin_start(12)
+        self.lbl_placeholder.add_css_class("dim-label")
+        self.lbl_placeholder.set_can_target(False)
+        overlay_input.add_overlay(self.lbl_placeholder)
+
+        self.text_input_buf.connect("changed", self._on_input_text_changed)
+        card_input.append(overlay_input)
 
         # Botão Interromper
         self.btn_parar = Gtk.Button(icon_name="process-stop-symbolic")
         self.btn_parar.add_css_class("destructive-action")
+        self.btn_parar.add_css_class("circular")
         self.btn_parar.set_valign(Gtk.Align.END)
         self.btn_parar.set_visible(False)
         self.btn_parar.set_tooltip_text(_t("Interromper"))
         self.btn_parar.connect("clicked", lambda _: self._interromper())
         card_input.append(self.btn_parar)
+
+        # Botão Enviar
+        self.btn_enviar = Gtk.Button(icon_name="mail-send-symbolic")
+        self.btn_enviar.add_css_class("suggested-action")
+        self.btn_enviar.add_css_class("circular")
+        self.btn_enviar.set_valign(Gtk.Align.END)
+        self.btn_enviar.set_tooltip_text(_t("Enviar (Enter)"))
+        self.btn_enviar.connect("clicked", lambda _: self._on_enviar())
+        card_input.append(self.btn_enviar)
 
         box_inferior.append(card_input)
 
@@ -301,6 +404,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.usados.clear()
         self.anterior_passagem = None
         self.agente_atual = None
+        self.ativo_assistente_view = None
+        self.ativo_assistente_buf = None
+        self.ativo_cleaner = None
 
     def _on_key_pressed(self, _controller, keyval, _keycode, state):
         if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
@@ -359,8 +465,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.usados.add(agente)
         self.inicio_agente = time.time()
         self.historico_tela.clear()
-        self.cauda_buffer = ""
         self.ignorar_limite_ate = time.time() + 2.0
+        self.ativo_cleaner = TerminalCleaner()
 
         # Cria a bolha de resposta do agente
         self._adicionar_bolha_assistente(agente)
@@ -376,12 +482,15 @@ class MainWindow(Adw.ApplicationWindow):
 
         # PTY
         mestre, escravo = pty.openpty()
+        definir_tamanho_pty(escravo, 40, 100)
         self.mestre_fd = mestre
 
         env = dict(os.environ)
         env["AGENTES_ATUAL"] = agente
         env["PYTHONUNBUFFERED"] = "1"
         env["TERM"] = "xterm-256color"
+        env["COLUMNS"] = "100"
+        env["LINES"] = "40"
 
         try:
             self.proc = subprocess.Popen(
@@ -406,9 +515,10 @@ class MainWindow(Adw.ApplicationWindow):
         threading.Thread(target=self._loop_leitura, args=(mestre, agente, pedido, cfg), daemon=True).start()
 
     def _loop_leitura(self, mestre, agente, pedido, cfg):
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
         while self.proc and self.proc.poll() is None:
             try:
-                r, _, _ = select.select([mestre], [], [], 0.2)
+                r, _, _ = select.select([mestre], [], [], 0.15)
             except (InterruptedError, ValueError):
                 break
             if mestre in r:
@@ -423,16 +533,18 @@ class MainWindow(Adw.ApplicationWindow):
                 if len(self.historico_tela) > 400000:
                     del self.historico_tela[:100000]
 
-                texto_limpo = M.limpar_ansi(dados.decode("utf-8", "replace"))
-                if texto_limpo:
-                    GLib.idle_add(self._anexar_texto_assistente, texto_limpo)
+                texto = decoder.decode(dados)
+                if self.ativo_cleaner:
+                    self.ativo_cleaner.feed(texto)
+                    self._agendar_atualizacao_texto()
 
                 # Detecção de limite de uso
                 if cfg.get("trocaAutomatica", True) and time.time() >= self.ignorar_limite_ate:
-                    self.cauda_buffer = (self.cauda_buffer + texto_limpo)[-600:]
-                    if M.detectar_limite(self.cauda_buffer):
-                        GLib.idle_add(self._executar_troca_transparente, agente, cfg)
-                        return
+                    if self.ativo_cleaner:
+                        texto_recente = self.ativo_cleaner.get_text()[-1200:]
+                        if M.detectar_limite(texto_recente):
+                            GLib.idle_add(self._executar_troca_transparente, agente, cfg)
+                            return
 
         try:
             os.close(mestre)
@@ -440,6 +552,17 @@ class MainWindow(Adw.ApplicationWindow):
             pass
 
         GLib.idle_add(self._finalizar_resposta)
+
+    def _agendar_atualizacao_texto(self):
+        if not self.atualizacao_pendente:
+            self.atualizacao_pendente = True
+            GLib.idle_add(self._aplicar_atualizacao_texto)
+
+    def _aplicar_atualizacao_texto(self):
+        self.atualizacao_pendente = False
+        if self.ativo_assistente_buf and self.ativo_cleaner:
+            self.ativo_assistente_buf.set_text(self.ativo_cleaner.get_text())
+            self._scroll_para_fim()
 
     def _executar_troca_transparente(self, agente_antigo, cfg):
         M.encerrar(self.proc.pid)
@@ -499,6 +622,9 @@ class MainWindow(Adw.ApplicationWindow):
         self._finalizar_resposta()
 
     def _finalizar_resposta(self):
+        if self.ativo_assistente_buf and self.ativo_cleaner:
+            self.ativo_assistente_buf.set_text(self.ativo_cleaner.get_text())
+            self._scroll_para_fim()
         self.btn_parar.set_visible(False)
         self.btn_enviar.set_visible(True)
         self.text_input.grab_focus()
@@ -522,13 +648,10 @@ class MainWindow(Adw.ApplicationWindow):
     def _adicionar_bolha_assistente(self, agente):
         nome = M.AGENTES.get(agente, {}).get("nome", agente)
 
-        box_linha = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        box_linha.set_halign(Gtk.Align.START)
-        box_linha.set_hexpand(True)
-
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         card.add_css_class("msg-assistant")
         card.set_hexpand(True)
+        card.set_margin_end(64)
 
         # Cabeçalho da mensagem
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -553,7 +676,8 @@ class MainWindow(Adw.ApplicationWindow):
         tv.set_editable(False)
         tv.set_cursor_visible(False)
         tv.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        tv.add_css_class("body")
+        tv.set_hexpand(True)
+        tv.add_css_class("msg-body")
         tv_buf = tv.get_buffer()
 
         card.append(tv)
@@ -566,8 +690,7 @@ class MainWindow(Adw.ApplicationWindow):
         btn_copiar.connect("clicked", lambda b: self._copiar_buffer(tv_buf, b))
         card.append(btn_copiar)
 
-        box_linha.append(card)
-        self.box_mensagens.append(box_linha)
+        self.box_mensagens.append(card)
 
         self.ativo_assistente_view = tv
         self.ativo_assistente_buf = tv_buf
@@ -606,12 +729,6 @@ class MainWindow(Adw.ApplicationWindow):
         box_linha.append(card)
         self.box_mensagens.append(box_linha)
         self._scroll_para_fim()
-
-    def _anexar_texto_assistente(self, texto):
-        if self.ativo_assistente_buf:
-            end = self.ativo_assistente_buf.get_end_iter()
-            self.ativo_assistente_buf.insert(end, texto)
-            self._scroll_para_fim()
 
     def _copiar_buffer(self, buf, btn):
         start, end = buf.get_bounds()

@@ -69,6 +69,58 @@ LIMITE = re.compile(r"\b(limit|limits|quota|limite|cota|rate.?limit(ed)?)\b", re
 ACABOU = re.compile(r"(\breset|\bresets\b|\bupgrade\b|try again|exceeded|\breached\b|exhausted|esgot|atingid)", re.I)
 PARCIAL = re.compile(r"(used|usou|utilizou)\s+\d{1,2}(\.\d+)?\s*%|approaching|perto do limite|\b\d{1,2}% (of|do|da)\b", re.I)
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>78]|\r")
+ANSI_CSI = re.compile(r"\x1b\[([0-9;?]*)(\??[a-zA-Z])")
+ANSI_OSC = re.compile(r"\x1b\][^\x07\x1b]*(\x07|\x1b\\)")
+ANSI_OTHER = re.compile(r"\x1b[()][0-9A-B]|\x1b[=>78]")
+
+
+class TerminalCleaner:
+    """Interpreta códigos de controle de terminal (ANSI/VT100) para manter o texto limpo.
+
+    Remove sequências de cores e cursor, interpreta retornos de carro (\\r),
+    limpeza de linha (\\x1b[2K / \\x1b[K) e cursor up (\\x1b[1A) para que spinners
+    e barras de progresso não poluam a saída de texto.
+    """
+
+    def __init__(self):
+        self.linhas = []
+        self.atual = ""
+
+    def feed(self, texto):
+        texto = ANSI_OSC.sub("", texto)
+        texto = ANSI_OTHER.sub("", texto)
+        i = 0
+        n = len(texto)
+        while i < n:
+            if texto[i:i+2] == "\x1b[":
+                m = ANSI_CSI.match(texto, i)
+                if m:
+                    args, cmd = m.group(1), m.group(2)
+                    if cmd in ("K", "2K"):
+                        self.atual = ""
+                    elif cmd == "A":
+                        count = int(args) if args.isdigit() else 1
+                        for _ in range(count):
+                            if self.linhas:
+                                self.atual = self.linhas.pop()
+                    elif cmd == "J" and args in ("2", "3"):
+                        self.linhas.clear()
+                        self.atual = ""
+                    i = m.end()
+                    continue
+            ch = texto[i]
+            if ch == "\r":
+                self.atual = ""
+            elif ch == "\n":
+                self.linhas.append(self.atual)
+                self.atual = ""
+            else:
+                self.atual += ch
+            i += 1
+
+    def get_text(self):
+        res = self.linhas + ([self.atual] if self.atual else [])
+        return "\n".join(res)
 
 
 def _achar(a):
@@ -262,12 +314,12 @@ def transcricao_codex(cwd, desde):
 
 
 def tela_limpa(buf):
-    if isinstance(buf, str):
-        t = ANSI.sub("", buf)
-    else:
-        t = ANSI.sub("", buf.decode("utf-8", "replace"))
+    if not isinstance(buf, str):
+        buf = buf.decode("utf-8", "replace")
+    tc = TerminalCleaner()
+    tc.feed(buf)
     out, ant = [], None
-    for l in t.splitlines():
+    for l in tc.get_text().splitlines():
         l = l.rstrip()
         if l and l != ant:
             out.append(l)
@@ -276,7 +328,9 @@ def tela_limpa(buf):
 
 
 def limpar_ansi(s):
-    return ANSI.sub("", s)
+    tc = TerminalCleaner()
+    tc.feed(s)
+    return tc.get_text()
 
 
 def passagem(agente, cwd, desde, tela, anterior=None):

@@ -2,8 +2,8 @@
 Operation = Install
 Operation = Upgrade
 Type = Package
-Target = simba-settings
-Target = simba-settings-dev
+Target = simba
+Target = simba-apps
 
 [Action]
 Description = Reloading Hyprland after Simba settings update...

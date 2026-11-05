@@ -139,7 +139,6 @@
  "Alinhar ícones à grade": "Align icons to grid",
  "Alterar papel de parede…": "Change wallpaper…",
  "Alto-falantes, fones, HDMI": "Speakers, headphones, HDMI",
- "Altura da barra (ou largura, na lateral)": "Bar height (or width, when on the side)",
  "Além dos fixados, mostra todo app com janela aberta": "Besides pinned ones, shows every app with an open window",
  "Amarelo": "Yellow",
  "Anexar num e-mail": "Attach to an email",
@@ -369,7 +368,6 @@
  "Como no Windows 11: arraste ícones para a seta para escondê-los, e de dentro dela para fora para mostrar de novo.": "Like Windows 11: drag icons onto the arrow to hide them, and from inside it back out to show them again.",
  "Como trazer tudo de volta depois de reinstalar o sistema.": "How to bring everything back after reinstalling the system.",
  "Compacta": "Compact",
- "Compacta, normal, confortável ou grande": "Compact, normal, comfortable or large",
  "Compactado em %1": "Compressed into %1",
  "Compactando…": "Compressing…",
  "Compactar as pastas pessoais": "Compress the personal folders",
@@ -1761,7 +1759,6 @@
  "backup categorias historico wallpaper papel de parede configuracoes programas pacotes": "backup categories history wallpaper settings programs packages",
  "backup criptografado: defina a senha com `conta senha <senha>`": "encrypted backup: set the password with `conta senha <password>`",
  "bandeja: ativar, desativar, recolher, ocultar, mostrar, app-ocultar, app-mostrar": "tray: ativar, desativar, recolher, ocultar, mostrar, app-ocultar, app-mostrar",
- "barra altura tamanho grossura grande pequena": "bar height size thickness large small",
  "barra de tarefas taskbar dock apps fixar fixados programas icones": "taskbar dock apps pin pinned programs icons",
  "barra posicao topo base lateral": "bar position top bottom side",
  "barra topo esconder mostrar painel waybar": "top bar hide show panel waybar",
@@ -2067,5 +2064,8 @@
  "Transparência da barra ajustada": "Bar transparency adjusted",
  "Transparência da barra": "Bar transparency",
  "Quanto do papel de parede aparece atrás da barra": "How much of the wallpaper shows behind the bar",
- "barra transparencia transparente fundo opacidade nivel": "bar transparency transparent background opacity level"
+ "barra transparencia transparente fundo opacidade nivel": "bar transparency transparent background opacity level",
+ "Altura da barra (ou largura, na lateral) · padrão 26 px": "Bar height (or width, on the side) · default 26 px",
+ "Altura da barra de 22 a 60 px": "Bar height from 22 to 60 px",
+ "barra altura tamanho grossura grande pequena aumentar diminuir": "bar height size thickness large small increase decrease"
 }

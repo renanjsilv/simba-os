@@ -362,7 +362,7 @@ def estado(cfg):
     _, _, be = achar_id(cfg, (BANDEJA,))
     extra = {"bandeja": {"ativa": be is not None, "apps": (be or {}).get("apps", []),
                          "ocultos": [eid(x) for x in (be or {}).get("ocultos", [])]},
-             "areas": estilo_areas(cfg), "tamanho": tamanho_atual(), "centroOculto": centro_oculto(cfg)}
+             "areas": estilo_areas(cfg), "tamanho": tamanho_atual(), "altura": altura_atual(), "centroOculto": centro_oculto(cfg)}
     cs, _, ce = achar_id(cfg, ("simba.clock",))
     extra["relogio"] = {"secao": cs or "", "formato": (ce or {}).get("format", "yyyy-MM-dd HH:mm"),
                         "partes": (ce or {}).get("partes")}
@@ -493,7 +493,7 @@ def main(a):
         gravar(cfg)
         return 0
     if cmd == "altura":
-        # altura livre em px (alça da barra): a barra e os ícones das tarefas
+        # altura livre em px (Configurações › Barra): a barra e os ícones das tarefas
         # crescem juntos, mantendo a proporção que a pessoa escolheu
         if not r:
             print(altura_atual())

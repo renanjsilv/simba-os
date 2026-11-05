@@ -509,9 +509,6 @@ Item {
     }
   }
 
-  // Borda interna da barra: arrastar ou − / + para mudar o tamanho (AlcaBarra.qml).
-  AlcaBarra { barra: root; janela: root.QsWindow.window }
-
   // ── menu do botão direito ────────────────────────────────────────────────
   PopupWindow {
     id: menu

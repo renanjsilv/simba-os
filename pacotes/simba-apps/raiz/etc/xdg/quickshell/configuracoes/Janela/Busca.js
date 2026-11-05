@@ -79,7 +79,7 @@ var itens = [
   ["barra", "barraBandeja", "Seta de ícones ocultos", "Bandeja estilo Windows 11", "seta bandeja ocultos esconder icones tray overflow windows"],
   ["barra", "barraItens", "Itens da barra", "Mostrar, ocultar e reordenar widgets", "widgets itens relogio bateria rede bluetooth audio bandeja tray clima"],
   ["barra", "relogioFormato", "Formato do relógio", "", "relogio hora data formato 24h"],
-  ["barra", "barraTamanho", "Tamanho da barra", "Compacta, normal, confortável ou grande", "barra altura tamanho grossura grande pequena"],
+  ["barra", "barraTamanho", "Tamanho da barra", "Altura da barra de 22 a 60 px", "barra altura tamanho grossura grande pequena aumentar diminuir"],
   ["barra", "areasEstilo", "Áreas de trabalho na barra", "Números, pontos, só ocupadas ou ocultar", "areas de trabalho workspaces 12345 numeros pontos ocultar esconder espacos"],
   ["barra", "tarefasIcones", "Estilo dos ícones da barra de tarefas", "Do tema (monocromáticos) ou coloridos", "icones tema monocromatico coloridos cor taskbar"],
   ["barra", "relogioHora", "Formato da hora", "24 ou 12 horas", "hora 12h 24h am pm relogio"],

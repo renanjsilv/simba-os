@@ -75,7 +75,16 @@ Pagina {
   readonly property bool monocromatico: !t || t.opcoes.estiloIcones !== "coloridos"
   readonly property string estiloAreas: t ? t.areas : "numeros"
   readonly property string tamanhoBarra: t ? t.tamanho : "normal"
-  readonly property int alturaBarra: ({ compacta: 22, normal: 26, confortavel: 32, grande: 38 })[tamanhoBarra] || 26
+  // altura em px (22–60); enquanto o controle é arrastado, a mini barra mostra a prévia
+  property int alturaArrasto: -1
+  readonly property int alturaBarra: alturaArrasto > 0 ? alturaArrasto : (t && t.altura ? t.altura : 26)
+  function nomeAltura(v) {
+    if (v <= 23) return I18n.t("Compacta")
+    if (v <= 28) return I18n.t("Normal")
+    if (v <= 35) return I18n.t("Confortável")
+    if (v <= 44) return I18n.t("Grande")
+    return I18n.t("Enorme")
+  }
 
   readonly property var todosNaBarra: b ? b.layout.left.concat(b.layout.center).concat(b.layout.right) : []
   readonly property var disponiveis: b ? b.catalogo.filter(function(c) { return pg.todosNaBarra.indexOf(c.id) < 0 && c.id !== "simba.workspaces" }) : []
@@ -395,12 +404,16 @@ Pagina {
     Linha {
       chave: "barraTamanho"; glifo: Icones.formatSize
       titulo: I18n.t("Tamanho da barra")
-      descricao: I18n.t("Altura da barra (ou largura, na lateral)")
-      Segmentado {
-        opcoes: [{ valor: "compacta", rotulo: I18n.t("Compacta") }, { valor: "normal", rotulo: I18n.t("Normal") },
-                 { valor: "confortavel", rotulo: I18n.t("Confortável") }, { valor: "grande", rotulo: I18n.t("Grande") }]
-        atual: pg.tamanhoBarra
-        onEscolhido: function(v) { pg.tarefas(["tamanho", v], I18n.t("Tamanho da barra ajustado")) }
+      descricao: I18n.t("Altura da barra (ou largura, na lateral) · padrão 26 px")
+      Deslizante {
+        width: 240; de: 22; ate: 60; passo: 2
+        valor: pg.t && pg.t.altura ? pg.t.altura : 26
+        formatar: function(v) { return Math.round(v) + " px · " + pg.nomeAltura(v) }
+        onMovido: function(v) { pg.alturaArrasto = Math.round(v) }
+        onSolto: function(v) {
+          pg.alturaArrasto = -1
+          pg.tarefas(["altura", String(Math.round(v))], I18n.t("Tamanho da barra ajustado"))
+        }
       }
     }
     Linha {

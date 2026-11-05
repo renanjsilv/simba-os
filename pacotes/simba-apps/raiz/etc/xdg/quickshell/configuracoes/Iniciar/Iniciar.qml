@@ -6,6 +6,7 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Comum
 import "../Janela/Busca.js" as BuscaConfig
+import "Equivalentes.js" as Equivalentes
 
 // Menu Iniciar (Super+Espaço e o botão Iniciar da barra), no estilo do Windows 11.
 //
@@ -148,6 +149,22 @@ Scope {
       else if (nome.indexOf(t) >= 0) p = 60
       else if (extra.indexOf(t) >= 0) p = 12
       if (p) out.push({ tipo: "app", id: e.id, titulo: e.name, sub: I18n.t("Aplicativo"), icone: iconeApp(e), pontos: p + ((uso[e.id] || {}).n || 0) * 0.5 })
+    }
+    // "word" → WordCraft, "excel" → GridCraft…: programas do Windows que não existem no Linux
+    // levam ao app que faz o mesmo papel (Equivalentes.js; vale o primeiro instalado)
+    var eq = Equivalentes.buscar(t)
+    for (var q0 = 0; q0 < eq.length; q0++) {
+      var alvo = null
+      for (var q1 = 0; q1 < eq[q0].ids.length && !alvo; q1++) {
+        var en = app(eq[q0].ids[q1])
+        if (en && !en.noDisplay) alvo = en
+      }
+      if (!alvo) continue
+      var subEq = I18n.t("Alternativa para ") + I18n.t(eq[q0].de)
+      var ptsEq = eq[q0].pontos + ((uso[alvo.id] || {}).n || 0) * 0.5
+      var ja = out.filter(function(x) { return x.tipo === "app" && x.id === alvo.id })[0]
+      if (ja) { if (ptsEq > ja.pontos) { ja.pontos = ptsEq; ja.sub = subEq } }
+      else out.push({ tipo: "app", id: alvo.id, titulo: alvo.name, sub: subEq, icone: iconeApp(alvo), pontos: ptsEq })
     }
     var cfg = BuscaConfig.buscar(texto, titulosPaginas, I18n.t).slice(0, 6)
     for (var c = 0; c < cfg.length; c++)

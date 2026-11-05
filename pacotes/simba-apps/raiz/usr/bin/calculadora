@@ -1,0 +1,3 @@
+#!/bin/bash
+# Calculadora do Simba OS (GTK4/libadwaita).
+exec /usr/bin/python3 /usr/share/simba-apps/calculadora/app.py "$@"

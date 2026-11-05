@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Calculator
+Name[pt_BR]=Calculadora
+GenericName=Calculator
+GenericName[pt_BR]=Calculadora
+Comment=Standard and scientific calculator with history and memory
+Comment[pt_BR]=Calculadora padrão e científica, com histórico e memória
+Exec=calculadora
+Icon=com.simba.Calculadora
+Terminal=false
+Categories=Utility;Calculator;
+Keywords=calculator;calc;math;scientific;percentage;
+Keywords[pt_BR]=calculadora;calc;conta;contas;matemática;científica;porcentagem;
+StartupNotify=true
+StartupWMClass=com.simba.Calculadora

@@ -29,13 +29,17 @@ guardar /usr/local/bin/simba-{craft-atualizar,idioma,loja,marca,sistema} /usr/lo
 guardar /etc/pacman.d/hooks/99-simba-limine.hook /etc/pacman.d/hooks/zz-simba-marca.hook
 UNIDADES=(simba-menu-volta.service simba-craft-atualizar.service simba-craft-atualizar.timer
           simba-flatpak-atualizar.service simba-flatpak-atualizar.timer)
-ATIVAS=()
+# quais estavam ativas fica anotado: se o script parar no meio, a próxima rodada religa
+ANOT=/var/lib/simba/migracao-unidades-ativas
 for u in "${UNIDADES[@]}"; do
   [[ -f /etc/systemd/system/$u ]] || continue
-  systemctl is-enabled "$u" >/dev/null 2>&1 && ATIVAS+=("$u")
+  systemctl is-enabled "$u" >/dev/null 2>&1 && echo "$u" | sudo tee -a "$ANOT" >/dev/null
   sudo systemctl disable "$u" >/dev/null 2>&1 || true
   guardar "/etc/systemd/system/$u"
 done
+# 1ª tentativa (antes desta anotação existir) desligou sem anotar: as que costumam ficar ligadas
+[[ -s $ANOT ]] || printf '%s\n' simba-menu-volta.service simba-craft-atualizar.timer simba-flatpak-atualizar.timer | sudo tee "$ANOT" >/dev/null
+mapfile -t ATIVAS < <(sort -u "$ANOT")
 guardar /etc/systemd/system/anydesk.service.d/hyprland-bridge.conf /etc/systemd/system/anydesk.service.d/simba-ordem.conf
 
 passo "4/6  Instalando os pacotes"
@@ -43,9 +47,12 @@ sudo pacman -U --noconfirm --needed \
   --overwrite /etc/mkinitcpio.conf.d/zz-tpm2-unlock.conf \
   --overwrite /etc/mkinitcpio.conf.d/simba_resume.conf \
   --overwrite /etc/sddm.conf.d/99-simba-login.conf \
+  --overwrite '/usr/share/backgrounds/simba/*' \
+  --overwrite /usr/share/simba/shell/plugins/agents/assets/agy.svg \
   $PKGS
 sudo systemctl daemon-reload
 for u in "${ATIVAS[@]}"; do sudo systemctl enable "$u" >/dev/null 2>&1 && echo "  reativado: $u"; done
+sudo rm -f "$ANOT"
 ok "instalados"
 
 passo "5/6  Seu usuário passa a usar os apps do sistema"

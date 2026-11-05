@@ -77,6 +77,11 @@ if [[ $VER != --ver ]]; then
   for n in "${ativos[@]}"; do systemctl --user enable "$n" >/dev/null 2>&1 && echo "  reativado: $n"; done
 fi
 
+echo "== Explorador como gerenciador de arquivos (\"mostrar na pasta\" dos apps)"
+# o do sistema é do Nautilus; o do usuário tem prioridade no D-Bus
+link "$HOME/.local/share/dbus-1/services/org.freedesktop.FileManager1.service" \
+     /usr/share/simba-apps/explorador/org.freedesktop.FileManager1.service
+
 echo "== módulos da barra e tela de bloqueio"
 link "$HOME/.config/simba/bar/modules" /usr/share/simba-apps/barra
 link "$HOME/.config/simba/plugins/renan.lock" /usr/share/simba-apps/bloqueio

@@ -6,7 +6,6 @@ codex
 copilot
 crush
 cursor-agent
-gemini
 grok
 opencode
 pi

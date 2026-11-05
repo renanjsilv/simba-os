@@ -10,6 +10,8 @@ continua o trabalho com o contexto (Configurações › Agentes de IA).
     agentes ativar <id> 0|1      liga/desliga um agente na lista
     agentes opcao <chave> <json> trocaAutomatica (bool), esperar (segundos)
     agentes entrar <id>          abre o login do agente num terminal
+    agentes instalar <id>        baixa e instala o agente (sem terminal; avisa ao terminar)
+    agentes remover <id>         desinstala o agente
 
 Como troca: o agente roda num pseudo-terminal; a saída passa direto para a tela e é
 vigiada. Ao aparecer o aviso de limite atingido ("usage limit reached", "quota
@@ -44,7 +46,7 @@ CONFIG = HOME / ".config/agentes/config.json"
 ESTADO = HOME / ".local/state/agentes"
 USO = HOME / ".local/state/simba/agents/usage"
 SIMBA_PADRAO = HOME / ".config/simba/defaults/agent"
-SIMBA_CONHECE = {"pi", "omp", "opencode", "claude", "codex", "grok", "gemini", "openclaw", "hermes", "copilot",
+SIMBA_CONHECE = {"pi", "omp", "opencode", "claude", "codex", "grok", "agy", "openclaw", "hermes", "copilot",
                    "crush", "cursor-agent", "muse"}
 
 # id → nome, comando (as mesmas opções que o simba-agent usa), como passar o pedido,
@@ -71,6 +73,24 @@ AGENTES = {
     "pi":       {"nome": "Pi", "cmd": ["pi"], "prompt": ["{p}"], "login": ["pi"], "conta": []},
 }
 
+# Como instalar cada um (Configurações › Agentes de IA › Instalar): pelo mise, com o valor
+# que vai em [tools] do ~/.config/mise/config.toml, ou pelo instalador oficial (Antigravity).
+INSTALAR = {
+    "claude": {"mise": '"latest"', "sobre": "Anthropic · conta Claude ou chave de API"},
+    "agy": {"script": "https://antigravity.google/cli/install.sh", "bin": HOME / ".local/bin/agy",
+            "sobre": "Google · conta Google"},
+    "codex": {"mise": '"latest"', "sobre": "OpenAI · conta ChatGPT"},
+    "copilot": {"mise": '"latest"', "sobre": "GitHub · conta GitHub com Copilot"},
+    "cursor-agent": {"mise": r"""{ version = "latest", bin_path = "bin", strip_components = 0, url = 'https://downloads.cursor.com/lab/{{ version }}/{{ os(macos="darwin") }}/{{ arch(x64="x64", arm64="arm64") }}/agent-cli-package.tar.gz', version_date_expr = 'map(versions, { [#, replace(#[:10], ".", "-")] })', version_list_url = "https://cursor.com/install", version_regex = 'downloads\.cursor\.com/lab/([0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9a-f]+)/', postinstall = 'mkdir -p "$MISE_TOOL_INSTALL_PATH/bin" && ln -sfn ../dist-package/cursor-agent "$MISE_TOOL_INSTALL_PATH/bin/cursor-agent"' }""",
+                     "sobre": "Cursor · conta Cursor"},
+    "grok": {"mise": """{ version = "latest", bin = "grok", url = 'https://storage.googleapis.com/grok-build-public-artifacts/cli/grok-{{ version }}-{{ os() }}-{{ arch(x64="x86_64", arm64="aarch64") }}', version_list_url = "https://x.ai/cli/stable" }""",
+             "sobre": "xAI · conta do Grok"},
+    "opencode": {"mise": '{ version = "latest", allow_builds = ["@opencode/cli"] }', "sobre": "Código aberto · vários provedores"},
+    "crush": {"mise": '"latest"', "sobre": "Charm · vários provedores"},
+    "pi": {"mise": '"latest"', "sobre": "Código aberto · vários provedores"},
+}
+MISE_CONFIG = HOME / ".config/mise/config.toml"
+
 # Aviso de limite: uma frase inequívoca, ou um termo de limite e um de "acabou/volta às…"
 # na mesma linha curta.
 FORTES = re.compile(r"(usage limit reached|you'?ve (hit|reached) your (usage |session |weekly )?limit|"
@@ -83,8 +103,14 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x
 
 
 # ── configuração ────────────────────────────────────────────────────────────
+def _achar(a):
+    """O comando do agente, mesmo antes de o PATH desta sessão ter os atalhos novos."""
+    cmd = AGENTES[a]["cmd"][0]
+    return shutil.which(cmd) or shutil.which(cmd, path=f"{HOME}/.local/share/mise/shims:{HOME}/.local/bin")
+
+
 def ler_config():
-    instalados = [a for a in AGENTES if shutil.which(AGENTES[a]["cmd"][0])]
+    instalados = [a for a in AGENTES if _achar(a)]
     # Sem configuração ainda: todos os instalados na lista, mas só os já logados ligados
     padrao = {"ordem": list(instalados), "inativos": [a for a in instalados if conectado(a) is not True],
               "trocaAutomatica": True, "esperar": 8}
@@ -108,7 +134,7 @@ def gravar_config(c):
     # o "agente padrão" do Simba (diagnóstico de travamentos etc.) acompanha o 1º da lista
     # (só agentes que o simba-default-agent conhece: o Antigravity, por exemplo, ele não aceita)
     lista = [a for a in c["ordem"] if a not in c["inativos"] and a in SIMBA_CONHECE
-             and shutil.which(AGENTES[a]["cmd"][0])]
+             and _achar(a)]
     if lista:
         SIMBA_PADRAO.parent.mkdir(parents=True, exist_ok=True)
         SIMBA_PADRAO.write_text(lista[0] + "\n")
@@ -520,16 +546,128 @@ def sessao(pedido):
 
 
 # ── comandos para a página de Configurações ─────────────────────────────────
+# ── instalar / remover ──────────────────────────────────────────────────────
+def _mise_linha(ferramenta, valor):
+    """Põe (ou troca) `ferramenta = valor` em [tools] do config.toml global do mise."""
+    linhas = MISE_CONFIG.read_text(encoding="utf-8").splitlines() if MISE_CONFIG.exists() else []
+    nova = f"{ferramenta} = {valor}"
+    secao, ini, fim, achou = None, None, None, False
+    for i, l in enumerate(linhas):
+        t = l.strip()
+        if t.startswith("["):
+            if secao == "[tools]" and fim is None:
+                fim = i
+            secao = t.replace(" ", "")
+            if secao == "[tools]":
+                ini = i
+            continue
+        if secao == "[tools]" and "=" in t and t.split("=", 1)[0].strip().strip('"') == ferramenta:
+            linhas[i], achou = nova, True
+    if not achou:
+        if ini is None:
+            linhas = ["[tools]", nova, ""] + linhas
+        else:
+            if fim is None:
+                fim = len(linhas)
+            while fim > ini + 1 and not linhas[fim - 1].strip():
+                fim -= 1
+            linhas.insert(fim, nova)
+    MISE_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    tmp = MISE_CONFIG.with_suffix(".toml.tmp")
+    tmp.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+    tmp.replace(MISE_CONFIG)
+
+
+def _avisar(titulo, texto, erro=False):
+    subprocess.run(["notify-send", "-a", _t("Agentes de IA"), "-i", "dialog-error" if erro else "emblem-ok-symbolic",
+                    titulo, texto], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _instalando(a):
+    """Instalação em andamento (a marca existe e o processo que a criou ainda roda)."""
+    marca = ESTADO / f"instalando-{a}"
+    try:
+        os.kill(int(marca.read_text()), 0)
+        return True
+    except (OSError, ValueError):
+        marca.unlink(missing_ok=True)
+        return False
+
+
+def instalar(a):
+    """Baixa e instala sem perguntar nada; o arquivo instalando-<id> mostra o progresso na página."""
+    info, nome = INSTALAR[a], AGENTES[a]["nome"]
+    ESTADO.mkdir(parents=True, exist_ok=True)
+    marca = ESTADO / f"instalando-{a}"
+    marca.write_text(str(os.getpid()))
+    log = ESTADO / f"instalar-{a}.log"
+    ok = False
+    try:
+        with open(log, "w") as saida:
+            if "mise" in info:
+                _mise_linha(a, info["mise"])
+                env = dict(os.environ, MISE_YES="1")
+                ok = subprocess.run(["mise", "install", a], stdout=saida, stderr=subprocess.STDOUT, env=env,
+                                    stdin=subprocess.DEVNULL).returncode == 0
+                subprocess.run(["mise", "reshim"], stdout=saida, stderr=subprocess.STDOUT)
+            else:
+                script = ESTADO / f"instalar-{a}.sh"
+                ok = subprocess.run(["curl", "-fsSL", "-o", str(script), info["script"]], stdout=saida,
+                                    stderr=subprocess.STDOUT).returncode == 0
+                ok = ok and subprocess.run(["bash", str(script)], stdout=saida, stderr=subprocess.STDOUT,
+                                           stdin=subprocess.DEVNULL).returncode == 0
+                script.unlink(missing_ok=True)
+                ok = ok and Path(info["bin"]).exists()
+        ok = ok and bool(_achar(a))
+    finally:
+        marca.unlink(missing_ok=True)
+    if ok:
+        c = ler_config()
+        if a not in c["ordem"]:
+            c["ordem"].append(a)
+        if a in c["inativos"]:
+            c["inativos"].remove(a)
+        gravar_config(c)
+        _avisar(_t("Agente instalado"), nome + " " + _t("está pronto. Clique em Entrar para conectar sua conta."))
+    else:
+        _avisar(_t("Não deu para instalar") + " " + nome, _t("Verifique a internet e tente de novo."), erro=True)
+    return 0 if ok else 1
+
+
+def remover(a):
+    info = INSTALAR[a]
+    if "mise" in info:
+        ok = subprocess.run(["mise", "unuse", "-g", a], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdin=subprocess.DEVNULL, env=dict(os.environ, MISE_YES="1")).returncode == 0
+        subprocess.run(["mise", "reshim"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        try:
+            Path(info["bin"]).unlink(missing_ok=True)
+            ok = True
+        except OSError:
+            ok = False
+    if ok:
+        c = ler_config()
+        if a in c["ordem"]:
+            c["ordem"].remove(a)
+        if a in c["inativos"]:
+            c["inativos"].remove(a)
+        gravar_config(c)
+    return 0 if ok else 1
+
+
 def estado():
     c = ler_config()
     out = []
     for a in c["ordem"] + [x for x in AGENTES if x not in c["ordem"]]:
         if a not in AGENTES:
             continue
-        inst = bool(shutil.which(AGENTES[a]["cmd"][0]))
+        inst = bool(_achar(a))
         ate = esgotado_ate(a) if inst else None
         icone = f"/usr/share/simba/shell/plugins/agents/assets/{a}.svg"
         out.append({"id": a, "nome": AGENTES[a]["nome"], "instalado": inst, "conectado": conectado(a) if inst else False,
+                    "instalavel": a in INSTALAR, "sobre": _t(INSTALAR.get(a, {}).get("sobre", "")),
+                    "instalando": _instalando(a),
                     "ativo": a not in c["inativos"] and a in c["ordem"], "uso": uso(a), "esgotadoAte": ate,
                     "esgotadoTexto": hora(ate) if ate else "", "icone": icone if os.path.exists(icone) else ""})
     return {"agentes": out, "trocaAutomatica": c["trocaAutomatica"], "esperar": c["esperar"]}
@@ -563,6 +701,10 @@ def main():
     elif a[0] == "opcao" and len(a) == 3:
         c[a[1]] = json.loads(a[2])
         gravar_config(c)
+    elif a[0] == "instalar" and len(a) == 2 and a[1] in INSTALAR:
+        return instalar(a[1])
+    elif a[0] == "remover" and len(a) == 2 and a[1] in INSTALAR:
+        return remover(a[1])
     elif a[0] == "entrar" and len(a) == 2 and a[1] in AGENTES:
         login = " ".join(AGENTES[a[1]]["login"])
         nome = AGENTES[a[1]]["nome"]

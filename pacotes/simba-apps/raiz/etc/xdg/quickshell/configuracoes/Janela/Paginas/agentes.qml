@@ -14,8 +14,27 @@ Pagina {
   readonly property string bin: "/usr/bin/agentes"
   property var s: null
   readonly property var instalados: s ? s.agentes.filter(function(a) { return a.instalado }) : []
+  readonly property var disponiveis: s ? s.agentes.filter(function(a) { return !a.instalado && a.instalavel }) : []
+  readonly property bool instalandoAlgum: s ? s.agentes.some(function(a) { return a.instalando }) : false
+  property var instalandoLocal: ({})
 
-  function atualizar() { Sistema.json([bin, "estado"], function(v) { if (v) pg.s = v }) }
+  function atualizar() {
+    Sistema.json([bin, "estado"], function(v) {
+      if (v) {
+        pg.s = v
+        var m = Object.assign({}, pg.instalandoLocal)
+        var mudou = false
+        for (var i = 0; i < v.agentes.length; i++) {
+          var ag = v.agentes[i]
+          if (m[ag.id] && (ag.instalado || !ag.instalando)) {
+            delete m[ag.id]
+            mudou = true
+          }
+        }
+        if (mudou) pg.instalandoLocal = m
+      }
+    })
+  }
   function rodar(args) { Sistema.rodar([bin].concat(args), function() { pg.atualizar() }) }
   function mover(id, d) {
     var ids = instalados.map(function(a) { return a.id })
@@ -34,9 +53,21 @@ Pagina {
     if (a.conectado === null) p.push(I18n.t("Login não verificável — ligue só se já entrou nele"))
     return p.length ? p.join(" · ") : I18n.t("Conectado")
   }
+  function instalar(id) {
+    var m = Object.assign({}, pg.instalandoLocal)
+    m[id] = true
+    pg.instalandoLocal = m
+    Sistema.solto([pg.bin, "instalar", id])
+    pg.atualizar()
+  }
 
   Component.onCompleted: atualizar()
-  Timer { interval: 5000; running: true; repeat: true; onTriggered: pg.atualizar() }
+  Timer {
+    interval: (pg.instalandoAlgum || Object.keys(pg.instalandoLocal).length > 0) ? 1500 : 5000
+    running: true
+    repeat: true
+    onTriggered: pg.atualizar()
+  }
 
   Cartao {
     Linha {
@@ -66,6 +97,40 @@ Pagina {
         Interruptor {
           ligado: lin.modelData.ativo
           onAlternado: function(x) { pg.rodar(["ativar", lin.modelData.id, x ? "1" : "0"]) }
+        }
+        Botao {
+          compacto: true
+          tipo: "fantasma"
+          glifo: Icones.deleteOutline
+          visible: lin.modelData.instalavel
+          onClicado: pg.rodar(["remover", lin.modelData.id])
+        }
+      }
+    }
+  }
+
+  Secao {
+    visible: pg.disponiveis.length > 0
+    titulo: I18n.t("Instalar outros agentes")
+    detalhe: I18n.t("Baixe com um clique, sem precisar de comandos no terminal.")
+  }
+  Cartao {
+    visible: pg.disponiveis.length > 0
+    Repeater {
+      model: pg.disponiveis
+      delegate: Linha {
+        id: dispLin
+        required property var modelData
+        readonly property bool emAndamento: dispLin.modelData.instalando || !!pg.instalandoLocal[dispLin.modelData.id]
+        glifo: Icones.robot
+        titulo: dispLin.modelData.nome
+        descricao: dispLin.modelData.sobre || I18n.t("Disponível para instalar")
+        Botao {
+          texto: dispLin.emAndamento ? I18n.t("Instalando…") : I18n.t("Instalar")
+          tipo: "primario"
+          ocupado: dispLin.emAndamento
+          habilitado: !dispLin.emAndamento
+          onClicado: pg.instalar(dispLin.modelData.id)
         }
       }
     }

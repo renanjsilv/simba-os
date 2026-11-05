@@ -22,7 +22,7 @@ var G = {
 // Primeira regra que casar com "id|classe|nome" (minúsculas) vence:
 // específicas antes das genéricas.
 var REGRAS = [
-  [/org\.simba\.agent|claude|chatgpt|gemini|copilot|hermes|openclaw|\bai\b/, "robo"],
+  [/org\.simba\.agent|claude|chatgpt|antigravity|agy|copilot|hermes|openclaw|\bai\b/, "robo"],
   [/org\.simba\.|foot|alacritty|ghostty|kitty|wezterm|konsole|terminal/, "terminal"],
   [/whatsapp/, "whatsapp"], [/spotify|spotifast/, "spotify"], [/steam/, "steam"],
   [/discord|vesktop|webcord/, "discord"], [/youtube/, "youtube"],

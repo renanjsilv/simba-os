@@ -5,7 +5,6 @@ mise settings set upgrade.auto_prune false
 simba-mise-install codex
 simba-mise-install claude
 simba-mise-install crush
-simba-mise-install gemini
 simba-mise-install gh
 simba-mise-install copilot
 simba-mise-install opencode

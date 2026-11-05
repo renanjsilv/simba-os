@@ -36,6 +36,8 @@ node_modules
 # Claude Code: vai o do mise (o Draco usa ele); a instalação nativa duplicada fica fora
 .local/share/claude
 .local/bin/claude
+# Antigravity CLI: baixado pelo usuário em Configurações › Agentes de IA com 1 clique
+.local/bin/agy
 # Draco: vai o que ele precisa para funcionar sem baixar nada (venv, modelo de ativação
 # treinado, voz padrão em português e em inglês); o resto ele baixa se precisar
 .local/share/draco/wake-train

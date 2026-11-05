@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # simba:summary=Set and launch the default coding agent
-# simba:args=[pi|omp|opencode|claude|codex|grok|gemini|openclaw|hermes|copilot|crush|cursor-agent|muse]
+# simba:args=[pi|omp|opencode|claude|codex|grok|agy|openclaw|hermes|copilot|crush|cursor-agent|muse]
 # simba:examples=simba default agent | simba default agent codex | simba default agent claude
 
 installing=false
@@ -31,7 +31,7 @@ claude | claude-code) agent="claude"; name="Claude Code" ;;
 codex) agent="codex"; name="Codex" ;;
 crush) agent="crush"; name="Crush" ;;
 grok) agent="grok"; name="Grok"; agent_package="npm:@xai-official/grok" ;;
-gemini | gemini-cli) agent="gemini"; name="Gemini" ;;
+agy | antigravity) agent="agy"; name="Antigravity"; agent_installer="simba-install-antigravity" ;;
 openclaw) agent="openclaw"; name="OpenClaw"; agent_installer="simba-install-openclaw-cli" ;;
 hermes) agent="hermes"; name="Hermes"; agent_installer="simba-install-hermes-cli" ;;
 copilot | github-copilot) agent="copilot"; name="GitHub Copilot" ;;
@@ -42,7 +42,7 @@ muse | muse-code | musecode)
   ;;
 cursor | cursor-agent) agent="cursor-agent"; name="Cursor CLI" ;;
 *)
-  echo "Usage: simba-default-agent <pi|omp|opencode|claude|codex|grok|gemini|openclaw|hermes|copilot|crush|cursor-agent|muse>"
+  echo "Usage: simba-default-agent <pi|omp|opencode|claude|codex|grok|agy|openclaw|hermes|copilot|crush|cursor-agent|muse>"
   exit 1
   ;;
 esac
@@ -59,8 +59,12 @@ if [[ -n ${agent_installer:-} ]]; then
   # install behind it finished or runs the sessions simba-agent starts.
   # Treating it as installed would skip the floating terminal and run a
   # minutes-long install inside the menu action instead.
-  agent_present() { "$agent_installer" --check; }
-  agent_install() { "$agent_installer" --now; }
+  agent_present() {
+    [[ -x $HOME/.local/bin/$agent ]] || { command -v "$agent_installer" >/dev/null && "$agent_installer" --check; }
+  }
+  agent_install() {
+    [[ -x $HOME/.local/bin/$agent ]] || "$agent_installer" --now
+  }
 else
   # Anything at the wrapper's path other than the wrapper is the user's own
   # install, such as the symlink Cursor's installer leaves. A mise copy would

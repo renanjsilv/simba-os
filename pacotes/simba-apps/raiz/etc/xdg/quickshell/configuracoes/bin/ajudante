@@ -172,7 +172,7 @@ padroes() {
   t=$(simba-default-terminal 2>/dev/null)
   e=$(simba-default-editor 2>/dev/null)
   a=$(simba-default-agent 2>/dev/null)
-  present() { command -v "$1" >/dev/null 2>&1 && echo true || echo false; }
+  present() { (command -v "$1" >/dev/null 2>&1 || [[ -x "$HOME/.local/bin/$1" ]]) && echo true || echo false; }
   jq -n -c --arg b "$b" --arg t "$t" --arg e "$e" --arg a "$a" \
     --argjson chromium "$(present chromium)" --argjson chrome "$(present google-chrome-stable)" --argjson brave "$(present brave)" \
     --argjson braveo "$(present brave-origin)" --argjson edge "$(present microsoft-edge-stable)" --argjson firefox "$(present firefox)" \
@@ -180,7 +180,7 @@ padroes() {
     --argjson alacritty "$(present alacritty)" --argjson foot "$(present foot)" --argjson ghostty "$(present ghostty)" --argjson kitty "$(present kitty)" \
     --argjson nvim "$(present nvim)" --argjson code "$(present code)" --argjson cursor "$(present cursor)" --argjson zed "$(present zeditor)" \
     --argjson subl "$(present sublime_text)" --argjson helix "$(present helix)" --argjson vim "$(present vim)" --argjson emacs "$(present emacs)" \
-    --argjson claude "$(present claude)" --argjson codex "$(present codex)" --argjson gemini "$(present gemini)" --argjson opencode "$(present opencode)" \
+    --argjson claude "$(present claude)" --argjson codex "$(present codex)" --argjson agy "$(present agy)" --argjson opencode "$(present opencode)" \
     --argjson copilot "$(present copilot)" --argjson crush "$(present crush)" --argjson grok "$(present grok)" --argjson pi "$(present pi)" \
     --argjson omp "$(present omp)" --argjson muse "$(present muse)" --argjson cagent "$(present cursor-agent)" '{
     navegador: { atual: $b, opcoes: ([
@@ -198,7 +198,7 @@ padroes() {
       {valor:"vim", rotulo:"Vim", ok:$vim}, {valor:"emacs", rotulo:"Emacs", ok:$emacs}
     ] | map(select(.ok))) },
     agente: { atual: $a, opcoes: ([
-      {valor:"claude", rotulo:"Claude Code", ok:$claude}, {valor:"codex", rotulo:"Codex", ok:$codex}, {valor:"gemini", rotulo:"Gemini", ok:$gemini},
+      {valor:"claude", rotulo:"Claude Code", ok:$claude}, {valor:"codex", rotulo:"Codex", ok:$codex}, {valor:"agy", rotulo:"Antigravity", ok:$agy},
       {valor:"opencode", rotulo:"OpenCode", ok:$opencode}, {valor:"copilot", rotulo:"Copilot", ok:$copilot}, {valor:"crush", rotulo:"Crush", ok:$crush},
       {valor:"grok", rotulo:"Grok", ok:$grok}, {valor:"pi", rotulo:"Pi", ok:$pi}, {valor:"omp", rotulo:"omp", ok:$omp},
       {valor:"muse", rotulo:"Muse Code", ok:$muse}, {valor:"cursor-agent", rotulo:"Cursor CLI", ok:$cagent}

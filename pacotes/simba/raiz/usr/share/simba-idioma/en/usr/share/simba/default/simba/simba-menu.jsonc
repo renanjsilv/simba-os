@@ -133,7 +133,7 @@
   "setup.default.agent.copilot": {"icon":"","label":"Copilot","checked":"[[ \"$(simba-default-agent)\" == \"copilot\" ]]","action":"simba-default-agent copilot"},
   "setup.default.agent.crush": {"icon":"󰋑","label":"Crush","checked":"[[ \"$(simba-default-agent)\" == \"crush\" ]]","action":"simba-default-agent crush"},
   "setup.default.agent.cursor-agent": {"icon":"","iconFont":"simba","label":"Cursor CLI","checked":"[[ \"$(simba-default-agent)\" == \"cursor-agent\" ]]","action":"simba-default-agent cursor-agent"},
-  "setup.default.agent.gemini": {"icon":"󰫢","label":"Gemini","checked":"[[ \"$(simba-default-agent)\" == \"gemini\" ]]","action":"simba-default-agent gemini"},
+  "setup.default.agent.agy": {"icon":"󰫢","label":"Antigravity","checked":"[[ \"$(simba-default-agent)\" == \"agy\" ]]","action":"simba-default-agent agy"},
   "setup.default.agent.grok": {"icon":"","iconFont":"simba","label":"Grok","checked":"[[ \"$(simba-default-agent)\" == \"grok\" ]]","action":"simba-default-agent grok"},
   "setup.default.agent.hermes": {"icon":"","iconFont":"simba","label":"Hermes","checked":"[[ \"$(simba-default-agent)\" == \"hermes\" ]]","action":"simba-default-agent hermes"},
   "setup.default.agent.muse": {"icon":"󰛤","label":"Muse Code","checked":"[[ \"$(simba-default-agent)\" == \"muse\" ]]","action":"simba-default-agent muse"},

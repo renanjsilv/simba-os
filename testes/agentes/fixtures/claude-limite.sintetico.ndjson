@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"/tmp/x","session_id":"11111111-2222-3333-4444-555555555555","model":"claude-sonnet-5-5"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1794160200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":1.0,"resetsAt":1794160200,"status":"rejected"},"seven_day":{"utilization":0.62,"resetsAt":1794733200,"status":"allowed"}}}}
+{"type":"assistant","message":{"model":"<synthetic>","role":"assistant","content":[{"type":"text","text":"You've hit your session limit · resets 3pm"}]},"session_id":"11111111-2222-3333-4444-555555555555","error":"rate_limit"}
+{"type":"result","subtype":"success","is_error":true,"result":"You've hit your session limit · resets 3pm","session_id":"11111111-2222-3333-4444-555555555555","total_cost_usd":0,"usage":{"input_tokens":0,"output_tokens":0}}

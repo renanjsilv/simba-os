@@ -22,49 +22,323 @@ CONFIG = HOME / ".config/agentes/config.json"
 ESTADO = HOME / ".local/state/agentes"
 USO = HOME / ".local/state/simba/agents/usage"
 SIMBA_PADRAO = HOME / ".config/simba/defaults/agent"
+USO_ID = {"cursor-agent": "cursor"}  # nome do arquivo de uso quando difere do id
 SIMBA_CONHECE = {"pi", "omp", "opencode", "claude", "codex", "grok", "agy", "openclaw", "hermes", "copilot",
                  "crush", "cursor-agent", "muse"}
 
+# Campos de cada agente:
+#   cmd         comando base (modo livre: o agente edita e executa sem perguntar)
+#   cmdSeguro   comando base no modo somente leitura (sem ele, o agente fica de fora)
+#   prompt      argumentos do primeiro pedido ({p} = pedido)
+#   retomar     argumentos para continuar UMA sessão específica ({s} = id da sessão);
+#               o id vem do próprio stream (session_id / sessionID / thread_id)
+#   continue    reserva para quem não informa o id: continua a sessão mais recente
+#   modelo      rótulo exibido quando nenhum modelo foi escolhido
 AGENTES = {
-    "agy":      {"nome": "Antigravity", "modelo": "Google AI Pro",
+    "agy":      {"nome": "Antigravity", "modelo": "Google",
                  "cmd": ["agy", "--dangerously-skip-permissions"],
+                 "cmdSeguro": ["agy", "--mode", "plan"],
                  "prompt": ["-p", "{p}", "--output-format", "stream-json"],
                  "continue": ["--continue", "-p", "{p}", "--output-format", "stream-json"],
                  "login": ["agy"], "conta": [], "verifica": ["agy", "models"], "env": "GEMINI_API_KEY"},
-    "claude":   {"nome": "Claude Code", "modelo": "Claude 3.5 Sonnet",
+    "claude":   {"nome": "Claude Code", "modelo": "Anthropic",
                  "cmd": ["claude", "--permission-mode", "auto"],
-                 "prompt": ["-p", "{p}", "--output-format", "stream-json", "--verbose"],
-                 "continue": ["--continue", "-p", "{p}", "--output-format", "stream-json", "--verbose"],
+                 # modo print + "default": o que precisaria de aprovação é negado
+                 "cmdSeguro": ["claude", "--permission-mode", "default"],
+                 "prompt": ["-p", "{p}", "--output-format", "stream-json", "--verbose",
+                            "--include-partial-messages"],
+                 "retomar": ["--resume", "{s}", "-p", "{p}", "--output-format", "stream-json", "--verbose",
+                             "--include-partial-messages"],
+                 "continue": ["--continue", "-p", "{p}", "--output-format", "stream-json", "--verbose",
+                              "--include-partial-messages"],
                  "login": ["claude", "auth", "login"], "conta": [".claude/.credentials.json"]},
-    "codex":    {"nome": "Codex", "modelo": "OpenAI o3-mini",
-                 "cmd": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"],
-                 "prompt": ["{p}"], "continue": ["resume", "--last", "{p}"],
+    "codex":    {"nome": "Codex", "modelo": "OpenAI",
+                 "cmd": ["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check",
+                         "--json"],
+                 "cmdSeguro": ["codex", "exec", "--sandbox", "read-only", "--skip-git-repo-check", "--json"],
+                 "prompt": ["{p}"], "retomar": ["resume", "{s}", "{p}"], "continue": ["resume", "--last", "{p}"],
                  "login": ["codex", "login"], "conta": [".codex/auth.json"]},
     "opencode": {"nome": "OpenCode", "modelo": "Open Source",
-                 "cmd": ["opencode", "run"],
-                 "prompt": ["{p}"], "continue": ["-c", "{p}"],
-                 "login": ["opencode", "auth", "login"], "conta": [".local/share/opencode/auth.json"]},
-    "copilot":  {"nome": "GitHub Copilot", "modelo": "Copilot",
+                 # --format json evita que a transcrição da interface (spinners,
+                 # leituras de arquivo, comandos) se misture à resposta no chat.
+                 "cmd": ["opencode", "run", "--format", "json"],
+                 # agente "plan" do OpenCode: não edita arquivos
+                 "cmdSeguro": ["opencode", "run", "--format", "json", "--agent", "plan"],
+                 "prompt": ["{p}"], "retomar": ["-s", "{s}", "{p}"], "continue": ["-c", "{p}"],
+                 "login": ["opencode", "auth", "login"], "conta": [".local/share/opencode/auth.json"],
+                 # OpenCode 2 guarda a conta no banco (opencode.db), não em auth.json; a lista
+                 # de credenciais abaixo é a fonte oficial (auth.json fica só como reserva)
+                 "verifica": ["opencode", "auth", "list", "--format", "json"], "verificaJson": "connections"},
+    "copilot":  {"nome": "GitHub Copilot", "modelo": "GitHub",
                  "cmd": ["copilot", "--allow-all"],
+                 # sem --allow-all, o modo -p nega as ferramentas que pediriam aprovação
+                 "cmdSeguro": ["copilot"],
                  "prompt": ["-p", "{p}"], "continue": ["--continue", "-p", "{p}"],
                  "login": ["copilot"], "conta": [".copilot/config.json"]},
-    "cursor-agent": {"nome": "Cursor", "modelo": "Cursor Agent",
+    "cursor-agent": {"nome": "Cursor", "modelo": "Cursor",
                      "cmd": ["cursor-agent", "--yolo", "--trust"],
+                     # sem --force/--yolo, comandos não são executados no modo print
+                     "cmdSeguro": ["cursor-agent", "--trust"],
                      "prompt": ["agent", "-p", "{p}"], "continue": ["agent", "-p", "{p}"],
                      "login": ["cursor-agent", "login"], "conta": [".cursor/cli-config.json"]},
-    "grok":     {"nome": "Grok", "modelo": "xAI Grok",
+    "grok":     {"nome": "Grok", "modelo": "xAI",
                  "cmd": ["grok", "--permission-mode", "bypassPermissions"],
                  "prompt": ["--", "{p}"], "continue": ["--", "{p}"],
-                 "login": ["grok"], "conta": []},
-    "crush":    {"nome": "Crush", "modelo": "Charm AI",
+                 "login": ["grok"], "conta": [".grok/auth.json"],
+                 # `grok models` sempre sai com 0; o texto é que diz se entrou ("You are not authenticated.")
+                 "verifica": ["grok", "models"], "verificaSaida": r"\byou are logged in\b",
+                 "verificaSaidaNegada": r"\bnot (authenticated|logged in)\b|\bsign in\b"},
+    "crush":    {"nome": "Crush", "modelo": "Charm",
                  "cmd": ["crush", "run"],
                  "prompt": ["{p}"], "continue": ["{p}"],
                  "login": ["crush"], "conta": []},
-    "pi":       {"nome": "Pi", "modelo": "Pi AI",
+    "pi":       {"nome": "Pi", "modelo": "Pi",
                  "cmd": ["pi"],
                  "prompt": ["--", "{p}"], "continue": ["--", "{p}"],
                  "login": ["pi"], "conta": []},
 }
+
+
+def suporta_seguro(a):
+    return bool(AGENTES.get(a, {}).get("cmdSeguro"))
+
+
+def montar_comando(a, pedido, cfg, sessao=None, continuar=False, seguro=False):
+    """Linha de comando completa de um pedido em modo print.
+
+    Com `sessao`, retoma exatamente aquela sessão; `continuar` (sem id) só é usado
+    por agentes que não informam o id da sessão.
+    """
+    info = AGENTES[a]
+    base = info.get("cmdSeguro") if seguro else info["cmd"]
+    cmd = aplicar_modelo(a, list(base), modelo_escolhido(a, cfg))
+    if sessao and info.get("retomar"):
+        modelo = info["retomar"]
+    elif continuar and info.get("continue"):
+        modelo = info["continue"]
+    else:
+        modelo = info.get("prompt")
+    if modelo:
+        cmd += [x.replace("{p}", pedido).replace("{s}", sessao or "") for x in modelo]
+    elif pedido:
+        cmd.append(pedido)
+    return cmd
+
+
+# ── modelos de cada agente ──────────────────────────────────────────────────
+# Cada CLI escolhe o modelo de um jeito. Onde a CLI sabe listar, a lista é
+# consultada uma vez e guardada em ~/.local/state/agentes/modelos.json (24 h).
+# Assim a página de Configurações abre rápido e continua mostrando a última
+# lista conhecida mesmo sem internet.
+MODELO_FLAG = {
+    "claude": ["--model", "{m}"],
+    "codex": ["-m", "{m}"],
+    "agy": ["--model", "{m}"],
+    "opencode": ["--model", "{m}"],
+    "copilot": ["--model", "{m}"],
+    "cursor-agent": ["--model", "{m}"],
+    "grok": ["-m", "{m}"],
+    "crush": ["-m", "{m}"],
+    "pi": ["--model", "{m}"],
+}
+# No modo interativo (TUI), estes CLIs aceitam a flag de modelo. OpenCode e
+# Crush escolhem no próprio aplicativo; o chat gráfico usa o modo print deles.
+MODELO_INTERATIVO = {"claude", "codex", "agy", "copilot", "cursor-agent", "grok", "pi"}
+MODELO_COMANDO = {
+    "agy": ["agy", "models"],
+    "opencode": ["opencode", "models"],
+    "grok": ["grok", "models"],
+    "crush": ["crush", "models"],
+    "cursor-agent": ["cursor-agent", "models"],
+    "pi": ["pi", "--list-models"],
+    "copilot": ["copilot", "help", "config"],
+}
+MODELOS_ESTATICOS = {
+    "claude": ["fable", "opus", "sonnet", "haiku",
+               "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
+               "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-5",
+               "claude-sonnet-4-5", "claude-haiku-4-5"],
+    "codex": ["gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.4", "gpt-5.4-mini",
+              "gpt-5.5", "gpt-5.5-pro", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+              "gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"],
+    "agy": ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low",
+            "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"],
+    "opencode": ["opencode/claude-sonnet-5-5", "opencode/claude-opus-5-5",
+                 "opencode/gpt-5.5", "opencode/gpt-5.3-codex", "opencode/gemini-3.1-pro",
+                 "opencode/grok-4.7", "opencode/kimi-k3", "opencode/deepseek-v4.1-flash-free"],
+    "copilot": ["auto", "claude-sonnet-5.5", "claude-opus-5.5", "claude-haiku-5.5",
+                "gpt-6.1-sol", "gpt-6-luna", "gpt-5.3-codex", "gemini-4-argon",
+                "grok-4.7", "kimi-k3"],
+    "cursor-agent": ["auto", "gpt-5", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5",
+                     "claude-opus-4-8", "claude-opus-4-6", "claude-sonnet-4-6",
+                     "gemini-3.1-pro", "gemini-3.8-flash", "grok-4.7"],
+    "grok": ["grok-4.7"],
+    "crush": [],
+    "pi": ["anthropic/claude-sonnet-5-5", "anthropic/claude-opus-5-5",
+           "openai/gpt-5.5", "openai/gpt-5.3-codex", "google/gemini-3.1-pro",
+           "xai/grok-4.7"],
+}
+CACHE_MODELOS = ESTADO / "modelos.json"
+
+
+def _opcao_modelo(valor, rotulo=""):
+    valor = str(valor).strip()
+    if not rotulo and "/" in valor:
+        provedor, _, nome = valor.partition("/")
+        return {"valor": valor, "rotulo": nome or valor, "detalhe": provedor}
+    return {"valor": valor, "rotulo": rotulo or valor, "detalhe": ""}
+
+
+def _unicos(opcoes):
+    vistos, saida = set(), []
+    for o in opcoes:
+        valor = str((o or {}).get("valor", "")).strip()
+        if not valor or valor in vistos:
+            continue
+        vistos.add(valor)
+        if not o.get("rotulo"):
+            o = _opcao_modelo(valor)
+        saida.append(o)
+    return saida
+
+
+def _parsear_modelos(a, texto):
+    """Transforma a saída textual de cada CLI em opções do seletor."""
+    out = []
+    if a == "copilot":
+        dentro = False
+        for linha in texto.splitlines():
+            if re.match(r"\s*`model`\s*:", linha):
+                dentro = True
+                continue
+            if dentro and re.match(r"\s*`[A-Za-z]", linha) and not linha.lstrip().startswith("-"):
+                break
+            if dentro:
+                m = re.match(r'\s*-\s*"([^"]+)"', linha)
+                if m:
+                    out.append(_opcao_modelo(m.group(1)))
+        return _unicos(out)
+    if a == "agy":
+        for linha in texto.splitlines():
+            if "\t" not in linha:
+                continue
+            valor, _, rotulo = linha.partition("\t")
+            valor, rotulo = valor.strip(), rotulo.strip()
+            if not valor or valor.startswith(("Fetching", "Error", "You are")):
+                continue
+            out.append({"valor": valor, "rotulo": rotulo or valor, "detalhe": ""})
+        return _unicos(out)
+    if a in ("opencode", "crush"):
+        for linha in texto.splitlines():
+            valor = linha.strip()
+            if "/" in valor and not valor.startswith(("Error", "Warning", "Use ", "See ")):
+                out.append(_opcao_modelo(valor))
+        return _unicos(out)
+    if a == "grok":
+        for linha in texto.splitlines():
+            s = linha.strip()
+            if s.startswith("*"):
+                s = s[1:].strip()
+            elif not s or s.startswith(("You are", "Default model", "Available models")):
+                continue
+            s = re.sub(r"\s*\(default\)\s*$", "", s, flags=re.I)
+            m = re.match(r"([A-Za-z0-9][\w./:-]*)", s)
+            if m and not m.group(1).lower().startswith(("error", "you", "http")):
+                out.append(_opcao_modelo(m.group(1)))
+        return _unicos(out)
+    # Cursor e Pi imprimem tabelas/listas; o primeiro token de cada linha útil serve.
+    for linha in texto.splitlines():
+        s = linha.strip().lstrip("*-• ").strip()
+        if not s or s.startswith(("Error", "Available", "Loading", "No models", "Use ", "See ", "Model")):
+            continue
+        m = re.match(r"([A-Za-z0-9][\w./:\-\[\]=,]*)", s)
+        if m:
+            out.append(_opcao_modelo(m.group(1)))
+    return _unicos(out)
+
+
+def _consultar_modelos(a):
+    cmd = MODELO_COMANDO.get(a)
+    if not cmd or not shutil.which(cmd[0]):
+        return []
+    try:
+        r = subprocess.run(cmd, cwd=HOME, stdin=subprocess.DEVNULL, capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    texto = (r.stdout or b"").decode("utf-8", "replace")
+    if not texto.strip():
+        texto = (r.stderr or b"").decode("utf-8", "replace")
+    return _parsear_modelos(a, texto)
+
+
+def _ler_cache_modelos():
+    try:
+        d = json.loads(CACHE_MODELOS.read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _gravar_cache_modelos(d):
+    try:
+        CACHE_MODELOS.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE_MODELOS.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d, ensure_ascii=False))
+        tmp.replace(CACHE_MODELOS)
+    except OSError:
+        pass
+
+
+def modelos_estaticos(a):
+    """Lista curta de reserva, para a página abrir na hora antes da consulta."""
+    return _unicos([_opcao_modelo(v) for v in MODELOS_ESTATICOS.get(a, [])])
+
+
+def modelos(a, atualizar=False):
+    """Opções de modelo do agente (cache em disco; consulta a CLI só se pedido)."""
+    cache = _ler_cache_modelos()
+    item = cache.get(a) if isinstance(cache.get(a), dict) else None
+    if item and item.get("opcoes"):
+        ttl = 3600 if item.get("falhou") else 86400
+        fresco = time.time() - float(item.get("quando", 0) or 0) < ttl
+        if not atualizar or fresco:
+            return item["opcoes"]
+    if atualizar:
+        lista = _consultar_modelos(a)
+        if lista:
+            cache[a] = {"quando": time.time(), "opcoes": lista}
+            _gravar_cache_modelos(cache)
+            return lista
+        opcoes = item["opcoes"] if item and item.get("opcoes") else modelos_estaticos(a)
+        cache[a] = {"quando": time.time(), "opcoes": opcoes, "falhou": True}
+        _gravar_cache_modelos(cache)
+        return opcoes
+    return modelos_estaticos(a)
+
+
+def modelos_todos(atualizar=True):
+    return {a: modelos(a, atualizar=atualizar) for a in AGENTES}
+
+
+def modelo_escolhido(a, cfg):
+    mods = cfg.get("modelos") if isinstance(cfg, dict) else None
+    if not isinstance(mods, dict):
+        return ""
+    valor = mods.get(a, "")
+    return valor.strip() if isinstance(valor, str) else ""
+
+
+def aplicar_modelo(a, cmd, modelo, interativo=False):
+    """Acrescenta a flag de modelo ao comando, quando o CLI aceita."""
+    if not modelo:
+        return cmd
+    if interativo and a not in MODELO_INTERATIVO:
+        return cmd
+    flag = MODELO_FLAG.get(a)
+    if not flag:
+        return cmd
+    return list(cmd) + [x.replace("{m}", modelo) for x in flag]
+
 
 INSTALAR = {
     "claude": {"mise": '"latest"', "sobre": "Anthropic · conta Claude ou chave de API"},
@@ -151,21 +425,35 @@ def _achar(a):
     return shutil.which(cmd) or shutil.which(cmd, path=f"{HOME}/.local/share/mise/shims:{HOME}/.local/bin")
 
 
-def ler_config():
+def ler_config(verificar=True):
     instalados = [a for a in AGENTES if _achar(a)]
-    padrao = {"ordem": list(instalados), "inativos": [a for a in instalados if conectado(a) is not True],
-              "trocaAutomatica": True, "esperar": 8}
+    existe = CONFIG.exists()
     try:
         c = json.loads(CONFIG.read_text())
+        if not isinstance(c, dict):
+            c = {}
     except (OSError, ValueError):
         c = {}
-    padrao.update(c)
+    # Configuração já existente: a lista e os inativos são a fonte da verdade.
+    # Não consulta o login de cada agente (subprocessos de até 20 s) toda vez
+    # que a interface abre ou troca um modelo — era o que travava a janela.
+    if not existe or not c:
+        c["ordem"] = list(instalados)
+        c["inativos"] = [a for a in instalados if verificar and conectado(a) is not True]
+    else:
+        c.setdefault("ordem", list(instalados))
+        c.setdefault("inativos", [])
+    c.setdefault("trocaAutomatica", True)
+    c.setdefault("esperar", 8)
+    c.setdefault("modelos", {})
+    c.setdefault("seguro", False)
+    # agentes instalados depois entram no fim da lista, desligados até você ligar
     for a in instalados:
-        if a not in padrao["ordem"]:
-            padrao["ordem"].append(a)
-            if conectado(a) is not True and a not in padrao["inativos"]:
-                padrao["inativos"].append(a)
-    return padrao
+        if a not in c["ordem"]:
+            c["ordem"].append(a)
+            if a not in c["inativos"]:
+                c["inativos"].append(a)
+    return c
 
 
 def gravar_config(c):
@@ -177,7 +465,38 @@ def gravar_config(c):
         SIMBA_PADRAO.write_text(lista[0] + "\n")
 
 
-def conectado(a):
+def _verificar(a, info):
+    """True/False para "conta conectada"; None quando não deu para concluir.
+
+    Além do código de saída (padrão), aceita checar o texto (`verificaSaida`) ou um
+    campo do JSON impresso (`verificaJson`), porque alguns CLIs saem com 0 mesmo
+    quando não há login.
+    """
+    try:
+        r = subprocess.run(info["verifica"], cwd=HOME, stdin=subprocess.DEVNULL, capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    saida = (r.stdout or b"").decode("utf-8", "replace")
+    if info.get("verificaJson"):
+        texto = saida.strip()
+        corte = min([i for i in (texto.find("["), texto.find("{")) if i >= 0] or [-1])
+        try:
+            dados = json.loads(texto[corte:]) if corte >= 0 else None
+        except ValueError:
+            return None
+        if isinstance(dados, list):
+            return any(isinstance(x, dict) and bool(x.get(info["verificaJson"])) for x in dados)
+        return bool(dados.get(info["verificaJson"])) if isinstance(dados, dict) else None
+    if info.get("verificaSaida"):
+        if re.search(info["verificaSaida"], saida, re.I):
+            return True
+        if info.get("verificaSaidaNegada") and re.search(info["verificaSaidaNegada"], saida, re.I):
+            return False
+        return None
+    return r.returncode == 0
+
+
+def conectado(a, verificar=True):
     info = AGENTES[a]
     if info.get("env") and os.environ.get(info["env"]):
         return True
@@ -185,27 +504,47 @@ def conectado(a):
         marca = ESTADO / f"login-{a}"
         try:
             quando, ok = marca.read_text().split()
-            if time.time() - float(quando) < (600 if ok == "1" else 60):
+            # Cache longo: evita rodar a CLI de login a cada abertura/troca de modelo.
+            if time.time() - float(quando) < (86400 if ok == "1" else 300):
                 return ok == "1"
         except (OSError, ValueError):
             pass
-        try:
-            ok = subprocess.run(info["verifica"], cwd=HOME, stdin=subprocess.DEVNULL, capture_output=True,
-                                timeout=20).returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-        ESTADO.mkdir(parents=True, exist_ok=True)
-        marca.write_text(f"{time.time()} {int(ok)}")
-        return ok
+        if not verificar:
+            # Caminho rápido da interface: não executa a CLI agora.
+            if not info["conta"]:
+                return None
+            return any((HOME / f).exists() and (HOME / f).stat().st_size > 2 for f in info["conta"])
+        ok = _verificar(a, info)
+        if ok is not None:
+            ESTADO.mkdir(parents=True, exist_ok=True)
+            marca.write_text(f"{time.time()} {int(ok)}")
+            return ok
     if not info["conta"]:
         return None
     return any((HOME / f).exists() and (HOME / f).stat().st_size > 2 for f in info["conta"])
 
 
 def uso(a):
+    """Fração usada (0–1) das janelas de limite, lida do widget de agentes do Simba.
+
+    O widget grava `limits` [{label, percent, resetsAt}]; versões antigas usavam
+    `windows` [{label, usedPercent, resetsAt}]. Os dois formatos são aceitos.
+    """
     try:
-        d = json.loads((USO / f"{a}.json").read_text())
+        d = json.loads((USO / f"{USO_ID.get(a, a)}.json").read_text())
         out = {}
+        for w in d.get("limits") or []:
+            label, pct = str(w.get("label", "")).lower(), w.get("percent")
+            if pct is None:
+                continue
+            chave = "sessao" if ("session" in label or "5-hour" in label or "5h" in label) else \
+                    "semana" if ("week" in label or "7-day" in label or "7d" in label) else None
+            if chave and chave not in out:
+                out[chave] = float(pct)
+                if w.get("resetsAt"):
+                    out[f"{chave}Volta"] = w["resetsAt"]
+        if out:
+            return out
         for w in d.get("windows", []):
             label, pct = w.get("label", "").lower(), w.get("usedPercent")
             if pct is None:
@@ -262,9 +601,10 @@ def marcar_esgotado(a, ate_iso=None):
     f.write_text(json.dumps(marcas))
 
 
-def candidatos(c, pular=()):
-    return [a for a in c["ordem"] if a not in c["inativos"] and a not in pular
-            and _achar(a) and conectado(a) is not False]
+def candidatos(c, pular=(), verificar=True, seguro=False):
+    return [a for a in c["ordem"] if a in AGENTES and a not in c["inativos"] and a not in pular
+            and _achar(a) and (not seguro or suporta_seguro(a))
+            and (not verificar or conectado(a) is not False)]
 
 
 def hora(iso):
@@ -335,6 +675,94 @@ def transcricao_codex(cwd, desde):
     return linhas
 
 
+def transcricao_agy(cwd, desde):
+    brain = HOME / ".gemini/antigravity-cli/brain"
+    if not brain.exists():
+        return None
+    arqs = [p for p in brain.glob("*/.system_generated/logs/transcript.jsonl") if p.stat().st_mtime >= desde - 5]
+    if not arqs:
+        arqs = [p for p in brain.glob("*/transcript.jsonl") if p.stat().st_mtime >= desde - 5]
+    if not arqs:
+        return None
+    arq = max(arqs, key=lambda p: p.stat().st_mtime)
+    linhas = []
+    for l in arq.read_text(errors="replace").splitlines():
+        try:
+            e = json.loads(l)
+        except ValueError:
+            continue
+        tipo = e.get("type")
+        if tipo == "USER_INPUT":
+            cont = e.get("content", "")
+            if isinstance(cont, str):
+                m = re.search(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", cont, re.DOTALL)
+                txt = m.group(1).strip() if m else cont.strip()
+                if txt:
+                    linhas.append(f"**Usuário:** {txt}")
+        elif tipo == "PLANNER_RESPONSE":
+            txt = (e.get("content") or "").strip()
+            if txt:
+                linhas.append(f"**Agente:** {txt}")
+            for tc in e.get("tool_calls") or []:
+                nome_ferr = tc.get("name", "ferramenta")
+                args = tc.get("args") or {}
+                cmd = args.get("CommandLine") or args.get("Path") or args.get("query") or ""
+                linhas.append(f"- ferramenta `{nome_ferr}`: {_corta(str(cmd), 300)}")
+    return linhas or None
+
+
+def transcricao_opencode(cwd, desde):
+    db_path = HOME / ".local/share/opencode/opencode.db"
+    if not db_path.exists():
+        return None
+    try:
+        import sqlite3
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            cur = conn.cursor()
+            limite_ms = int((desde - 5) * 1000)
+            cur.execute(
+                "SELECT id FROM session_v2 WHERE time_created >= ? OR time_updated >= ? ORDER BY time_updated DESC LIMIT 1",
+                (limite_ms, limite_ms),
+            )
+            row = cur.fetchone()
+            if not row:
+                cur.execute("SELECT id FROM session_v2 ORDER BY time_updated DESC LIMIT 1")
+                row = cur.fetchone()
+            if not row:
+                return None
+            session_id = row[0]
+            cur.execute(
+                "SELECT type, data FROM session_message WHERE session_id = ? ORDER BY seq ASC",
+                (session_id,),
+            )
+            linhas = []
+            for m_type, m_data in cur.fetchall():
+                try:
+                    d = json.loads(m_data)
+                except ValueError:
+                    continue
+                if m_type == "user":
+                    txt = d.get("text", "").strip()
+                    if txt:
+                        linhas.append(f"**Usuário:** {txt}")
+                elif m_type == "assistant":
+                    conteudos = d.get("content") or []
+                    if isinstance(conteudos, list):
+                        for b in conteudos:
+                            if not isinstance(b, dict):
+                                continue
+                            if b.get("type") == "text" and b.get("text", "").strip():
+                                linhas.append(f"**Agente:** {b['text'].strip()}")
+                            elif b.get("type") == "tool_use":
+                                nome_ferr = b.get("name", "ferramenta")
+                                inp = b.get("input") or {}
+                                alvo = inp.get("command") or inp.get("path") or ""
+                                linhas.append(f"- ferramenta `{nome_ferr}`: {_corta(str(alvo), 300)}")
+            return linhas or None
+    except Exception:
+        return None
+
+
 def tela_limpa(buf):
     if not isinstance(buf, str):
         buf = buf.decode("utf-8", "replace")
@@ -355,6 +783,24 @@ def limpar_ansi(s):
     return tc.get_text()
 
 
+def _limpar_avisos_de_limite(linhas):
+    """Tira do contexto as mensagens de limite de uso.
+
+    O arquivo de passagem é lido pelo próximo agente; se ele contiver o aviso
+    "You've hit your weekly limit" do agente anterior, a detecção de limite
+    dispara de novo e troca de agente sem necessidade.
+    """
+    if not linhas:
+        return linhas
+    def aviso(l):
+        s = str(l)
+        return bool(FORTES.search(s)) or (
+            len(s.strip()) < 220 and LIMITE.search(s) and ACABOU.search(s)
+            and not PARCIAL.search(s)
+        )
+    return [l for l in linhas if not aviso(l)]
+
+
 def passagem(agente, cwd, desde, tela, anterior=None):
     ESTADO.mkdir(parents=True, exist_ok=True)
     linhas = None
@@ -363,12 +809,17 @@ def passagem(agente, cwd, desde, tela, anterior=None):
             linhas = transcricao_claude(cwd, desde)
         elif agente == "codex":
             linhas = transcricao_codex(cwd, desde)
+        elif agente == "agy":
+            linhas = transcricao_agy(cwd, desde)
+        elif agente == "opencode":
+            linhas = transcricao_opencode(cwd, desde)
     except Exception:  # noqa: BLE001
         linhas = None
     fonte = _t("transcrição da sessão")
     if not linhas:
         linhas = tela_limpa(tela)[-1500:]
         fonte = _t("texto que passou pelo terminal")
+    linhas = _limpar_avisos_de_limite(linhas)
     texto = "\n\n".join(linhas) if fonte.startswith("transcrição") else "```\n" + "\n".join(linhas) + "\n```"
     if len(texto) > 90000:
         texto = texto[:15000] + "\n\n[… parte do meio omitida …]\n\n" + texto[-70000:]

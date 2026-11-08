@@ -8,6 +8,8 @@ continua o trabalho com o contexto (Configurações › Agentes de IA).
     agentes estado               JSON para a página de Configurações
     agentes ordem <id>...        define a ordem
     agentes ativar <id> 0|1      liga/desliga um agente na lista
+    agentes modelo <id> <nome>   escolhe o modelo do agente ("" usa o padrão dele)
+    agentes modelos              JSON com os modelos disponíveis em cada agente
     agentes opcao <chave> <json> trocaAutomatica (bool), esperar (segundos)
     agentes entrar <id>          abre o login do agente num terminal
     agentes instalar <id>        baixa e instala o agente (sem terminal; avisa ao terminar)
@@ -41,6 +43,32 @@ import sys as _sys, os as _os  # noqa: E401
 _sys.path.insert(0, _os.path.expanduser("/usr/share/simba-apps/idiomas"))
 from simba_i18n import t as _t  # noqa: E402  (traduções: /usr/share/simba-apps/idiomas)
 
+# Catálogo/flag de modelos compartilhado com o chat gráfico. AGENTES_LIB permite
+# testar o código do repositório sem instalar (aponta para a pasta agentes/).
+_sys.path.insert(0, _os.environ.get("AGENTES_LIB", "/usr/share/simba-apps/agentes"))
+try:
+    import motor as _M  # noqa: E402
+except Exception:  # noqa: BLE001  (pacote antigo, sem o catálogo de modelos)
+    _M = None
+
+
+def _modelos(a, atualizar=False):
+    return _M.modelos(a, atualizar) if _M and hasattr(_M, "modelos") else []
+
+
+def _modelos_estaticos(a):
+    return _M.modelos_estaticos(a) if _M and hasattr(_M, "modelos_estaticos") else []
+
+
+def _modelo(a, cfg):
+    return _M.modelo_escolhido(a, cfg) if _M and hasattr(_M, "modelo_escolhido") else ""
+
+
+def _aplicar_modelo(a, cmd, modelo):
+    if _M and hasattr(_M, "aplicar_modelo"):
+        return _M.aplicar_modelo(a, cmd, modelo, interativo=True)
+    return cmd
+
 HOME = Path.home()
 CONFIG = HOME / ".config/agentes/config.json"
 ESTADO = HOME / ".local/state/agentes"
@@ -62,13 +90,19 @@ AGENTES = {
                  # o token não fica num arquivo conhecido: `agy models` falha ("Please sign in") sem login
                  "verifica": ["agy", "models"], "env": "GEMINI_API_KEY"},
     "opencode": {"nome": "OpenCode", "cmd": ["opencode", "--auto"], "prompt": ["--prompt", "{p}"],
-                 "login": ["opencode", "auth", "login"], "conta": [".local/share/opencode/auth.json"]},
+                 "login": ["opencode", "auth", "login"], "conta": [".local/share/opencode/auth.json"],
+                 # OpenCode 2 guarda a conta no banco (opencode.db), não em auth.json; a lista
+                 # de credenciais abaixo é a fonte oficial (auth.json fica só como reserva)
+                 "verifica": ["opencode", "auth", "list", "--format", "json"], "verificaJson": "connections"},
     "copilot":  {"nome": "GitHub Copilot", "cmd": ["copilot", "--allow-all"], "prompt": ["--interactive", "{p}"],
                  "login": ["copilot"], "conta": [".copilot/config.json"]},
     "cursor-agent": {"nome": "Cursor", "cmd": ["cursor-agent", "--yolo", "--trust"], "prompt": ["agent", "--", "{p}"],
                      "login": ["cursor-agent", "login"], "conta": [".cursor/cli-config.json"]},
     "grok":     {"nome": "Grok", "cmd": ["grok", "--permission-mode", "bypassPermissions"], "prompt": ["--", "{p}"],
-                 "login": ["grok"], "conta": []},
+                 "login": ["grok"], "conta": [".grok/auth.json"],
+                 # `grok models` sempre sai com 0; o texto é que diz se entrou ("You are not authenticated.")
+                 "verifica": ["grok", "models"], "verificaSaida": r"\byou are logged in\b",
+                 "verificaSaidaNegada": r"\bnot (authenticated|logged in)\b|\bsign in\b"},
     "crush":    {"nome": "Crush", "cmd": ["crush", "--yolo"], "prompt": None, "login": ["crush"], "conta": []},
     "pi":       {"nome": "Pi", "cmd": ["pi"], "prompt": ["{p}"], "login": ["pi"], "conta": []},
 }
@@ -109,23 +143,34 @@ def _achar(a):
     return shutil.which(cmd) or shutil.which(cmd, path=f"{HOME}/.local/share/mise/shims:{HOME}/.local/bin")
 
 
-def ler_config():
+def ler_config(verificar=True):
     instalados = [a for a in AGENTES if _achar(a)]
-    # Sem configuração ainda: todos os instalados na lista, mas só os já logados ligados
-    padrao = {"ordem": list(instalados), "inativos": [a for a in instalados if conectado(a) is not True],
-              "trocaAutomatica": True, "esperar": 8}
+    existe = CONFIG.exists()
     try:
         c = json.loads(CONFIG.read_text())
+        if not isinstance(c, dict):
+            c = {}
     except (OSError, ValueError):
         c = {}
-    padrao.update(c)
+    # Configuração já existente: a lista e os inativos são a fonte da verdade.
+    # Não consulta o login de cada agente (subprocessos de até 20 s) a cada
+    # execução — era o que atrasava o terminal e a página de Configurações.
+    if not existe or not c:
+        c["ordem"] = list(instalados)
+        c["inativos"] = [a for a in instalados if verificar and conectado(a) is not True]
+    else:
+        c.setdefault("ordem", list(instalados))
+        c.setdefault("inativos", [])
+    c.setdefault("trocaAutomatica", True)
+    c.setdefault("esperar", 8)
+    c.setdefault("modelos", {})
     # agentes instalados depois entram no fim da lista, desligados até você ligar
     for a in instalados:
-        if a not in padrao["ordem"]:
-            padrao["ordem"].append(a)
-            if conectado(a) is not True and a not in padrao["inativos"]:
-                padrao["inativos"].append(a)
-    return padrao
+        if a not in c["ordem"]:
+            c["ordem"].append(a)
+            if a not in c["inativos"]:
+                c["inativos"].append(a)
+    return c
 
 
 def gravar_config(c):
@@ -140,27 +185,60 @@ def gravar_config(c):
         SIMBA_PADRAO.write_text(lista[0] + "\n")
 
 
-def conectado(a):
+def _verificar(a, info):
+    """True/False para "conta conectada"; None quando não deu para concluir.
+
+    Além do código de saída (padrão), aceita checar o texto (`verificaSaida`) ou um
+    campo do JSON impresso (`verificaJson`), porque alguns CLIs saem com 0 mesmo
+    quando não há login.
+    """
+    try:
+        r = subprocess.run(info["verifica"], cwd=HOME, stdin=subprocess.DEVNULL, capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    saida = (r.stdout or b"").decode("utf-8", "replace")
+    if info.get("verificaJson"):
+        texto = saida.strip()
+        corte = min([i for i in (texto.find("["), texto.find("{")) if i >= 0] or [-1])
+        try:
+            dados = json.loads(texto[corte:]) if corte >= 0 else None
+        except ValueError:
+            return None
+        if isinstance(dados, list):
+            return any(isinstance(x, dict) and bool(x.get(info["verificaJson"])) for x in dados)
+        return bool(dados.get(info["verificaJson"])) if isinstance(dados, dict) else None
+    if info.get("verificaSaida"):
+        if re.search(info["verificaSaida"], saida, re.I):
+            return True
+        if info.get("verificaSaidaNegada") and re.search(info["verificaSaidaNegada"], saida, re.I):
+            return False
+        return None
+    return r.returncode == 0
+
+
+def conectado(a, verificar=True):
     info = AGENTES[a]
     if info.get("env") and os.environ.get(info["env"]):
         return True
     if info.get("verifica") and shutil.which(info["verifica"][0]):
-        # consulta a internet: guarda a resposta (10 min se logado, 1 min se não)
+        # consulta rápida (local): guarda a resposta (1 dia se logado, 5 min se não)
         marca = ESTADO / f"login-{a}"
         try:
             quando, ok = marca.read_text().split()
-            if time.time() - float(quando) < (600 if ok == "1" else 60):
+            if time.time() - float(quando) < (86400 if ok == "1" else 300):
                 return ok == "1"
         except (OSError, ValueError):
             pass
-        try:
-            ok = subprocess.run(info["verifica"], cwd=HOME, stdin=subprocess.DEVNULL, capture_output=True,
-                                timeout=20).returncode == 0
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-        ESTADO.mkdir(parents=True, exist_ok=True)
-        marca.write_text(f"{time.time()} {int(ok)}")
-        return ok
+        if not verificar:
+            # Caminho rápido: não executa a CLI agora.
+            if not info["conta"]:
+                return None
+            return any((HOME / f).exists() and (HOME / f).stat().st_size > 2 for f in info["conta"])
+        ok = _verificar(a, info)
+        if ok is not None:
+            ESTADO.mkdir(parents=True, exist_ok=True)
+            marca.write_text(f"{time.time()} {int(ok)}")
+            return ok
     if not info["conta"]:
         return None  # não dá para saber
     return any((HOME / f).exists() and (HOME / f).stat().st_size > 2 for f in info["conta"])
@@ -220,9 +298,10 @@ def marcar_esgotado(a):
     f.write_text(json.dumps(marcas))
 
 
-def candidatos(c, pular=()):
+def candidatos(c, pular=(), verificar=True):
     return [a for a in c["ordem"] if a in AGENTES and a not in c["inativos"] and a not in pular
-            and shutil.which(AGENTES[a]["cmd"][0]) and conectado(a) is not False]
+            and shutil.which(AGENTES[a]["cmd"][0])
+            and (not verificar or conectado(a) is not False)]
 
 
 def hora(iso):
@@ -294,6 +373,94 @@ def transcricao_codex(cwd, desde):
     return linhas
 
 
+def transcricao_agy(cwd, desde):
+    brain = HOME / ".gemini/antigravity-cli/brain"
+    if not brain.exists():
+        return None
+    arqs = [p for p in brain.glob("*/.system_generated/logs/transcript.jsonl") if p.stat().st_mtime >= desde - 5]
+    if not arqs:
+        arqs = [p for p in brain.glob("*/transcript.jsonl") if p.stat().st_mtime >= desde - 5]
+    if not arqs:
+        return None
+    arq = max(arqs, key=lambda p: p.stat().st_mtime)
+    linhas = []
+    for l in arq.read_text(errors="replace").splitlines():
+        try:
+            e = json.loads(l)
+        except ValueError:
+            continue
+        tipo = e.get("type")
+        if tipo == "USER_INPUT":
+            cont = e.get("content", "")
+            if isinstance(cont, str):
+                m = re.search(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", cont, re.DOTALL)
+                txt = m.group(1).strip() if m else cont.strip()
+                if txt:
+                    linhas.append(f"**Usuário:** {txt}")
+        elif tipo == "PLANNER_RESPONSE":
+            txt = (e.get("content") or "").strip()
+            if txt:
+                linhas.append(f"**Agente:** {txt}")
+            for tc in e.get("tool_calls") or []:
+                nome_ferr = tc.get("name", "ferramenta")
+                args = tc.get("args") or {}
+                cmd = args.get("CommandLine") or args.get("Path") or args.get("query") or ""
+                linhas.append(f"- ferramenta `{nome_ferr}`: {_corta(str(cmd), 300)}")
+    return linhas or None
+
+
+def transcricao_opencode(cwd, desde):
+    db_path = HOME / ".local/share/opencode/opencode.db"
+    if not db_path.exists():
+        return None
+    try:
+        import sqlite3
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            cur = conn.cursor()
+            limite_ms = int((desde - 5) * 1000)
+            cur.execute(
+                "SELECT id FROM session_v2 WHERE time_created >= ? OR time_updated >= ? ORDER BY time_updated DESC LIMIT 1",
+                (limite_ms, limite_ms),
+            )
+            row = cur.fetchone()
+            if not row:
+                cur.execute("SELECT id FROM session_v2 ORDER BY time_updated DESC LIMIT 1")
+                row = cur.fetchone()
+            if not row:
+                return None
+            session_id = row[0]
+            cur.execute(
+                "SELECT type, data FROM session_message WHERE session_id = ? ORDER BY seq ASC",
+                (session_id,),
+            )
+            linhas = []
+            for m_type, m_data in cur.fetchall():
+                try:
+                    d = json.loads(m_data)
+                except ValueError:
+                    continue
+                if m_type == "user":
+                    txt = d.get("text", "").strip()
+                    if txt:
+                        linhas.append(f"**Usuário:** {txt}")
+                elif m_type == "assistant":
+                    conteudos = d.get("content") or []
+                    if isinstance(conteudos, list):
+                        for b in conteudos:
+                            if not isinstance(b, dict):
+                                continue
+                            if b.get("type") == "text" and b.get("text", "").strip():
+                                linhas.append(f"**Agente:** {b['text'].strip()}")
+                            elif b.get("type") == "tool_use":
+                                nome_ferr = b.get("name", "ferramenta")
+                                inp = b.get("input") or {}
+                                alvo = inp.get("command") or inp.get("path") or ""
+                                linhas.append(f"- ferramenta `{nome_ferr}`: {_corta(str(alvo), 300)}")
+            return linhas or None
+    except Exception:
+        return None
+
+
 def tela_limpa(buf):
     """Texto do terminal sem códigos de cor/cursor, sem linhas repetidas seguidas."""
     t = ANSI.sub("", buf.decode("utf-8", "replace"))
@@ -306,6 +473,24 @@ def tela_limpa(buf):
     return out
 
 
+def _limpar_avisos_de_limite(linhas):
+    """Remove do contexto as mensagens de limite de uso.
+
+    O próximo agente lê o arquivo de passagem; se ele contiver o aviso
+    "You've hit your weekly limit" do agente anterior, a detecção de limite
+    dispara de novo e troca de agente sem necessidade.
+    """
+    if not linhas:
+        return linhas
+    def aviso(l):
+        s = str(l)
+        return bool(FORTES.search(s)) or (
+            len(s.strip()) < 220 and LIMITE.search(s) and ACABOU.search(s)
+            and not PARCIAL.search(s)
+        )
+    return [l for l in linhas if not aviso(l)]
+
+
 def passagem(agente, cwd, desde, tela, anterior=None):
     ESTADO.mkdir(parents=True, exist_ok=True)
     linhas = None
@@ -314,12 +499,17 @@ def passagem(agente, cwd, desde, tela, anterior=None):
             linhas = transcricao_claude(cwd, desde)
         elif agente == "codex":
             linhas = transcricao_codex(cwd, desde)
+        elif agente == "agy":
+            linhas = transcricao_agy(cwd, desde)
+        elif agente == "opencode":
+            linhas = transcricao_opencode(cwd, desde)
     except Exception:  # noqa: BLE001
         linhas = None
     fonte = _t("transcrição da sessão")
     if not linhas:
         linhas = tela_limpa(tela)[-1500:]
         fonte = _t("texto que passou pelo terminal")
+    linhas = _limpar_avisos_de_limite(linhas)
     texto = "\n\n".join(linhas) if fonte.startswith("transcrição") else "```\n" + "\n".join(linhas) + "\n```"
     # mantém o começo (o pedido) e o fim (onde parou)
     if len(texto) > 90000:
@@ -394,10 +584,23 @@ def rodar(agente, pedido, cfg):
             cmd += [x.replace("{p}", pedido) for x in info["prompt"]]
         elif agente == "crush":
             cmd = ["crush", "run", pedido]
+    modelo = _modelo(agente, cfg)
+    cmd = _aplicar_modelo(agente, cmd, modelo)
     inicio = time.time()
     pid, mestre = pty.fork()
     if pid == 0:
         os.environ["AGENTES_ATUAL"] = agente
+        # O OpenCode escolhe o modelo pelo próprio config; passamos um conteúdo
+        # mesclado para não perder o que já está em ~/.config/opencode/opencode.json.
+        if agente == "opencode" and modelo:
+            try:
+                base = json.loads((HOME / ".config/opencode/opencode.json").read_text())
+                if not isinstance(base, dict):
+                    base = {}
+            except (OSError, ValueError):
+                base = {}
+            base["model"] = modelo
+            os.environ["OPENCODE_CONFIG_CONTENT"] = json.dumps(base)
         try:
             os.execvp(cmd[0], cmd)
         except OSError as e:
@@ -667,7 +870,8 @@ def estado():
         icone = f"/usr/share/simba/shell/plugins/agents/assets/{a}.svg"
         out.append({"id": a, "nome": AGENTES[a]["nome"], "instalado": inst, "conectado": conectado(a) if inst else False,
                     "instalavel": a in INSTALAR, "sobre": _t(INSTALAR.get(a, {}).get("sobre", "")),
-                    "instalando": _instalando(a),
+                    "instalando": _instalando(a), "modelo": _modelo(a, c),
+                    "modelos": _modelos_estaticos(a) if inst else [],
                     "ativo": a not in c["inativos"] and a in c["ordem"], "uso": uso(a), "esgotadoAte": ate,
                     "esgotadoTexto": hora(ate) if ate else "", "icone": icone if os.path.exists(icone) else ""})
     return {"agentes": out, "trocaAutomatica": c["trocaAutomatica"], "esperar": c["esperar"]}
@@ -703,6 +907,19 @@ def main():
         elif a[1] not in c["inativos"]:
             c["inativos"].append(a[1])
         gravar_config(c)
+    elif a[0] == "modelo" and len(a) == 3 and a[1] in AGENTES:
+        mods = c.get("modelos")
+        if not isinstance(mods, dict):
+            mods = {}
+            c["modelos"] = mods
+        if a[2]:
+            mods[a[1]] = a[2]
+        else:
+            mods.pop(a[1], None)
+        gravar_config(c)
+    elif a[0] == "modelos":
+        catalogo = _M.modelos_todos() if _M and hasattr(_M, "modelos_todos") else {}
+        print(json.dumps(catalogo, ensure_ascii=False))
     elif a[0] == "opcao" and len(a) == 3:
         c[a[1]] = json.loads(a[2])
         gravar_config(c)

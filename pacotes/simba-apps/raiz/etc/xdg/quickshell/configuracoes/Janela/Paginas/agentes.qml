@@ -17,6 +17,7 @@ Pagina {
   readonly property var disponiveis: s ? s.agentes.filter(function(a) { return !a.instalado && a.instalavel }) : []
   readonly property bool instalandoAlgum: s ? s.agentes.some(function(a) { return a.instalando }) : false
   property var instalandoLocal: ({})
+  property var catalogs: ({})
 
   function atualizar() {
     Sistema.json([bin, "estado"], function(v) {
@@ -60,8 +61,27 @@ Pagina {
     Sistema.solto([pg.bin, "instalar", id])
     pg.atualizar()
   }
+  function opcoesModelo(a) {
+    a = a || {}
+    var lista = (pg.catalogs && pg.catalogs[a.id]) ? pg.catalogs[a.id] : (a.modelos || [])
+    var ops = [{ valor: "", rotulo: I18n.t("Padrão do agente"), detalhe: I18n.t("Deixa o próprio agente escolher") }]
+    var tem = false
+    for (var i = 0; i < lista.length; i++) {
+      var o = lista[i]
+      if (!o || !o.valor) continue
+      if (a.modelo && o.valor === a.modelo) tem = true
+      ops.push(o)
+    }
+    if (a.modelo && !tem) ops.push({ valor: a.modelo, rotulo: a.modelo, detalhe: I18n.t("Escolhido") })
+    return ops
+  }
+  function atualizarModelos() {
+    Sistema.json([pg.bin, "modelos"], function(m) {
+      if (m) pg.catalogs = m
+    })
+  }
 
-  Component.onCompleted: atualizar()
+  Component.onCompleted: { atualizar(); atualizarModelos() }
   Timer {
     interval: (pg.instalandoAlgum || Object.keys(pg.instalandoLocal).length > 0) ? 1500 : 5000
     running: true
@@ -104,6 +124,22 @@ Pagina {
           glifo: Icones.deleteOutline
           visible: lin.modelData.instalavel
           onClicado: pg.rodar(["remover", lin.modelData.id])
+        }
+        expandido: true
+        extra: RowLayout {
+          Layout.fillWidth: true
+          Layout.leftMargin: 48
+          Texto {
+            text: I18n.t("Modelo")
+            color: Tema.texto2
+            Layout.fillWidth: true
+          }
+          Selecao {
+            Layout.preferredWidth: 280
+            opcoes: pg.opcoesModelo(lin.modelData)
+            atual: lin.modelData.modelo
+            onEscolhido: function(v) { pg.rodar(["modelo", lin.modelData.id, v]) }
+          }
         }
       }
     }

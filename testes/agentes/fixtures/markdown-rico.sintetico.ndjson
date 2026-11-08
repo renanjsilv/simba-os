@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","cwd":"/tmp/x","session_id":"aaaaaaaa-0000-0000-0000-000000000001","model":"claude-sonnet-5-5"}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"## Resumo da análise\n\nEncontrei **3 problemas** no arquivo `app.py`. O principal está na função de leitura:\n\n"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1. O descritor do terminal não é fechado\n2. A fila de mensagens se perde\n3. Falta tratar o *timeout*\n\n```python\ndef ler(fd):\n    dados = os.read(fd, 4096)\n"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"    if not dados:\n        return None\n    return dados.decode(\"utf-8\")\n```\n\nPara aplicar a correção, rode:\n\n```bash\nsudo pacman -U simba-apps.pkg.tar.zst\n```\n\n"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"| Item | Antes | Depois |\n|---|---|---|\n| Fila | perdia | guarda |\n| Sessão | errada | certa |\n\n> Dica: veja a [documentação](https://example.com) para mais detalhes.\n\n- Lista com `código inline`\n- Outro item"}}}
+{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"aaaaaaaa-0000-0000-0000-000000000001","total_cost_usd":0.0123,"usage":{"input_tokens":1200,"output_tokens":340}}

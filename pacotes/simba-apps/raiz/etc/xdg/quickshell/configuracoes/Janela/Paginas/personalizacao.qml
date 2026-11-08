@@ -1222,20 +1222,20 @@ Pagina {
       titulo: I18n.t("Fundo do menu")
       descricao: I18n.t("Acrílico desfoca o que está atrás; Transparente só deixa ver")
       Segmentado {
-        atual: Preferencias.obter("iniciar.material", "acrilico")
+        atual: Preferencias.obter("iniciar.material", "transparente")
         opcoes: [{ valor: "solido", rotulo: I18n.t("Sólido") }, { valor: "acrilico", rotulo: I18n.t("Acrílico") }, { valor: "transparente", rotulo: I18n.t("Transparente") }]
         onEscolhido: function(v) { Preferencias.definir("iniciar.material", v) }
       }
     }
     Linha {
-      visible: Preferencias.obter("iniciar.material", "acrilico") !== "solido"
+      visible: Preferencias.obter("iniciar.material", "transparente") !== "solido"
       chave: "iniciarTransparencia"
       glifo: Icones.opacity
       titulo: I18n.t("Transparência")
       Deslizante { width: 220; de: 0; ate: 85; passo: 1; sufixo: " %"; valor: Preferencias.obter("iniciar.transparencia", 28); onSolto: function(v) { Preferencias.definir("iniciar.transparencia", v) } }
     }
     Linha {
-      visible: Preferencias.obter("iniciar.material", "acrilico") === "acrilico"
+      visible: Preferencias.obter("iniciar.material", "transparente") === "acrilico"
       chave: "iniciarIntensidade"
       glifo: Icones.blur
       titulo: I18n.t("Intensidade do desfoque")

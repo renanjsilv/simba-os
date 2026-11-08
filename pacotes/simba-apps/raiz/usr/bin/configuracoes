@@ -42,6 +42,15 @@ iniciar() {
 
 enviar() {
   [[ $(stat -c %s "$CMD" 2>/dev/null || echo 0) -gt 100000 ]] && : >"$CMD"
+  # Caminho rápido do menu Iniciar (clique no botão / Super+Espaço): evita
+  # iniciar o jq (~10 ms) no caminho mais sensível a atraso. A sequência tem
+  # sempre 19 dígitos, como `date +%s%N`, para o Quickshell ordenar os comandos.
+  if [[ $1 == menu-iniciar && ${2:-} =~ ^(abrir|fechar|alternar)$ ]]; then
+    local seq
+    if [[ -n ${EPOCHREALTIME:-} ]]; then seq="${EPOCHREALTIME//[.,]/}000"; else seq=$(date +%s%N); fi
+    printf '{"s":"%s","c":"menu-iniciar","a":["%s"]}\n' "$seq" "$2" >>"$CMD"
+    return
+  fi
   jq -cn --arg s "$(date +%s%N)" --arg c "$1" '{s: $s, c: $c, a: $ARGS.positional}' --args -- "${@:2}" >>"$CMD"
 }
 

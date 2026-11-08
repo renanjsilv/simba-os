@@ -46,7 +46,7 @@ Scope {
   readonly property bool centralizado: Preferencias.obter("iniciar.centro", false)
   // Aparência (Personalização › Iniciar):
   //   material  solido | acrilico (captura da tela atrás, desfocada) | transparente
-  readonly property string material: Preferencias.obter("iniciar.material", "acrilico")
+  readonly property string material: Preferencias.obter("iniciar.material", "transparente")
   readonly property real transparencia: Preferencias.obter("iniciar.transparencia", 28) / 100   // 0 = opaco
   readonly property real intensidade: Preferencias.obter("iniciar.intensidade", 70) / 100       // desfoque
   readonly property string tom: Preferencias.obter("iniciar.tom", "tema")                       // tema | destaque
@@ -229,15 +229,28 @@ Scope {
   onTextoChanged: { sel = 0; if (!texto.trim()) { buscaLoja = []; buscaArquivos = [] } buscaExtra.restart() }
 
   // ── ações ────────────────────────────────────────────────────────────────
-  function abrir() {
-    if (aberto) return
-    telaNome = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
-    Hyprland.refreshMonitors()
-    texto = ""; pagina = "inicio"; contexto = null; energiaAberta = false
-    aberturas++
-    aberto = true
+  // Dados secundários (recentes, mais usados, nome da conta) só são lidos
+  // depois que o menu já apareceu, e no máximo a cada 20 s. Antes, cada
+  // abertura disparava vários processos (Python, jq, hyprctl) antes do desenho.
+  property double extrasEm: 0
+  property double contaEm: 0
+  Timer { id: extras; interval: 40; repeat: false; onTriggered: m.carregarExtras() }
+  Timer { id: conta; interval: 40; repeat: false; onTriggered: m.carregarConta() }
+
+  function carregarExtras() {
+    if (!aberto) return
+    var agora = Date.now()
+    if (agora - extrasEm < 20000) return
+    extrasEm = agora
     Sistema.json([Sistema.bin + "/iniciar", "recentes", "12"], function(v) { if (v) { m.recentes = v; m.buscarIcones() } })
-    buscarIcones()
+    Sistema.json([Sistema.bin + "/iniciar", "uso"], function(v) { if (v) m.uso = v })
+    Sistema.json(["barra-tarefas", "estado"], function(v) { if (v && v.fixados) m.barraFixados = v.fixados })
+  }
+  function carregarConta() {
+    if (!aberto) return
+    var agora = Date.now()
+    if (agora - contaEm < 60000) return
+    contaEm = agora
     Sistema.rodar(["hyprctl", "getoption", "decoration:blur:enabled", "-j"], function(o) {
       try { var j = JSON.parse(o); m.desfoque = !!(j.int !== undefined ? j.int : j.bool) } catch (e) {}
     })
@@ -247,8 +260,19 @@ Scope {
       var u = Quickshell.env("USER") || ""
       m.nomeUsuario = l[0] || (u.charAt(0).toUpperCase() + u.slice(1))
     })
-    Sistema.json([Sistema.bin + "/iniciar", "uso"], function(v) { if (v) m.uso = v })
-    Sistema.json(["barra-tarefas", "estado"], function(v) { if (v && v.fixados) m.barraFixados = v.fixados })
+  }
+
+  function abrir() {
+    if (aberto) return
+    telaNome = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+    Hyprland.refreshMonitors()
+    texto = ""; pagina = "inicio"; contexto = null; energiaAberta = false
+    aberturas++
+    aberto = true
+    buscarIcones()
+    // O menu aparece primeiro; o resto chega logo depois, sem atrasar o desenho.
+    extras.restart()
+    conta.restart()
   }
   function fechar() { aberto = false; contexto = null; energiaAberta = false }
   // Resolve (uma vez) os ícones de apps e arquivos que ainda não estão no cache.
@@ -341,17 +365,21 @@ Scope {
 
   // ── janela ───────────────────────────────────────────────────────────────
   Variants {
-    model: m.aberto ? Quickshell.screens.filter(function(s) { return m.telaNome === "" ? s === Quickshell.screens[0] : s.name === m.telaNome }) : []
+    // A janela do menu já existe desde o início (oculta). Criar a superfície e
+    // a árvore de itens no clique custava ~100 ms; agora abrir só a torna visível.
+    model: Quickshell.screens
     delegate: PanelWindow {
       id: w
       required property var modelData
       screen: modelData
+      visible: m.aberto && (m.telaNome === "" ? modelData === Quickshell.screens[0] : modelData.name === m.telaNome)
       anchors { top: true; bottom: true; left: true; right: true }
       color: "transparent"
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.layer: WlrLayer.Overlay
       WlrLayershell.namespace: "configuracoes-iniciar"
-      WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+      // Só captura o teclado enquanto o menu está aberto (oculto, não rouba foco).
+      WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
       // Área reservada pela barra (esquerda, cima, direita, baixo) neste monitor.
       readonly property var reservado: {
@@ -404,7 +432,12 @@ Scope {
         width: w.telaCheia ? w.width : w.largCartao
         height: w.telaCheia ? w.height : w.altCartao
         opacity: p
-        NumberAnimation on p { id: entrada; from: 0; to: 1; duration: Tema.animacoes ? 260 : 0; easing.type: Easing.OutCubic; running: true }
+        NumberAnimation on p { id: entrada; from: 0; to: 1; duration: Tema.animacoes ? 120 : 0; easing.type: Easing.OutQuad; running: true }
+        // A janela existe desde o início; ao abrir, refaz a entrada suave.
+        Connections {
+          target: m
+          function onAbertoChanged() { if (m.aberto) { cartao.p = 0; entrada.restart() } }
+        }
 
         // Fundo: acrílico = o que está atrás do menu (captura), desfocado e com a
         // cor do tema por cima; transparente = só a cor translúcida (com o desfoque

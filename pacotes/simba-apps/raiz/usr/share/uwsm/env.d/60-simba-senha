@@ -1,0 +1,2 @@
+# sudo sem terminal (apps, agentes de IA, scripts do menu) pede a senha numa janela.
+export SUDO_ASKPASS=/usr/bin/simba-senha

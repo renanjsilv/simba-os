@@ -35,6 +35,14 @@ end
 table.insert(kept, 1, bin_dir)
 hl.env("PATH", table.concat(kept, ":"))
 
+-- sudo sem terminal (apps, agentes de IA, scripts do menu) pede a senha numa
+-- janela (simba-senha, do pacote simba-apps). hl.env vale já no próximo reload.
+local askpass = io.open("/usr/bin/simba-senha", "r")
+if askpass then
+  askpass:close()
+  hl.env("SUDO_ASKPASS", "/usr/bin/simba-senha")
+end
+
 -- Hardware-specific environment.
 require("default.hypr.nvidia")
 

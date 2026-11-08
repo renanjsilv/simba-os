@@ -1,0 +1,174 @@
+#!/usr/bin/env python3
+"""simba-senha — pede a senha de administrador numa janela (askpass do sudo).
+
+O sudo chama este programa quando precisa de senha e não há terminal (apps
+gráficos, agentes de IA, scripts lançados pelo menu) ou com `sudo -A`. A senha
+digitada vai só para o sudo, pela saída padrão; nada é guardado.
+
+    SUDO_ASKPASS=/usr/bin/simba-senha   (definido pelo Simba na sessão)
+
+A janela mostra QUEM pediu e O QUE vai rodar como administrador (lido do
+processo do sudo), para a pessoa decidir com informação.
+Saída 0 com a senha; 1 se cancelar.
+"""
+import os
+from pathlib import Path
+import re
+import shlex
+import sys
+
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
+
+sys.path.insert(0, "/usr/share/simba-apps/idiomas")
+try:
+    from simba_i18n import t as _t  # noqa: E402
+except ImportError:
+    def _t(texto, *a):
+        return texto
+
+NOMES = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "agy": "Antigravity",
+         "copilot": "GitHub Copilot", "cursor-agent": "Cursor", "grok": "Grok", "crush": "Crush",
+         "pi": "Pi", "draco": "Draco", "pkexec": "pkexec"}
+
+
+def _cmdline(pid):
+    try:
+        partes = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        return [p.decode("utf-8", "replace") for p in partes if p]
+    except OSError:
+        return []
+
+
+def _pai(pid):
+    try:
+        for linha in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if linha.startswith("PPid:"):
+                return int(linha.split()[1])
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
+def contexto():
+    """(comando que o sudo vai rodar, programa que chamou o sudo)."""
+    sudo = os.getppid()
+    args = _cmdline(sudo)
+    comando = ""
+    if args and Path(args[0]).name == "sudo":
+        resto = args[1:]
+        # pula as opções do próprio sudo (-A, -E, -u usuário…)
+        while resto and resto[0].startswith("-") and resto[0] != "--":
+            opc = resto.pop(0)
+            if opc in ("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t", "-U", "-T") and resto:
+                resto.pop(0)
+        if resto and resto[0] == "--":
+            resto.pop(0)
+        comando = shlex.join(resto) if resto else ""
+    quem = ""
+    pid = _pai(sudo)
+    for _ in range(8):  # sobe a árvore até achar um programa conhecido
+        if pid <= 1:
+            break
+        args = _cmdline(pid)
+        nomes = [Path(a).name for a in args[:3]]
+        achado = next((NOMES[n] for n in nomes if n in NOMES), None)
+        if achado:
+            quem = achado
+            break
+        if not quem and args and Path(args[0]).name not in ("bash", "sh", "zsh", "fish", "python3", "python", "env"):
+            quem = Path(args[0]).name
+        pid = _pai(pid)
+    return comando, quem
+
+
+class Senha(Adw.Application):
+    def __init__(self, prompt):
+        super().__init__(application_id="com.simba.Senha", flags=Gio.ApplicationFlags.NON_UNIQUE)
+        self.prompt = prompt
+        self.resultado = None
+
+    def do_activate(self):
+        comando, quem = contexto()
+        win = Adw.ApplicationWindow(application=self, title=_t("Senha de administrador"))
+        win.set_default_size(460, -1)
+        win.set_resizable(False)
+
+        caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        for lado in ("top", "bottom", "start", "end"):
+            getattr(caixa, f"set_margin_{lado}")(22)
+
+        icone = Gtk.Image.new_from_icon_name("dialog-password-symbolic")
+        icone.set_pixel_size(40)
+        icone.add_css_class("accent")
+        caixa.append(icone)
+
+        titulo = Gtk.Label(label=_t("Permissão de administrador"))
+        titulo.add_css_class("title-2")
+        caixa.append(titulo)
+
+        quem_txt = (f"{quem} " + _t("quer executar como administrador:")) if quem else \
+            _t("Um programa quer executar como administrador:")
+        desc = Gtk.Label(label=quem_txt, wrap=True, justify=Gtk.Justification.CENTER)
+        desc.add_css_class("dim-label")
+        caixa.append(desc)
+
+        if comando:
+            cmd = Gtk.Label(label=comando, wrap=True, selectable=True, xalign=0)
+            cmd.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            cmd.add_css_class("monospace")
+            for lado in ("top", "bottom", "start", "end"):
+                getattr(cmd, f"set_margin_{lado}")(10)
+            moldura = Gtk.Box()
+            moldura.add_css_class("card")
+            moldura.append(cmd)
+            caixa.append(moldura)
+
+        if re.search(r"try again|tente novamente|incorret", self.prompt or "", re.I):
+            erro = Gtk.Label(label=_t("Senha incorreta. Tente novamente."))
+            erro.add_css_class("error")
+            caixa.append(erro)
+
+        self.entrada = Gtk.PasswordEntry(show_peek_icon=True)
+        self.entrada.set_property("placeholder-text", _t("Senha de %1").replace("%1", os.environ.get("USER", "")))
+        self.entrada.connect("activate", lambda *_: self.confirmar(win))
+        caixa.append(self.entrada)
+
+        botoes = Gtk.Box(spacing=10, homogeneous=True)
+        cancelar = Gtk.Button(label=_t("Cancelar"))
+        cancelar.connect("clicked", lambda *_: win.close())
+        ok = Gtk.Button(label=_t("Autorizar"))
+        ok.add_css_class("suggested-action")
+        ok.connect("clicked", lambda *_: self.confirmar(win))
+        botoes.append(cancelar)
+        botoes.append(ok)
+        caixa.append(botoes)
+
+        tecla = Gtk.EventControllerKey()
+        tecla.connect("key-pressed", lambda _c, k, *_: (win.close(), True)[1] if k == 0xff1b else False)
+        win.add_controller(tecla)
+
+        win.set_content(caixa)
+        win.present()
+        GLib.idle_add(self.entrada.grab_focus)
+
+    def confirmar(self, win):
+        self.resultado = self.entrada.get_text()
+        win.close()
+
+
+def main():
+    prompt = " ".join(sys.argv[1:])
+    app = Senha(prompt)
+    app.run([sys.argv[0]])
+    if app.resultado is None:
+        return 1
+    sys.stdout.write(app.resultado + "\n")
+    sys.stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

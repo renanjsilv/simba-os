@@ -1,0 +1,11 @@
+# Só no modo "Distribuível": o que é do sistema mas identifica quem gerou a ISO.
+# Máquinas virtuais (definições e estado)
+etc/libvirt/qemu/*.xml
+etc/libvirt/qemu/autostart/*
+var/lib/libvirt/qemu/*
+var/lib/libvirt/images/*
+# Foto e estado de login
+var/lib/AccountsService/icons/*
+var/lib/AccountsService/users/*
+var/lib/sddm/.cache
+var/lib/sddm/state.conf

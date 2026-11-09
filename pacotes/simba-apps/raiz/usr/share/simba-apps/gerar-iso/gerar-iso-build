@@ -163,6 +163,7 @@ patterns() { { grep -vE '^\s*(#|$)' "$1" || true; } | sed 's/[[:space:]]*$//'; }
 
 patterns "$SRC/excluir-sistema.txt" > "$WORK/excl-system"
 [ "$LOGINS" = 1 ] || patterns "$SRC/excluir-sistema-logins.txt" >> "$WORK/excl-system"
+[ "$MODO" = distribuivel ] && patterns "$SRC/excluir-sistema-distribuivel.txt" >> "$WORK/excl-system"
 
 listas_home=("$SRC/excluir-home.txt")
 [ "$MODO" = pessoal ] || listas_home+=("$SRC/excluir-pessoal.txt")

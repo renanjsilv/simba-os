@@ -43,9 +43,9 @@ magick -size 2560x1440 radial-gradient:"$fundo"-"$fundo2" \
 magick "$out/logo.png" -resize 256x256 "PNG32:$out/icone.png"
 # gerador da tela de inicialização (vai junto: o do sistema clonado pode ser mais antigo)
 install -d "$out/temas-boot"
-install -m755 "$HOME_DONO/.local/share/temas-boot/gerar" "$out/temas-boot/gerar"
-install -m644 "$HOME_DONO/.local/share/temas-boot/tema.script" "$out/temas-boot/tema.script"
-install -m644 "$HOME_DONO/.local/share/temas-boot/simba-simbolo.svg" "$out/temas-boot/simba-simbolo.svg"
+install -m755 /usr/share/simba-apps/temas-boot/gerar "$out/temas-boot/gerar"
+install -m644 /usr/share/simba-apps/temas-boot/tema.script "$out/temas-boot/tema.script"
+install -m644 /usr/share/simba-apps/simba-simbolo.svg "$out/temas-boot/simba-simbolo.svg"
 rm -f "$out/cab.tmp.png"
 cat > "$out/marca.env" <<ENV
 NOME='${nome//\'/}'

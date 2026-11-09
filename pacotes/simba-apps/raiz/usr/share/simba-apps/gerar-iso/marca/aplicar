@@ -22,9 +22,9 @@ if ! cmp -s "$tmp" /etc/os-release 2>/dev/null || [ -L /etc/os-release ]; then
 fi
 rm -f "$tmp"
 printf '%s \\r (\\l)\n\n' "$NOME" > /etc/issue
-if [ -d /usr/share/plymouth/themes/win11-marca ] && command -v plymouth-set-default-theme >/dev/null; then
-  if [ "$(plymouth-set-default-theme)" != win11-marca ]; then
-    plymouth-set-default-theme win11-marca
+if [ -d /usr/share/plymouth/themes/simba-marca ] && command -v plymouth-set-default-theme >/dev/null; then
+  if [ "$(plymouth-set-default-theme)" != simba-marca ]; then
+    plymouth-set-default-theme simba-marca
     [ "${1:-}" = --gancho ] && command -v limine-mkinitcpio >/dev/null && limine-mkinitcpio >/dev/null 2>&1
   fi
 fi
@@ -45,7 +45,7 @@ Exec = /usr/local/bin/marca-sistema --gancho
 HOOK
 
 # tela de inicialização com o logo e o nome
-gerador=/home/$u/.local/share/temas-boot
+gerador=/usr/share/simba-apps/temas-boot
 if [ -x "$pac/temas-boot/gerar" ]; then
   install -d "$T/usr/local/share/marca/temas-boot"
   cp "$pac"/temas-boot/* "$T/usr/local/share/marca/temas-boot/"
@@ -53,7 +53,7 @@ if [ -x "$pac/temas-boot/gerar" ]; then
 fi
 if [ -x "$T$gerador/gerar" ]; then
   arch-chroot "$T" env MARCA_LOGO=/usr/local/share/marca/logo-nome.png MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" \
-    "$gerador/gerar" marca /usr/share/plymouth/themes/win11-marca >/dev/null
+    "$gerador/gerar" marca /usr/share/plymouth/themes/simba-marca >/dev/null
 fi
 # nome no menu de boot (Limine)
 # e a tela do gato mesmo com console serial (o Plymouth cai para texto se houver um)

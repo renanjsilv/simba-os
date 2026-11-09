@@ -39,3 +39,5 @@
 .local/share/*/*.bak-*
 .local/share/*/*/*.bak-*
 .local/bin/*.bak-*
+# Temporários do Steam Runtime (umu)
+.local/share/umu/steamrt3/var/tmp-*

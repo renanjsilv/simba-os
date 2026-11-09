@@ -537,6 +537,13 @@ echo "$HOST" > "$T/etc/hostname"
 rm -f "$T/etc/machine-id"
 x systemd-machine-id-setup --root="$T"
 
+# Chaveiro do pacman: cada instalação gera a própria chave mestra. A da máquina que
+# gerou a ISO nunca pode ser compartilhada (com ela dá para fazer o pacman de outra
+# instalação confiar em pacotes falsos); a ISO nem leva a parte privada.
+rm -rf "$T/etc/pacman.d/gnupg"
+x arch-chroot "$T" pacman-key --init || echo "aviso: pacman-key --init" >> "$LOG"
+x arch-chroot "$T" pacman-key --populate || echo "aviso: pacman-key --populate" >> "$LOG"
+
 # teclado (console e Hyprland leem o /etc/vconsole.conf)
 if [ -f "$T/etc/vconsole.conf" ]; then
   sed -i -e "s/^KEYMAP=.*/KEYMAP=$KEYMAP/" -e "s/^XKBLAYOUT=.*/XKBLAYOUT=$XKB/" "$T/etc/vconsole.conf"

@@ -40,3 +40,6 @@
 # Draco: chaves de API
 .config/draco/chaves
 .local/share/draco/groq.key
+# CLIs de IA com login próprio (token e histórico)
+.grok
+.pi/agent/auth.json

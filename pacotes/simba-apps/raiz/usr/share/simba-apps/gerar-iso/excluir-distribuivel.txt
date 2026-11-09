@@ -11,7 +11,7 @@
 .config/explorador/config.json
 .config/explorador/nuvens.json
 .local/state/simba/current/background
-.local/state/simba/current/background
+.local/state/simba/papel-definido
 .local/share/draco/*.bak*
 .local/share/draco/workdir/memoria*
 .local/share/sddm
@@ -46,3 +46,8 @@ node_modules
 .local/share/draco/voices/pt_BR-cadu-*
 .local/share/draco/voices/pt_BR-edresson-*
 .local/share/draco/voices/pt_BR-jeff-*
+# Identidades de dispositivo (quem instalasse se passaria por este PC)
+.config/Moonlight Game Streaming Project
+.local/share/org.localsend.localsend_app
+# Scripts soltos de quem gerou
+ativar-sudo-sem-senha.sh

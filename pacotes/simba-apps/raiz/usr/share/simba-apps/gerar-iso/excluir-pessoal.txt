@@ -37,3 +37,6 @@ steam-*.log
 .local/share/draco/wake-train/clips-cache.npz
 .local/share/draco/wake-train/treino.log
 .local/state/agentes
+# Histórico de prompts/reprodução de outros apps
+.local/state/opencode/prompt-history.jsonl
+.local/state/spotifast

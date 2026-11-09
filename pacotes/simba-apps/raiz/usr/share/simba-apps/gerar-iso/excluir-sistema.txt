@@ -39,3 +39,20 @@ var/cache/simba-craft/*
 # símbolos de depuração e restos do sistema antigo
 usr/lib/debug/*
 var/lib/omarchy
+var/cache/omarchy
+var/lib/simba-idioma-4.5
+var/lib/simba/*.omarchy
+var/lib/simba/migracao-pacotes-*
+
+# Chave mestra PRIVADA do pacman (o instalador cria um chaveiro novo)
+etc/pacman.d/gnupg/private-keys-v1.d/*
+etc/pacman.d/gnupg/openpgp-revocs.d/*
+
+# root: identidade do AnyDesk e caches
+root/.anydesk
+root/.npm
+
+# NetworkManager: concessões de IP, redes vistas e horários (refeitos sozinhos)
+var/lib/NetworkManager/*.lease
+var/lib/NetworkManager/seen-bssids
+var/lib/NetworkManager/timestamps

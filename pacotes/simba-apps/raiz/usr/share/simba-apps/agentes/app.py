@@ -44,6 +44,10 @@ from markdown import MarkdownMixin  # noqa: E402
 from painel import PainelMixin  # noqa: E402
 from parser import AgentStreamParser  # noqa: E402
 import voz  # noqa: E402
+try:  # navegador embutido (WebKitGTK 6); sem ele o chat funciona igual
+    import navegador  # noqa: E402
+except (ImportError, ValueError):
+    navegador = None
 
 # AGENTES_DEV=1 abre uma instância separada (para testar sem mexer na janela aberta).
 APP_ID = "com.simba.AgentesDev" if os.environ.get("AGENTES_DEV") else "com.simba.Agentes"
@@ -150,6 +154,12 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._construir_ui()
         self._carregar_agentes()
         self.connect("close-request", self._ao_fechar)
+        if self.navegador:
+            try:
+                self.navegador.iniciar_controle(APP_ID)
+            except GLib.Error as e:
+                print("navegador: controle indisponível:", e.message, file=sys.stderr)
+            self.connect("close-request", lambda *_: (self.navegador.parar_controle(), False)[1])
 
         # Atalho de teclado global na janela (Esc interrompe geração em execução)
         win_key_ctrl = Gtk.EventControllerKey()
@@ -242,6 +252,15 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         btn_central.connect("clicked", lambda _: self._abrir_central())
         acoes.append(btn_central)
 
+        # Navegador embutido: a pessoa abre por aqui; o agente, pelo simba-navegador
+        self.btn_navegador = Gtk.ToggleButton(icon_name="web-browser-symbolic")
+        self.btn_navegador.add_css_class("flat")
+        self.btn_navegador.add_css_class("icon-button")
+        self.btn_navegador.set_tooltip_text(f"{_t('Navegador')} (Ctrl+Shift+B)")
+        self.btn_navegador.set_visible(navegador is not None)
+        self.btn_navegador.connect("toggled", self._on_alternar_navegador)
+        acoes.append(self.btn_navegador)
+
         header.pack_end(acoes)
 
         # Área Central de Mensagens: coluna central ergonômica para leitura agradável
@@ -299,7 +318,24 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         box_principal.append(self._criar_barra_busca())
         box_principal.append(self.overlay)
         box_principal.append(box_inferior)
-        toolbar_view.set_content(box_principal)
+        self.navegador = None
+        if navegador is not None:
+            self.navegador = navegador.PainelNavegador(ao_mostrar=self._mostrar_navegador,
+                                                       ao_esconder=self._esconder_navegador)
+            self.navegador.set_visible(False)
+            self.divisao = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+            self.divisao.set_wide_handle(True)
+            self.divisao.set_start_child(box_principal)
+            self.divisao.set_end_child(self.navegador)
+            self.divisao.set_resize_start_child(True)
+            self.divisao.set_resize_end_child(True)
+            self.divisao.set_shrink_start_child(False)
+            self.divisao.set_shrink_end_child(False)
+            box_principal.set_size_request(420, -1)
+            self.navegador.set_size_request(420, -1)
+            toolbar_view.set_content(self.divisao)
+        else:
+            toolbar_view.set_content(box_principal)
 
         # Arrastar e soltar arquivos/imagens em qualquer lugar da janela
         drop_target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
@@ -532,6 +568,27 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.text_input.add_controller(foco)
 
         return composer
+
+    # ── navegador embutido ─────────────────────────────────────────────────
+    def _on_alternar_navegador(self, botao):
+        if botao.get_active():
+            self.navegador.mostrar()
+        else:
+            self._esconder_navegador()
+
+    def _mostrar_navegador(self):
+        if not self.navegador.get_visible():
+            self.navegador.set_visible(True)
+            largura = self.get_width() or 1400
+            # conversa à esquerda com ~40 % da janela, página com o resto
+            self.divisao.set_position(max(420, int(largura * 0.4)))
+        if not self.btn_navegador.get_active():
+            self.btn_navegador.set_active(True)
+
+    def _esconder_navegador(self):
+        self.navegador.set_visible(False)
+        if self.btn_navegador.get_active():
+            self.btn_navegador.set_active(False)
 
     def _usar_sugestao(self, texto):
         self.text_input_buf.set_text(texto)
@@ -1035,6 +1092,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         if ctrl and shift and keyval in (Gdk.KEY_a, Gdk.KEY_A):
             self._abrir_central()
             return True
+        if ctrl and shift and keyval in (Gdk.KEY_b, Gdk.KEY_B) and self.navegador:
+            self.btn_navegador.set_active(not self.btn_navegador.get_active())
+            return True
         if ctrl and not shift and keyval in (Gdk.KEY_f, Gdk.KEY_F):
             self._abrir_busca()
             return True
@@ -1180,6 +1240,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         # pôde ser retomada) recebe o histórico junto com o pedido.
         if not agente_forcado and not sessao and not continuar:
             pedido = self._pedido_com_contexto(pedido)
+        # sessão nova de um agente: ele fica sabendo do navegador embutido
+        if self.navegador and self.navegador.socket and not sessao and not continuar:
+            pedido = navegador.INSTRUCAO_AGENTE + "\n\n" + pedido
         self.precisa_contexto = False
 
         cmd = M.montar_comando(agente, pedido, cfg, sessao=sessao, continuar=continuar, seguro=seguro)
@@ -1215,6 +1278,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         env = dict(os.environ)
         env.update(AGENTES_ATUAL=agente, PYTHONUNBUFFERED="1", TERM="xterm-256color",
                    COLUMNS="240", LINES="60")
+        if self.navegador and self.navegador.socket:
+            env["SIMBA_NAVEGADOR"] = self.navegador.socket
         try:
             proc = subprocess.Popen(
                 cmd, stdin=escravo, stdout=escravo, stderr=escravo, cwd=str(self.work_dir),

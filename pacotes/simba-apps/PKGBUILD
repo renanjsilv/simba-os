@@ -3,7 +3,7 @@
 # bloqueio, sistema de idiomas (catálogos), atualização ("Atualizar tudo") e utilitários.
 pkgname=simba-apps
 pkgver=1.1.12
-pkgrel=22
+pkgrel=23
 pkgdesc="Simba OS: apps e ferramentas próprios (Configurações, Explorador, Gerenciador de Tarefas…)"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -11,6 +11,8 @@ license=('MIT')
 options=('!debug' '!strip')
 depends=('simba' 'quickshell' 'python' 'python-gobject' 'gtk4' 'libadwaita' 'jq' 'curl' 'yay'
          'pacman-contrib' 'wl-clipboard' 'libnotify'
+         # navegador embutido no chat dos Agentes de IA (simba-navegador)
+         'webkitgtk-6.0'
          # plugin de janelas (compilado por usuário contra o Hyprland instalado)
          'gcc' 'make' 'pkgconf')
 optdepends=('rclone: nuvens no Explorador e backup da Conta no Google Drive'

@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""simba-navegador — controla o navegador embutido no chat dos Agentes de IA.
+
+Usado pelos próprios agentes (o chat passa SIMBA_NAVEGADOR com o socket).
+Sem a variável, usa o chat aberto mais recente deste usuário.
+
+  simba-navegador abrir <url>
+  simba-navegador ler [--max N] | elementos | url
+  simba-navegador clicar <número|texto|seletor>
+  simba-navegador digitar <número|seletor> <texto> [--enter] [--limpar]
+  simba-navegador tecla Enter|Tab|Escape
+  simba-navegador esperar <texto> [segundos]
+  simba-navegador rolar baixo|cima
+  simba-navegador captura [arquivo.png]
+  simba-navegador voltar | avancar | recarregar | mostrar | fechar
+  simba-navegador js <código>
+  --json   resposta crua em JSON
+"""
+import json
+import os
+import signal
+import socket
+import sys
+from pathlib import Path
+
+
+def achar_socket():
+    s = os.environ.get("SIMBA_NAVEGADOR")
+    if s and os.path.exists(s):
+        return s
+    base = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/simba-{os.getuid()}") / "simba-navegador"
+    vivos = []
+    for p in base.glob("*.sock"):
+        try:
+            pid = int(p.stem.rsplit("-", 1)[1])
+            os.kill(pid, 0)
+            vivos.append(p)
+        except (ValueError, IndexError, ProcessLookupError, PermissionError):
+            continue
+    if not vivos:
+        return None
+    return str(max(vivos, key=lambda p: p.stat().st_mtime))
+
+
+def pedir(dados, espera=90):
+    caminho = achar_socket()
+    if not caminho:
+        sys.exit("simba-navegador: o chat dos Agentes de IA não está aberto.")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(espera)
+        s.connect(caminho)
+        s.sendall((json.dumps(dados) + "\n").encode())
+        buf = b""
+        while not buf.endswith(b"\n"):
+            parte = s.recv(65536)
+            if not parte:
+                break
+            buf += parte
+    return json.loads(buf.decode() or "{}")
+
+
+def mostrar_elementos(els):
+    for e in els or []:
+        partes = [f"[{e['ref']}]", e["tag"] + (f":{e['tipo']}" if e.get("tipo") else "")]
+        if e.get("rotulo"):
+            partes.append(repr(e["rotulo"]))
+        if e.get("senha"):
+            partes.append("(senha)")
+        if "valor" in e:
+            partes.append(f"valor={e['valor']!r}")
+        if "marcado" in e:
+            partes.append("marcado" if e["marcado"] else "desmarcado")
+        if e.get("foco"):
+            partes.append("← foco")
+        if e.get("href") and e["tag"] == "a":
+            partes.append(f"→ {e['href']}")
+        print(" ".join(partes))
+
+
+def main(args):
+    crua = "--json" in args
+    args = [a for a in args if a != "--json"]
+    if not args or args[0] in ("-h", "--help", "ajuda"):
+        print(__doc__.strip())
+        return 0
+    cmd, resto = args[0], args[1:]
+    flags = {a for a in resto if a.startswith("--")}
+    pos = [a for a in resto if not a.startswith("--")]
+    d = {"cmd": cmd}
+    if cmd == "abrir":
+        d["url"] = " ".join(pos)
+    elif cmd == "ler":
+        if "--max" in resto:
+            d["max"] = int(resto[resto.index("--max") + 1])
+    elif cmd == "clicar":
+        d["alvo"] = " ".join(pos)
+    elif cmd == "digitar":
+        if len(pos) < 2:
+            sys.exit("uso: simba-navegador digitar <número|seletor> <texto> [--enter] [--limpar]")
+        d.update(alvo=pos[0], texto=" ".join(pos[1:]), enter="--enter" in flags, limpar="--limpar" in flags)
+    elif cmd == "tecla":
+        d["tecla"] = pos[0] if pos else "Enter"
+    elif cmd == "esperar":
+        d["texto"] = pos[0] if pos else ""
+        if len(pos) > 1:
+            d["segundos"] = float(pos[1])
+    elif cmd == "rolar":
+        d["direcao"] = pos[0] if pos else "baixo"
+    elif cmd == "captura":
+        if pos:
+            d["arquivo"] = os.path.abspath(pos[0])
+    elif cmd == "js":
+        d["codigo"] = " ".join(resto)
+    r = pedir(d, espera=float(d.get("segundos", 0)) + 90)
+    if crua:
+        print(json.dumps(r, ensure_ascii=False, indent=1))
+        return 0 if r.get("ok") else 1
+    if not r.get("ok"):
+        print("erro:", r.get("erro", "?"), file=sys.stderr)
+        if r.get("url"):
+            print(f"(página: {r.get('titulo', '')} — {r['url']})", file=sys.stderr)
+        return 1
+    if r.get("url") is not None and cmd != "js":
+        print(f"{r.get('titulo', '')} — {r['url']}")
+    if r.get("aviso"):
+        print("aviso:", r["aviso"])
+    if cmd == "ler":
+        print("\n" + (r.get("texto") or "").strip() + "\n\n── elementos ──")
+        mostrar_elementos(r.get("elementos"))
+    elif cmd == "elementos":
+        mostrar_elementos(r.get("elementos"))
+    elif cmd == "captura":
+        print(r.get("arquivo"))
+    elif cmd == "js":
+        print(json.dumps(r.get("resultado"), ensure_ascii=False, indent=1))
+    elif cmd == "clicar" and r.get("clicado"):
+        print("clicado:", r["clicado"])
+    return 0
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)  # saída cortada por | head
+    sys.exit(main(sys.argv[1:]))

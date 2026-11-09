@@ -43,3 +43,5 @@
 # CLIs de IA com login próprio (token e histórico)
 .grok
 .pi/agent/auth.json
+# Navegador embutido no chat dos Agentes (cookies e logins)
+.local/share/agentes/navegador

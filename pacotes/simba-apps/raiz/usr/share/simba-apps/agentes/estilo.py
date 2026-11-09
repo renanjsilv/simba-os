@@ -379,4 +379,12 @@ levelbar.uso-medidor > trough > block.empty { background-color: alpha(@accent_bg
 levelbar.uso-medidor > trough > block.uso-ok { background-color: @accent_bg_color; }
 levelbar.uso-medidor > trough > block.uso-alto { background-color: @warning_color; }
 levelbar.uso-medidor > trough > block.uso-critico { background-color: @error_color; }
+
+/* navegador embutido */
+.navegador { border-left: 1px solid alpha(currentColor, 0.12); }
+.navegador-barra entry { min-height: 30px; border-radius: 15px; padding: 0 12px; }
+.navegador-aviso {
+  background: alpha(@accent_bg_color, 0.92); color: @accent_fg_color;
+  border-radius: 999px; padding: 6px 14px; font-weight: 600; font-size: 0.9em;
+}
 """

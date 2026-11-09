@@ -24,6 +24,9 @@ NOME=${GERAR_ISO_NOME:-Simba OS}
 # GERAR_ISO_REUSAR=<iso>: refaz só o pendrive (sistema live, instalador e marca) e
 # reaproveita o clone (system.sqfs, home.sqfs, boot.tar, clone.env) de uma ISO já gerada.
 REUSAR=${GERAR_ISO_REUSAR:-}
+# GERAR_ISO_CLONE=<pasta>: usa um sistema já pronto (system.sqfs, home.sqfs, boot.tar, clone.env),
+# montado por receita (iso/construir no repositório simba-os), sem copiar nada desta máquina.
+CLONE=${GERAR_ISO_CLONE:-}
 case $MODO in sistema|pessoal|distribuivel) ;; *) echo "modo inválido: $MODO" >&2; exit 2 ;; esac
 [ "$MODO" = pessoal ] || LOGINS=0
 etapa() { [ -n "$GUI" ] && printf '@@ETAPA %s %s\n' "$1" "$2"; return 0; }
@@ -46,8 +49,17 @@ if [ -n "$REUSAR" ]; then
   [ -n "${GERAR_ISO_NOME:-}" ] || NOME=$(. /tmp/gerar-iso-reusar.env; echo "${NOME_SISTEMA:-$NOME}")
   [ "$NOME" = Simba ] && NOME="Simba OS"
 fi
+if [ -n "$CLONE" ]; then
+  for f in system.sqfs home.sqfs boot.tar clone.env; do
+    [ -f "$CLONE/$f" ] || die "falta $CLONE/$f"
+  done
+  # shellcheck disable=SC1091
+  MODO=$(. "$CLONE/clone.env"; echo "${MODO:-distribuivel}")
+  [ -n "${GERAR_ISO_NOME:-}" ] || NOME=$(. "$CLONE/clone.env"; echo "${NOME_SISTEMA:-$NOME}")
+else
 [ "$(findmnt -no FSTYPE /)" = btrfs ] || die "a raiz não é btrfs."
 [ "$(findmnt -no FSTYPE /home)" = btrfs ] || die "/home não é btrfs."
+fi
 # Escolha de idioma no instalador: precisa do pacote de tradução atualizado.
 if [ -x /usr/bin/simba-idioma ]; then
   /usr/bin/simba-idioma --reaplicar >/dev/null || warn "simba-idioma --reaplicar falhou."
@@ -72,17 +84,20 @@ esac
 
 USED=$(df --output=used -B1 / | tail -1)
 [ -n "$REUSAR" ] && USED=$(( $(stat -c %s "$REUSAR") * 2 ))
+[ -n "$CLONE" ] && USED=$(du -sb "$CLONE" | cut -f1)
 AVAIL=$(df --output=avail -B1 "$OUTBASE" | tail -1)
 NEED=$((USED + 10 * 1024 ** 3))
 [ "$AVAIL" -ge "$NEED" ] || die "espaço insuficiente em $OUTBASE (precisa de ~$((NEED / 1024 ** 3)) GB livres)."
 
 # ---------------------------------------------------------------- origem
+if [ -z "$CLONE" ]; then
 ROOT_SRC=$(findmnt -no SOURCE /)
 ROOT_DEV=${ROOT_SRC%%[*}
 ROOT_SUBVOL=$(findmnt -no FSROOT /)
 HOME_SUBVOL=$(findmnt -no FSROOT /home)
 LUKS_DEV=$(cryptsetup status "$(basename "$ROOT_DEV")" 2>/dev/null | awk '$1 == "device:" {print $2}')
 [ -n "$LUKS_DEV" ] || die "a raiz não está num volume LUKS (esperado pelo instalador)."
+fi
 
 TOP="$WORK/top"
 cleanup() {
@@ -98,8 +113,8 @@ trap 'exit 130' INT TERM
 # nada de sair calado: qualquer comando que derrube o script diz onde foi
 trap 'rc=$?; printf "\nERRO: o comando da linha %s falhou (código %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
-printf '\e[1mGerar ISO — clone deste sistema\e[0m\n'
-info "Origem: $ROOT_DEV ($ROOT_SUBVOL e $HOME_SUBVOL)"
+printf '\e[1mGerar ISO — %s\e[0m\n' "$([ -n "$CLONE" ] && echo "sistema da receita" || echo "clone deste sistema")"
+if [ -n "$CLONE" ]; then info "Origem: $CLONE"; else info "Origem: $ROOT_DEV ($ROOT_SUBVOL e $HOME_SUBVOL)"; fi
 info "Saída:  $ISO"
 info "Tipo:   $MODO$([ "$LOGINS" = 1 ] && echo ' (com senhas e logins)')"
 
@@ -116,6 +131,11 @@ if [ -n "$REUSAR" ]; then
   chmod -R u+w "$WORK/clone-antigo"
   for f in system.sqfs home.sqfs boot.tar clone.env; do mv "$WORK/clone-antigo/$f" "$WORK/$f"; done
   sed -i "s/^NOME_SISTEMA=.*/NOME_SISTEMA='${NOME//\'/}'/" "$WORK/clone.env"
+elif [ -n "$CLONE" ]; then
+  etapa sistema "Usando o sistema da receita"
+  msg "Usando o sistema montado por receita ($CLONE)"
+  mkdir -p "$WORK"
+  for f in system.sqfs home.sqfs boot.tar clone.env; do cp --reflink=auto "$CLONE/$f" "$WORK/$f"; done
 else
 # ---------------------------------------------------------------- snapshots
 etapa snapshots "Tirando snapshots do sistema"

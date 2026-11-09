@@ -18,7 +18,7 @@ for p in "${@:-${PACOTES[@]}}"; do
     || { tail -20 "$t/makepkg.log"; exit 1; }
   rm -rf "$t"
 done
-if [[ -n $CHAVE ]]; then
+if [[ -n $CHAVE && -z ${SEM_ASSINAR:-} ]]; then
   for f in "$R"/dist/*.pkg.tar.zst; do
     [[ -f $f.sig && $f.sig -nt $f ]] || gpg --batch --yes -u "$CHAVE" --detach-sign "$f"
   done

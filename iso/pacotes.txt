@@ -1,0 +1,37 @@
+# Pacotes do Simba OS (ISO oficial). Um por linha; # comenta. As dependências vêm sozinhas.
+# Tudo precisa existir nos repositórios oficiais do Arch ou no [simba-os].
+# Limite: a ISO inteira tem que caber em 2 GiB (limite de arquivo do GitHub Releases).
+
+# base e boot
+base base-devel linux linux-firmware linux-headers intel-ucode amd-ucode sof-firmware
+btrfs-progs cryptsetup dosfstools exfatprogs ntfs-3g efibootmgr mkinitcpio
+limine limine-mkinitcpio-hook limine-snapper-sync snapper plymouth zram-generator
+sudo man-db less inetutils whois unzip
+
+# rede, som, energia, Bluetooth, impressão
+networkmanager wireless-regdb nss-mdns avahi
+bluez bluez-utils
+pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber gst-plugin-pipewire libpulse alsa-utils pamixer
+power-profiles-daemon brightnessctl ddcutil fwupd ufw
+cups cups-filters cups-pk-helper system-config-printer
+
+# vídeo (NVIDIA e microcódigo são ajustados pelo instalador conforme o computador)
+mesa vulkan-intel vulkan-radeon intel-media-driver
+
+# área de trabalho
+hyprland hyprland-guiutils hyprpicker hyprsunset uwsm sddm quickshell
+xdg-desktop-portal-hyprland xdg-desktop-portal-gtk qt6-wayland qt6-imageformats gtk4-layer-shell webp-pixbuf-loader
+noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd woff2-font-awesome
+gnome-themes-extra yaru-icon-theme gnome-keyring
+
+# aplicativos
+brave-bin nautilus nautilus-python sushi gnome-disk-utility gnome-text-editor evince imv mpv file-roller
+foot btop fastfetch flatpak rclone tesseract tesseract-data-eng webkitgtk-6.0
+gvfs-mtp gvfs-smb udiskie ffmpegthumbnailer xdg-terminal-exec
+
+# terminal
+git jq gum bat eza fd fzf ripgrep zoxide starship tmux neovim
+wl-clipboard grim slurp wtype imagemagick inotify-tools socat plocate yay-bin
+
+# Simba
+simba simba-apps simba-draco simba-keyring

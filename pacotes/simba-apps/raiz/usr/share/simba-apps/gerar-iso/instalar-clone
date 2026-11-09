@@ -589,6 +589,16 @@ if [ -n "$UCODE" ] && ! arch-chroot "$T" pacman -Q "$UCODE" >/dev/null 2>&1; the
   if tem_rede; then x arch-chroot "$T" pacman -Sy --noconfirm --needed "$UCODE" || true
   else echo "aviso: sem $UCODE (sem internet)" >> "$LOG"; fi
 fi
+# ISO da receita: o sistema foi montado sem olhar para nenhum computador; a detecção de
+# hardware (Wi-Fi, áudio, notebooks específicos, Intel…) roda aqui, no computador de destino.
+if [ "${RECEITA:-0}" = 1 ] && [ -x "$T/usr/bin/simba-apply-hardware" ]; then
+  if tem_rede; then
+    x arch-chroot "$T" env SIMBA_INSTALL_LOG_FILE=/var/log/simba-install.log \
+      simba-apply-hardware --install-user "${NEW_USER:-$OLD_USER}" || echo "aviso: simba-apply-hardware" >> "$LOG"
+  else
+    echo "aviso: sem internet, simba-apply-hardware fica para depois (sudo simba-apply-hardware --install-user ${NEW_USER:-$OLD_USER})" >> "$LOG"
+  fi
+fi
 # entrada automática (SDDM)
 if [ "$AUTO_LOGIN" = s ]; then
   mkdir -p "$T/etc/sddm.conf.d"

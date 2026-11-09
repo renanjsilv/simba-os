@@ -1,0 +1,177 @@
+#!/bin/bash
+# iso/construir — monta a ISO oficial do Simba OS a partir da receita deste diretório,
+# sem copiar nada da máquina que está montando:
+#
+#   1. pacstrap dos pacotes de pacotes.txt (repositórios oficiais do Arch + [simba-os])
+#   2. arquivos de sistema/ (boot, idioma, teclado) com UUIDs de modelo (uuids.env)
+#   3. usuário modelo "simbamodelo" (o instalador troca pelo de quem instalar)
+#   4. configuração do Simba (simba-apply-system, sem a parte de hardware: essa roda
+#      no computador de destino, pelo instalador)
+#   5. system.sqfs + home.sqfs + boot.tar + clone.env → gerar-iso-build (pendrive live +
+#      instalador) → simba-os-<versão>-x86_64.iso
+#
+# Uso: sudo iso/construir            (precisa de ~15 GB livres e internet)
+#      SIMBA_ISO_SAIDA=/pasta        (padrão: /mnt/dados/simba-iso ou /var/tmp/simba-iso)
+#      SIMBA_ISO_RAPIDA=1            (zstd em vez de xz: gera mais rápido, ISO maior)
+set -euo pipefail
+
+msg()  { printf '\n\e[1;34m==>\e[0m \e[1m%s\e[0m\n' "$*"; }
+info() { printf '    %s\n' "$*"; }
+die()  { printf '\n\e[1;31mERRO: %s\e[0m\n' "$*" >&2; exit 1; }
+
+[ "$(id -u)" = 0 ] || die "rode com sudo."
+I="$(cd "$(dirname "$0")" && pwd)"
+R="$(dirname "$I")"
+GERAR="$R/pacotes/simba-apps/raiz/usr/share/simba-apps/gerar-iso"
+VERSAO=$(cat "$I/VERSAO")
+USUARIO=simbamodelo   # nome único: o instalador troca toda ocorrência dele em /etc
+# shellcheck disable=SC1091
+. "$I/uuids.env"
+
+if [ -n "${SIMBA_ISO_SAIDA:-}" ]; then SAIDA=$SIMBA_ISO_SAIDA
+elif mountpoint -q /mnt/dados; then SAIDA=/mnt/dados/simba-iso
+else SAIDA=/var/tmp/simba-iso; fi
+WORK="$SAIDA/work"
+RAIZ="$WORK/raiz"
+CLONE="$WORK/clone"
+
+for c in pacstrap arch-chroot mksquashfs mkarchiso xorriso; do
+  command -v "$c" >/dev/null || pacman -S --needed --noconfirm arch-install-scripts squashfs-tools archiso libisoburn >/dev/null
+done
+
+desmontar() { set +e; for m in $(findmnt -Rno TARGET "$RAIZ" 2>/dev/null | sort -r); do umount -l "$m"; done; }
+trap desmontar EXIT
+
+# ---------------------------------------------------------------- 1. pacotes
+msg "Simba OS $VERSAO — montando o sistema em $RAIZ"
+desmontar
+rm -rf "$WORK"
+mkdir -p "$RAIZ" "$CLONE"
+
+# pacman.conf só com os repositórios oficiais e o [simba-os] (nada desta máquina)
+cat > "$WORK/pacman.conf" <<'EOF'
+[options]
+HoldPkg = pacman glibc
+Architecture = auto
+ParallelDownloads = 5
+SigLevel = Required DatabaseOptional
+LocalFileSigLevel = Optional
+
+[core]
+Include = /etc/pacman.d/mirrorlist
+[extra]
+Include = /etc/pacman.d/mirrorlist
+[multilib]
+Include = /etc/pacman.d/mirrorlist
+
+[simba-os]
+SigLevel = Required DatabaseRequired
+Server = https://github.com/renanjsilv/simba-os/releases/download/repo
+EOF
+# SIMBA_ISO_REPO_LOCAL=<pasta com .pkg.tar.zst>: testa pacotes ainda não publicados (vêm antes
+# do [simba-os]; sem assinatura — só para teste, nunca para a ISO publicada)
+if [ -n "${SIMBA_ISO_REPO_LOCAL:-}" ]; then
+  mkdir -p "$WORK/repo-local"
+  for f in "$SIMBA_ISO_REPO_LOCAL"/*.pkg.tar.zst; do ln -sf "$f" "$WORK/repo-local/"; done
+  repo-add -q "$WORK/repo-local/simba-local.db.tar.zst" "$WORK"/repo-local/*.pkg.tar.zst
+  sed -i "/^\[simba-os\]/i [simba-local]\nSigLevel = Never\nServer = file://$WORK/repo-local\n" "$WORK/pacman.conf"
+  info "AVISO: usando pacotes locais sem assinatura de $SIMBA_ISO_REPO_LOCAL (só teste)"
+fi
+mapfile -t PACOTES < <(grep -vE '^\s*(#|$)' "$I/pacotes.txt" | tr -s ' \t' '\n' | grep .)
+info "${#PACOTES[@]} pacotes na receita"
+# -G: não copia o chaveiro desta máquina; o do sistema novo é criado logo abaixo
+pacstrap -C "$WORK/pacman.conf" -G "$RAIZ" "${PACOTES[@]}"
+
+# ---------------------------------------------------------------- 2. sistema
+msg "Configuração do sistema (idioma, teclado, boot)"
+cp -a "$I/sistema/." "$RAIZ/"
+sed -i -e 's/^#\(pt_BR.UTF-8 UTF-8\)/\1/' -e 's/^#\(en_US.UTF-8 UTF-8\)/\1/' "$RAIZ/etc/locale.gen"
+arch-chroot "$RAIZ" locale-gen >/dev/null
+ln -sf /usr/share/zoneinfo/America/Sao_Paulo "$RAIZ/etc/localtime"
+arch-chroot "$RAIZ" pacman-key --init >/dev/null 2>&1
+arch-chroot "$RAIZ" pacman-key --populate >/dev/null 2>&1
+
+# ---------------------------------------------------------------- 3. usuário modelo
+msg "Usuário modelo ($USUARIO)"
+arch-chroot "$RAIZ" useradd -m -G wheel -s /bin/bash -c "Simba" "$USUARIO"
+arch-chroot "$RAIZ" passwd -l "$USUARIO" >/dev/null
+install -m 440 /dev/stdin "$RAIZ/etc/sudoers.d/10-wheel" <<<'%wheel ALL=(ALL:ALL) ALL'
+
+# ---------------------------------------------------------------- 4. Simba
+msg "Configuração do Simba (simba-apply-system, sem hardware)"
+# Como o simba-apply-system, mas a detecção de hardware fica para o instalador (ela
+# veria o computador que monta a ISO). Só entram os passos que valem para qualquer máquina.
+cat > "$RAIZ/root/montar-simba.sh" <<'EOF'
+set -uo pipefail
+export SIMBA_INSTALL_USER="$1" SIMBA_FIRST_INSTALL=1 SIMBA_UPGRADE=0
+export SIMBA_PATH=/usr/share/simba SIMBA_INSTALL=/usr/share/simba/install
+export SIMBA_INSTALL_LOG_FILE=/var/log/simba-install.log SIMBA_LOG_TO_STDOUT=1
+export PATH="$SIMBA_PATH/bin:$PATH"
+source "$SIMBA_INSTALL/helpers/logging.sh"
+source "$SIMBA_INSTALL/helpers/as-root.sh"
+falhas=()
+run_logged() {
+  echo "-- $(basename "$1")"
+  bash -c "source '$SIMBA_INSTALL/helpers/as-root.sh'; source '$1'" || falhas+=("$(basename "$1")")
+}
+start_install_log
+source "$SIMBA_INSTALL/config/all.sh"
+for h in network set-wireless-regdom bluetooth fix-fkeys; do run_logged "$SIMBA_INSTALL/hardware/$h.sh"; done
+source "$SIMBA_INSTALL/login/all.sh"
+source "$SIMBA_INSTALL/post-install/all.sh"
+stop_install_log
+[ ${#falhas[@]} -eq 0 ] || echo "AVISO: falharam: ${falhas[*]}"
+EOF
+arch-chroot "$RAIZ" bash /root/montar-simba.sh "$USUARIO" 2>&1 | tee "$WORK/montar-simba.log" | grep -E '^(--|AVISO)' || true
+rm -f "$RAIZ/root/montar-simba.sh"
+# apps próprios para o usuário modelo (barra, módulos, atalhos)
+arch-chroot "$RAIZ" runuser -u "$USUARIO" -- env HOME="/home/$USUARIO" simba-apps-usuario >"$WORK/apps-usuario.log" 2>&1 \
+  || info "aviso: simba-apps-usuario (ver $WORK/apps-usuario.log)"
+
+# ---------------------------------------------------------------- limpeza
+msg "Limpando o que é de cada instalação"
+rm -rf "$RAIZ/etc/pacman.d/gnupg"            # o instalador cria um chaveiro novo
+: > "$RAIZ/etc/machine-id"
+rm -rf "$RAIZ"/var/cache/pacman/pkg/* "$RAIZ"/var/log/pacman.log "$RAIZ"/var/tmp/* "$RAIZ"/tmp/*
+rm -rf "$RAIZ/root/.cache" "$RAIZ/home/$USUARIO/.cache"
+rm -f "$RAIZ/etc/ssh"/ssh_host_* 2>/dev/null || true
+
+# ---------------------------------------------------------------- 5. pacote do sistema
+msg "Compactando o sistema"
+desmontar
+if [ -n "${SIMBA_ISO_RAPIDA:-}" ]; then SQ=(-comp zstd -Xcompression-level 15)
+else SQ=(-comp xz -Xbcj x86 -b 1M); fi
+mksquashfs "$RAIZ" "$CLONE/system.sqfs" "${SQ[@]}" -noappend -wildcards -e 'home/*' 'boot/*' 'proc/*' 'sys/*' 'dev/*' 'run/*'
+mksquashfs "$RAIZ/home" "$CLONE/home.sqfs" "${SQ[@]}" -noappend
+tar -C "$RAIZ/boot" -cf "$CLONE/boot.tar" .
+cat > "$CLONE/clone.env" <<EOF
+# Gerado por iso/construir em $(date '+%F %T') — Simba OS $VERSAO (receita)
+CLONE_DATE='$(date '+%F %T')'
+OLD_HOSTNAME='simba'
+MODO='distribuivel'
+RECEITA=1
+NOME_SISTEMA='Simba OS'
+OLD_USER='$USUARIO'
+OLD_MACHINE_ID=''
+OLD_FS_UUID='$OLD_FS_UUID'
+OLD_ESP_UUID='$OLD_ESP_UUID'
+OLD_LUKS_UUID='$OLD_LUKS_UUID'
+OLD_PARTUUID='$OLD_PARTUUID'
+ROOT_SUBVOL='@'
+HOME_SUBVOL='@home'
+NEED_BYTES=$(( ($(stat -c %s "$CLONE/system.sqfs") + $(stat -c %s "$CLONE/home.sqfs")) * 3 + 16 * 1024 ** 3 ))
+EOF
+info "sistema: $(du -h "$CLONE/system.sqfs" | cut -f1)   pessoal: $(du -h "$CLONE/home.sqfs" | cut -f1)   boot: $(du -h "$CLONE/boot.tar" | cut -f1)"
+
+# ---------------------------------------------------------------- 6. ISO
+msg "Pendrive de instalação"
+# GERAR_ISO_GUI=1: modo do app (sem perguntas; o caminho sai numa linha "@@ISO")
+GERAR_ISO_GUI=1 GERAR_ISO_CLONE="$CLONE" GERAR_ISO_NOME="Simba OS" GERAR_ISO_RAPIDA="${SIMBA_ISO_RAPIDA:-}" \
+  bash "$GERAR/gerar-iso-build" </dev/null | tee "$WORK/gerar-iso.log" | grep -v '^@@ETAPA'
+ISO=$(sed -n 's/^@@ISO //p' "$WORK/gerar-iso.log" | tail -1)
+[ -f "$ISO" ] || die "a ISO não foi gerada (ver $WORK/gerar-iso.log)"
+FINAL="$SAIDA/simba-os-$VERSAO-x86_64.iso"
+mv -f "$ISO" "$FINAL"
+(cd "$SAIDA" && sha256sum "$(basename "$FINAL")" > "$(basename "$FINAL").sha256")
+chown -R "${SUDO_USER:-root}:" "$SAIDA" 2>/dev/null || true
+msg "Pronto: $FINAL ($(du -h "$FINAL" | cut -f1))"

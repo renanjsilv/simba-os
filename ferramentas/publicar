@@ -15,8 +15,11 @@ fi
 "$R/ferramentas/construir"
 cd "$R/dist"
 rm -f "$REPO_NOME".db* "$REPO_NOME".files*
+# o GitHub troca ":" por "." no nome dos arquivos (época, ex.: brave-bin-1:1.2-1): renomeia
+# antes do repo-add, para o banco já apontar para o nome que o GitHub vai guardar
+for f in *:*.pkg.tar.zst *:*.pkg.tar.zst.sig; do [[ -e $f ]] && mv -f "$f" "${f//:/.}"; done
 # só a versão mais nova de cada pacote entra no banco
-mais_novos=$(for p in "${PACOTES[@]}"; do ls -t "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | head -1; done)
+mais_novos=$(for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do ls -t "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1; done)
 repo-add -s -k "$CHAVE" "$REPO_NOME.db.tar.zst" $mais_novos
 # o GitHub não guarda links: troca os links .db/.files por cópias
 for f in "$REPO_NOME".db "$REPO_NOME".files "$REPO_NOME".db.sig "$REPO_NOME".files.sig; do

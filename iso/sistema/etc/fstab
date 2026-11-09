@@ -1,0 +1,6 @@
+# /etc/fstab — Simba OS (o instalador troca os UUIDs)
+UUID=5133ba05-0000-4000-8000-000000000001	/         	btrfs	rw,relatime,compress=zstd:3,space_cache=v2,subvol=/@	0 0
+UUID=5133ba05-0000-4000-8000-000000000001	/home     	btrfs	rw,relatime,compress=zstd:3,space_cache=v2,subvol=/@home	0 0
+UUID=5133ba05-0000-4000-8000-000000000001	/var/cache/pacman/pkg	btrfs	rw,relatime,compress=zstd:3,space_cache=v2,subvol=/@pkg	0 0
+UUID=5133ba05-0000-4000-8000-000000000001	/var/log  	btrfs	rw,relatime,compress=zstd:3,space_cache=v2,subvol=/@log	0 0
+UUID=5133-BA05	/boot	vfat	rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=ascii,shortname=mixed,utf8,errors=remount-ro	0 2

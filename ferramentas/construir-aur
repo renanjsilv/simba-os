@@ -1,0 +1,36 @@
+#!/bin/bash
+# construir-aur [pacote…] — compila as receitas do AUR guardadas em pacotes-aur/ (dependências do
+# Simba que não estão nos repositórios oficiais) e põe o resultado em dist/, assinado.
+# Assim uma instalação nova só precisa dos repositórios oficiais + [simba-os].
+# Atualizar uma receita: ferramentas/construir-aur --atualizar <pacote> (baixa o PKGBUILD do AUR;
+# revise o diff no git antes de publicar).
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+source "$R/ferramentas/config.sh"
+mkdir -p "$R/dist"
+if [[ ${1:-} == --atualizar ]]; then
+  shift
+  for p in "$@"; do
+    t=$(mktemp -d)
+    git clone -q --depth 1 "https://aur.archlinux.org/$p.git" "$t/$p"
+    rm -rf "$t/$p/.git" "$t/$p/.SRCINFO"
+    mkdir -p "$R/pacotes-aur/$p" && cp -a "$t/$p/." "$R/pacotes-aur/$p/"
+    rm -rf "$t"
+    git -C "$R" --no-pager diff --stat -- "pacotes-aur/$p"
+  done
+  exit 0
+fi
+for p in "${@:-${PACOTES_AUR[@]}}"; do
+  [[ -f $R/pacotes-aur/$p/PKGBUILD ]] || { echo "sem receita: pacotes-aur/$p" >&2; exit 1; }
+  echo "── $p (AUR)"
+  t=$(mktemp -d)
+  cp -a "$R/pacotes-aur/$p/." "$t/"
+  (cd "$t" && PKGDEST="$R/dist" SRCDEST="$t/src-cache" BUILDDIR="$t/build" \
+     makepkg -f --noconfirm --needed --nosign >"$t/makepkg.log" 2>&1) || { tail -30 "$t/makepkg.log"; exit 1; }
+  rm -rf "$t"
+done
+if [[ -n $CHAVE && -z ${SEM_ASSINAR:-} ]]; then
+  for f in "$R"/dist/*.pkg.tar.zst; do
+    [[ -f $f.sig && $f.sig -nt $f ]] || gpg --batch --yes -u "$CHAVE" --detach-sign "$f"
+  done
+fi

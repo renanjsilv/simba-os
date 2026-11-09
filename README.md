@@ -3,113 +3,126 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/imagens/banner-escuro.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/imagens/banner-claro.png">
-  <img alt="Simba OS — o gatinho Simba e o nome do sistema" src="docs/imagens/banner-escuro.png" width="820">
+  <img alt="Simba OS" src="docs/imagens/banner-escuro.png" width="760">
 </picture>
 
-<br><br>
+<p>
+Distribuição baseada no Arch Linux, com Hyprland e uma área de trabalho completa:<br>
+barra de tarefas, Menu Iniciar, Configurações e aplicativos próprios, em português.
+</p>
 
-**Uma distribuição baseada no Arch Linux, com Hyprland e uma área de trabalho familiar:**<br>
-barra de tarefas, Menu Iniciar, Configurações e apps próprios, tudo em português.
+<p>
+<a href="https://archlinux.org"><img alt="Base: Arch Linux" src="https://img.shields.io/badge/base-Arch_Linux-1793D1?style=flat-square&logo=archlinux&logoColor=white"></a>
+<a href="https://hyprland.org"><img alt="Compositor: Hyprland" src="https://img.shields.io/badge/compositor-Hyprland-1f2328?style=flat-square"></a>
+<a href="https://quickshell.org"><img alt="Shell: Quickshell" src="https://img.shields.io/badge/shell-Quickshell-1f2328?style=flat-square"></a>
+<a href="LICENSE"><img alt="Licença: MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-1f2328?style=flat-square"></a>
+</p>
+
+<p>
+<a href="#instalação"><b>Instalação</b></a> &nbsp;·&nbsp;
+<a href="#capturas-de-tela"><b>Capturas de tela</b></a> &nbsp;·&nbsp;
+<a href="#desenvolvimento"><b>Desenvolvimento</b></a> &nbsp;·&nbsp;
+<a href="#licença"><b>Licença</b></a>
+</p>
 
 <br>
 
-[![Arch Linux](https://img.shields.io/badge/base-Arch%20Linux-1793D1?style=for-the-badge&logo=archlinux&logoColor=white)](https://archlinux.org)
-[![Hyprland](https://img.shields.io/badge/Hyprland-Wayland-58E1FF?style=for-the-badge&logo=wayland&logoColor=white)](https://hyprland.org)
-[![Licença MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-a6d189?style=for-the-badge)](LICENSE)
-[![Idiomas](https://img.shields.io/badge/idiomas-pt--BR%20%C2%B7%20en-f5a97f?style=for-the-badge)](#-idiomas)
-
-[Destaques](#-destaques) ·
-[Apps](#-apps-do-simba) ·
-[Instalação](#-instalação) ·
-[Papéis de parede](#%EF%B8%8F-papéis-de-parede) ·
-[Desenvolvimento](#%EF%B8%8F-desenvolvimento) ·
-[Licença](#-licença)
+<img alt="Área de trabalho do Simba OS com o Menu Iniciar aberto" src="docs/imagens/capturas/menu-iniciar.png" width="900">
 
 </div>
 
----
+<br>
 
-## ✨ Destaques
+## Sobre
 
-<table>
-<tr>
-<td width="50%" valign="top">
+O Simba OS é um Arch Linux pronto para usar no dia a dia. Por baixo, é o Arch de sempre:
+`pacman`, AUR e atualizações contínuas. Por cima, o Hyprland roda uma área de trabalho
+organizada do jeito que a maioria das pessoas já conhece. Configurações comuns, como tela,
+rede, som, temas e contas, são feitas por aplicativos, sem editar arquivos de texto.
 
-### 🪟 Área de trabalho familiar
-Barra de tarefas, **Menu Iniciar**, bandeja do sistema, notificações e botões de janela,
-tudo construído com Quickshell sobre o **Hyprland**. Fica bonito no Wayland e não
-estranha quem chega do Windows.
-
-</td>
-<td width="50%" valign="top">
-
-### ⚙️ Configurações de verdade
-Um app de **Configurações** com tela, som, rede, Bluetooth, temas, papel de parede,
-desfoque da barra e tema de boot. Ninguém precisa editar arquivo de texto para mudar
-o básico.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🐉 Draco, assistente de voz
-Palavra de ativação, transcrição com Whisper, vozes Piper/Edge e integração com
-agentes de IA. Responde em português.
-
-</td>
-<td width="50%" valign="top">
-
-### 🤖 Agentes de IA no desktop
-Chat próprio para Claude Code, Codex, Gemini e outros, com sessões, fila, voz e um
-**navegador embutido** que o agente consegue controlar.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 💿 Gere sua própria ISO
-O **Gerar ISO** cria uma imagem instalável a partir da sua máquina, como clone pessoal
-ou como versão distribuível, sem os seus dados. O instalador detecta NVIDIA e
-microcódigo sozinho.
-
-</td>
-<td width="50%" valign="top">
-
-### 🔄 Atualizações assinadas
-Os pacotes do Simba saem de um repositório pacman próprio, assinado com GPG. O
-**Atualizar tudo** atualiza o Arch, o AUR e o Simba de uma vez.
-
-</td>
-</tr>
-</table>
-
-## 📦 Apps do Simba
-
-| | App | O que faz |
-|:-:|---|---|
-| ⚙️ | **Configurações** | Central do sistema: aparência, temas (com loja da comunidade), tela, som, rede, contas |
-| 🗂️ | **Explorador de Arquivos** | Gerenciador de arquivos próprio |
-| 📊 | **Gerenciador de Tarefas** | Processos, desempenho e apps em execução |
-| 🤖 | **Agentes de IA** | Chat com agentes de código, voz e navegador embutido |
-| 🎙️ | **Transcrever** | Áudio para texto, localmente, com Whisper |
-| 🧮 | **Calculadora** | Calculadora no visual do sistema |
-| 💿 | **Gerar ISO** | Cria uma ISO instalável (clone pessoal ou distribuível) |
-| 👋 | **Boas-vindas** | Primeiros passos depois da instalação |
-| 🔒 | **Tela de bloqueio** e **temas de boot** | Plymouth e bloqueio com a identidade do Simba |
-
-## 💾 Instalação
+Todo o sistema está em português do Brasil, com inglês como segunda opção. Cada parte é
+um pacote pacman comum, com atualizações assinadas.
 
 > [!NOTE]
-> O Simba OS ainda é um projeto pessoal em evolução. A ISO pública e o repositório de
-> pacotes assinados estão sendo preparados.
+> O Simba OS é um projeto pessoal em desenvolvimento ativo. A ISO pública e o repositório
+> de pacotes assinados ainda estão sendo preparados. Por enquanto, a forma de instalar é
+> gerar a ISO a partir de uma máquina com o Simba (veja [Instalação](#instalação)).
 
-**Pela ISO:** gere a imagem no app **Gerar ISO** (modo *Distribuível*), grave num pendrive
-e dê boot. O instalador pergunta disco, usuário e login automático.
+## O que vem no sistema
 
-**Num Arch Linux que já existe:** adicione o repositório ao `/etc/pacman.conf`
-(o pacote `simba-keyring` faz isso sozinho):
+**Área de trabalho.** Barra de tarefas com prévia das janelas, Menu Iniciar com busca de
+apps, configurações e arquivos, bandeja do sistema, central de notificações, tela de
+bloqueio e tema de boot (Plymouth) próprios.
+
+**Aplicativos.**
+
+| Aplicativo | Função |
+|---|---|
+| Configurações | Tela, som, rede, Bluetooth, contas, temas, papel de parede, barra e janelas |
+| Explorador de Arquivos | Acesso rápido, favoritos, abas, Google Drive e OneDrive |
+| Gerenciador de Tarefas | Processos, desempenho, aplicativos de inicialização e serviços |
+| Agentes de IA | Chat para Claude Code, Codex, Gemini e outros, com voz e navegador embutido |
+| Draco | Assistente de voz com palavra de ativação, Whisper e vozes Piper/Edge |
+| Transcrever | Converte áudio em texto localmente, com Whisper |
+| Gerar ISO | Cria uma ISO instalável da máquina: clone pessoal ou versão distribuível, sem dados pessoais |
+| Calculadora, Boas-vindas, Loja de Apps | Ferramentas do dia a dia e primeiros passos |
+
+**Sistema.** O instalador detecta a placa NVIDIA e escolhe o driver certo, além do
+microcódigo Intel ou AMD. O **Atualizar tudo** atualiza Arch, AUR e Simba de uma vez.
+Também há pontos de restauração e backup no Google Drive.
+
+## Capturas de tela
+
+<table>
+  <tr>
+    <td width="50%"><img alt="Configurações, página Personalização" src="docs/imagens/capturas/configuracoes.png"></td>
+    <td width="50%"><img alt="Explorador de Arquivos" src="docs/imagens/capturas/explorador.png"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Configurações: temas, papel de parede e tipografia</sub></td>
+    <td align="center"><sub>Explorador de Arquivos</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img alt="Gerenciador de Tarefas e Calculadora" src="docs/imagens/capturas/gerenciador-calculadora.png"></td>
+    <td width="50%"><img alt="Papel de parede Simba e a lua" src="docs/imagens/papel-simba-lua.jpg"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Gerenciador de Tarefas e Calculadora</sub></td>
+    <td align="center"><sub>Um dos papéis de parede do sistema</sub></td>
+  </tr>
+</table>
+
+<details>
+<summary><b>Papéis de parede</b></summary>
+<br>
+
+O sistema vem com 18 papéis de parede próprios, claros e escuros.
+
+<table>
+  <tr>
+    <td><img alt="Simba no pôr do sol" src="docs/imagens/papel-simba-por-do-sol.jpg"></td>
+    <td><img alt="Retrato do Simba" src="docs/imagens/papel-simba-retrato-escuro.jpg"></td>
+    <td><img alt="Patinhas" src="docs/imagens/papel-simba-patinhas.jpg"></td>
+  </tr>
+  <tr>
+    <td><img alt="Montanhas" src="docs/imagens/papel-montanhas.jpg"></td>
+    <td><img alt="Aurora" src="docs/imagens/papel-aurora-escura.jpg"></td>
+    <td><img alt="Simba e a lua" src="docs/imagens/papel-simba-lua.jpg"></td>
+  </tr>
+</table>
+</details>
+
+## Instalação
+
+### Pela ISO
+
+1. Numa máquina com o Simba OS, abra **Gerar ISO** e escolha o modo **Distribuível**.
+2. Grave a ISO num pendrive (por exemplo, com `dd` ou o Fedora Media Writer).
+3. Dê boot pelo pendrive. O instalador pergunta o disco, o usuário e se o login deve ser automático.
+
+### Num Arch Linux já instalado
+
+Adicione o repositório ao `/etc/pacman.conf`:
 
 ```ini
 [simba-os]
@@ -117,73 +130,66 @@ SigLevel = Required DatabaseRequired
 Server = https://github.com/renanjsilv/simba-os/releases/download/repo
 ```
 
+Depois instale os pacotes:
+
 ```bash
 sudo pacman -Sy simba-keyring
 sudo pacman -S simba simba-apps simba-draco
 simba-apps-usuario        # uma vez por usuário
 ```
 
-## 🖼️ Papéis de parede
+> [!IMPORTANT]
+> O pacote `simba` substitui boa parte da configuração do Hyprland. Num sistema que já tem
+> configurações próprias, faça backup de `~/.config/hypr` antes de instalar.
 
-O Simba vem com papéis de parede próprios, e o gatinho aparece em vários deles.
+## Pacotes
 
-<table>
-<tr>
-<td><img src="docs/imagens/papel-simba-lua.jpg" alt="Simba e a lua"></td>
-<td><img src="docs/imagens/papel-simba-por-do-sol.jpg" alt="Simba no pôr do sol"></td>
-<td><img src="docs/imagens/papel-simba-retrato-escuro.jpg" alt="Retrato do Simba"></td>
-</tr>
-<tr>
-<td><img src="docs/imagens/papel-simba-patinhas.jpg" alt="Patinhas"></td>
-<td><img src="docs/imagens/papel-montanhas.jpg" alt="Montanhas"></td>
-<td><img src="docs/imagens/papel-aurora-escura.jpg" alt="Aurora"></td>
-</tr>
-</table>
-
-## 🧩 Pacotes
-
-| Pacote | O que tem |
+| Pacote | Conteúdo |
 |---|---|
-| `simba` | Base: shell (barra, menus, notificações), scripts `simba-*`, temas, `/etc/skel`, tradução. Derivado do [Omarchy](https://github.com/basecamp/omarchy) (MIT) |
-| `simba-apps` | Configurações, Menu Iniciar, Explorador, Gerenciador de Tarefas, Agentes, Transcrever, Boas-vindas, Gerar ISO, módulos da barra, tela de bloqueio, idiomas |
-| `simba-draco` | Assistente de voz Draco (o ambiente Python e as vozes são preparados para cada usuário) |
-| `simba-keyring` | Chave que assina os pacotes e a seção `[simba-os]` do `pacman.conf` |
+| `simba` | Base do sistema: barra, menus, notificações, scripts `simba-*`, temas, `/etc/skel` e tradução |
+| `simba-apps` | Configurações, Menu Iniciar, Explorador, Gerenciador de Tarefas, Agentes de IA, Transcrever, Gerar ISO, módulos da barra, tela de bloqueio e idiomas |
+| `simba-draco` | Assistente de voz Draco. O ambiente Python e as vozes são preparados para cada usuário |
+| `simba-keyring` | Chave pública que assina os pacotes e a seção `[simba-os]` do `pacman.conf` |
 
-Cada `pacotes/<pacote>/raiz/` espelha o sistema instalado (`raiz/usr/bin/x` → `/usr/bin/x`).
+## Desenvolvimento
 
-## 🛠️ Desenvolvimento
+Cada `pacotes/<pacote>/raiz/` espelha o sistema instalado: `raiz/usr/bin/x` vira `/usr/bin/x`.
 
 ```bash
-# 1. edite em pacotes/<pacote>/raiz/…  (suba pkgver/pkgrel no PKGBUILD a cada versão)
+# edite em pacotes/<pacote>/raiz/ e suba pkgver/pkgrel no PKGBUILD
 ferramentas/construir simba-apps                 # gera dist/simba-apps-*.pkg.tar.zst
-sudo pacman -U dist/simba-apps-*.pkg.tar.zst     # testa no seu computador
+sudo pacman -U dist/simba-apps-*.pkg.tar.zst     # instala e testa localmente
 
-# 2. publica para todas as instalações
 ferramentas/publicar                             # assina, gera o banco e envia ao GitHub Releases
 ```
 
-Na primeira vez, rode `ferramentas/criar-chave` (gera a chave GPG que assina os pacotes; a
-chave privada fica só no seu computador) e `gh auth login`.
+Na primeira publicação, rode `ferramentas/criar-chave` para gerar a chave GPG de assinatura.
+A chave privada fica só na máquina de quem publica.
 
-Os testes dos Agentes de IA ficam em `testes/agentes`:
+Testes do chat de Agentes de IA:
 
 ```bash
-python3 -m unittest discover -s testes/agentes
+python3 -m unittest discover -s testes/agentes   # parser e markdown
+testes/agentes/janela_integracao.sh              # janela GTK real, sem abrir nada na tela
 ```
 
-## 🌎 Idiomas
-
-Português (Brasil) e inglês. Os textos dos apps próprios ficam em catálogos em
-`pacotes/simba-apps/raiz/usr/share/simba-apps/idiomas/`, com o texto em português como
-chave. Para adicionar um idioma, crie um novo `.json`; o `LEIA-ME.md` da pasta e as
-ferramentas `extrair.py`, `marcar.py` e `conferir.py` explicam como.
-
-## 📜 Licença
-
-[MIT](LICENSE). A parte derivada do [Omarchy](https://github.com/basecamp/omarchy) mantém
-o aviso original em [`NOTICE`](NOTICE) e [`LICENSES/omarchy-MIT.txt`](LICENSES/omarchy-MIT.txt).
-
-<div align="center">
+<details>
+<summary><b>Traduções</b></summary>
 <br>
-<sub>Feito com ☕ e 🐈 no Brasil.</sub>
-</div>
+
+Os textos dos aplicativos próprios ficam em catálogos JSON em
+`pacotes/simba-apps/raiz/usr/share/simba-apps/idiomas/`, com o texto em português como chave.
+Para adicionar um idioma, crie um novo `.json` nessa pasta. O `LEIA-ME.md` da pasta explica
+as ferramentas `extrair.py`, `marcar.py` e `conferir.py`.
+</details>
+
+## Créditos
+
+O Simba OS existe graças a [Arch Linux](https://archlinux.org), [Hyprland](https://hyprland.org)
+e [Quickshell](https://quickshell.org). A base do pacote `simba` deriva do
+[Omarchy](https://github.com/basecamp/omarchy), da Basecamp.
+
+## Licença
+
+Distribuído sob a licença [MIT](LICENSE). A parte derivada do Omarchy mantém o aviso
+original em [`NOTICE`](NOTICE) e [`LICENSES/omarchy-MIT.txt`](LICENSES/omarchy-MIT.txt).

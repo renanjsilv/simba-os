@@ -291,6 +291,41 @@ class Teste:
         checar(w.get_visible(), "janela voltou depois da captura")
         w._limpar_anexos()
 
+        if w.navegador and w.navegador.socket:
+            print("14) agente fecha o navegador e o chat volta ao foco")
+            import json as js_
+            import socket as sk
+            import navegador as N
+
+            def pedir(dados):
+                with sk.socket(sk.AF_UNIX, sk.SOCK_STREAM) as s:
+                    s.setblocking(False)
+                    s.connect(w.navegador.socket)
+                    s.sendall((js_.dumps(dados) + "\n").encode())
+                    buf = b""
+                    for _ in range(200):
+                        try:
+                            buf += s.recv(65536)
+                        except BlockingIOError:
+                            pass
+                        if buf.endswith(b"\n"):
+                            break
+                        ctx = A.GLib.MainContext.default()
+                        while ctx.pending():
+                            ctx.iteration(False)
+                    return js_.loads(buf or b"{}")
+
+            w.navegador.mostrar()
+            yield 0.3
+            checar(w.navegador.get_visible() and w.btn_navegador.get_active(), "navegador aberto")
+            checar(pedir({"cmd": "fechar"}).get("ok"), "comando fechar respondeu ok")
+            yield 0.3
+            checar(not w.navegador.get_visible() and not w.btn_navegador.get_active(), "navegador escondido")
+            checar(w.get_focus() is w.text_input, "foco de volta na caixa de mensagem")
+            checar("simba-navegador fechar" in N.INSTRUCAO_AGENTE, "instrução ensina o agente a fechar")
+            checar(N._corpo_js('let a = 2; a * 3').endswith("return (function(){ return (a * 3); })();"),
+                   "js com várias instruções devolve a última")
+
 
 class AppTeste(A.App):
     def do_activate(self):

@@ -589,6 +589,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.navegador.set_visible(False)
         if self.btn_navegador.get_active():
             self.btn_navegador.set_active(False)
+        # a conversa volta a ser o foco: cursor na caixa de mensagem
+        self.text_input.grab_focus()
 
     def _usar_sugestao(self, texto):
         self.text_input_buf.set_text(texto)

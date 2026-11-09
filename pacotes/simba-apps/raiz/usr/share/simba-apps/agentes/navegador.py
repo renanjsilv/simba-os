@@ -106,6 +106,14 @@ def _js_chamar(corpo):
     return JS_BASE + "\nJSON.stringify((function(){ const S = window.__simba; " + corpo + " })());"
 
 
+def _corpo_js(codigo):
+    """`js` sem return: devolve o valor da última instrução (aceita várias, separadas por ;)."""
+    instrucoes = codigo.strip().rstrip(";").rsplit(";", 1)
+    ultima = instrucoes[-1].strip()
+    antes = instrucoes[0] + ";\n" if len(instrucoes) > 1 else ""
+    return antes + "return (function(){ return (" + ultima + "); })();"
+
+
 class PainelNavegador(Gtk.Box):
     COMANDOS = ("abrir", "ler", "elementos", "clicar", "digitar", "tecla", "rolar", "js", "captura",
                 "esperar", "voltar", "avancar", "recarregar", "url", "mostrar", "fechar")
@@ -458,7 +466,7 @@ class PainelNavegador(Gtk.Box):
 
     def _cmd_js(self, p, responder):
         codigo = p.get("codigo", "")
-        corpo = "return (function(){ return (" + codigo + "); })();" if "return" not in codigo else codigo
+        corpo = codigo if "return" in codigo else _corpo_js(codigo)
         self._js(corpo, lambda v, erro: responder(
             {"ok": not erro, **({"erro": erro} if erro else {"resultado": v})}))
 
@@ -501,4 +509,6 @@ Este chat tem um navegador ao lado da conversa, que o usuário também vê. Quan
   simba-navegador esperar <texto> [segundos]    espera um texto aparecer
   simba-navegador captura              PNG da tela do navegador (abra a imagem para ver)
   simba-navegador rolar baixo|cima · voltar · url · js <código>
-Senhas e códigos de dois fatores: deixe o usuário digitar no próprio navegador e espere (`esperar`) em vez de pedir no chat. O navegador guarda os logins entre conversas."""
+  simba-navegador fechar               esconde o navegador; a conversa volta a ocupar a janela
+Senhas e códigos de dois fatores: deixe o usuário digitar no próprio navegador e espere (`esperar`) em vez de pedir no chat. O navegador guarda os logins entre conversas.
+Quando terminar o que precisava fazer na página, rode `simba-navegador fechar` para o chat voltar ao foco. Só deixe aberto se o usuário ainda tiver algo a fazer nela (digitar uma senha, aprovar um login) ou se ele pediu para ver a página."""

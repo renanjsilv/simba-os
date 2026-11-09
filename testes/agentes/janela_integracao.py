@@ -121,6 +121,14 @@ class Teste:
         roteiro.append(("claude-ferramenta.ndjson", 0.15))
         self.enviar("o que tem nesta pasta?")
         yield 0.4
+        # o status (spinner/pensando) fica abaixo do texto da resposta, no fim da conversa
+        st, msg = self.win.ativo_status_box, self.win.ativo_mensagem
+        filhos, f = [], (st.get_parent().get_first_child() if st and st.get_parent() else None)
+        while f is not None:
+            filhos.append(f)
+            f = f.get_next_sibling()
+        checar(st in filhos and msg in filhos and filhos.index(st) > filhos.index(msg),
+               "status de pensamento fica abaixo do texto da resposta")
         print("2) mensagem enviada durante a resposta vai para a fila")
         roteiro.append(("claude-ferramenta.ndjson", 0.05))
         self.enviar("e o tamanho?")

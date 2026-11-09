@@ -1906,7 +1906,6 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         conteudo_detalhes.append(rotulo_detalhes)
         btn_detalhes.set_child(conteudo_detalhes)
         status_row.append(btn_detalhes)
-        card.append(status_row)
 
         # Painel expansível com o histórico de pensamento/ações (oculto por padrão)
         revealer = Gtk.Revealer()
@@ -1924,11 +1923,15 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         log_view.add_css_class("activity-log")
         log_buf = log_view.get_buffer()
         revealer.set_child(log_view)
-        card.append(revealer)
 
         # Corpo da resposta: blocos de texto, código e tabela (markdown.MensagemView)
         mensagem = self._criar_mensagem()
         card.append(mensagem)
+
+        # O status fica DEPOIS do texto: enquanto a resposta cresce ele continua no
+        # fim da conversa, à vista, em vez de subir junto com o começo da mensagem.
+        card.append(status_row)
+        card.append(revealer)
 
         # Ações da resposta
         act_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)

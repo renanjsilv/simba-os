@@ -19,6 +19,8 @@ Pagina {
   property var t: null          // barra-tarefas estado
   property var icones: ({})     // desktop-id → arquivo (modo colorido)
   property bool ocupado: false
+  // a descrição do desfoque depende do desfoque global do Hyprland
+  QtObject { Component.onCompleted: if (!Hypr.carregado) Hypr.recarregar() }
 
   readonly property var nomes: ({
     "simba.active-window": I18n.t("Janela ativa"), "simba.agents": I18n.t("Agentes de IA"), "simba.audio": I18n.t("Áudio"),
@@ -432,6 +434,20 @@ Pagina {
       }
     }
     Linha {
+      chave: "barraDesfoque"; glifo: Icones.blur
+      titulo: I18n.t("Desfoque atrás da barra")
+      descricao: Hypr.valor("decoration:blur:enabled", false)
+        ? I18n.t("Vidro fosco: o que fica atrás da barra aparece desfocado. Combine com a transparência para deixar mais ou menos cor do tema.")
+        : I18n.t("Precisa do desfoque ligado em Janelas e animações.")
+      Interruptor {
+        ligado: Preferencias.obter("barraDesfoque", false)
+        onAlternado: function(on) {
+          Hypr.definirDesfoqueBarra(on)
+          Navegacao.confirmar(on ? I18n.t("Desfoque da barra ligado") : I18n.t("Desfoque da barra desligado"))
+        }
+      }
+    }
+    Linha {
       chave: "barraCentro"; glifo: Icones.eyeOutline
       titulo: I18n.t("Ícones do centro")
       descricao: I18n.t("Indicadores, teclado, clima e atualizações no meio da barra. O relógio continua, se estiver lá.")
@@ -440,7 +456,7 @@ Pagina {
     Linha {
       chave: "barraBandeja"; glifo: Icones.chevronUp
       titulo: I18n.t("Seta de ícones ocultos")
-      descricao: I18n.t("Como no Windows 11: arraste ícones para a seta para escondê-los, e de dentro dela para fora para mostrar de novo.")
+      descricao: I18n.t("Arraste ícones para a seta para escondê-los, e de dentro dela para fora para mostrar de novo.")
       Interruptor { ligado: pg.t ? pg.t.bandeja.ativa : false; onAlternado: function(on) { pg.tarefas(["bandeja", on ? "ativar" : "desativar"], on ? I18n.t("Seta de ícones ocultos ativada") : I18n.t("Seta desativada, ícones de volta na barra")) } }
     }
   }

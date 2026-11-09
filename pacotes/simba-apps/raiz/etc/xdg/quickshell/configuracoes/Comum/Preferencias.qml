@@ -34,7 +34,8 @@ Singleton {
     luzNoturna: { temperatura: 4000, agendar: false, inicio: "20:00", fim: "07:00" },
     animVelocidade: 1.0,
     hypr: {},
-    gestos: false
+    gestos: false,
+    barraDesfoque: false
   })
 
   function obter(caminhoChave, padrao) {

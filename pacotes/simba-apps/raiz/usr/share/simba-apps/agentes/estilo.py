@@ -59,10 +59,11 @@ headerbar {
   box-shadow: 0 1px 4px alpha(#000, 0.06);
 }
 .assistant-avatar {
-  min-width: 28px;
-  min-height: 28px;
-  background-color: alpha(@accent_bg_color, 0.16);
-  border: 1px solid alpha(@accent_bg_color, 0.22);
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  background-color: alpha(@window_fg_color, 0.07);
+  border: 1px solid alpha(@window_fg_color, 0.10);
   border-radius: 999px;
 }
 .assistant-name { font-weight: 700; font-size: 13.5px; }
@@ -74,6 +75,7 @@ headerbar {
   font-size: 11px;
   font-weight: 600;
 }
+.model-badge image { color: @window_fg_color; }
 .msg-time { font-size: 11px; opacity: 0.55; }
 
 /* Atividade da IA: discreta por padrão, detalhes sob demanda */
@@ -324,5 +326,57 @@ headerbar {
 /* Blocos de código ocupam a largura da mensagem */
 .code-block-box { margin: 2px 0; }
 .code-block-box scrolledwindow { border-radius: 0 0 10px 10px; }
-.code-copy-btn box { spacing: 4px; }
+
+/* Anexos: faixa acima do texto e miniaturas nas mensagens */
+.anexos-faixa { margin: 2px 2px 4px 2px; }
+.anexos-faixa > flowboxchild, .user-bubble flowboxchild { padding: 0; }
+.anexo-botao {
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid alpha(@window_fg_color, 0.14);
+  background-color: alpha(@window_fg_color, 0.05);
+}
+.anexo-botao:hover { border-color: alpha(@accent_bg_color, 0.70); }
+.anexo-foto { border-radius: 9px; }
+.anexo-arquivo { padding: 6px 10px; font-size: 12px; }
+.anexo-remover {
+  min-width: 20px;
+  min-height: 20px;
+  padding: 0;
+  margin: 3px;
+  background-color: alpha(#000, 0.65);
+  color: #fff;
+}
+.anexo-remover:hover { background-color: @error_color; }
+.anexo-remover image { -gtk-icon-size: 12px; }
+
+/* Arrastando arquivos sobre a janela */
+.chat-bg:drop(active) { box-shadow: inset 0 0 0 2px alpha(@accent_bg_color, 0.70); }
+
+/* Busca na conversa */
+.barra-busca {
+  padding: 6px 12px;
+  background-color: alpha(@window_bg_color, 0.94);
+  border-bottom: 1px solid alpha(@window_fg_color, 0.07);
+}
+
+/* Painel de uso e custo */
+.uso-cartao {
+  background-color: alpha(@window_fg_color, 0.045);
+  border: 1px solid alpha(@window_fg_color, 0.09);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+.uso-rotulo { font-size: 12px; color: alpha(@window_fg_color, 0.62); }
+.uso-valor { font-size: 26px; font-weight: 700; }
+.uso-detalhe { font-size: 12px; color: alpha(@window_fg_color, 0.55); }
+.uso-numero { font-feature-settings: "tnum"; }
+progressbar.uso-barra > trough { min-height: 6px; border-radius: 3px; background-color: alpha(@accent_bg_color, 0.16); }
+progressbar.uso-barra > trough > progress { min-height: 6px; border-radius: 3px; background-color: @accent_bg_color; }
+levelbar.uso-medidor > trough { min-height: 8px; border-radius: 4px; padding: 0; }
+levelbar.uso-medidor > trough > block { min-height: 8px; border-radius: 4px; border: none; }
+levelbar.uso-medidor > trough > block.empty { background-color: alpha(@accent_bg_color, 0.16); }
+levelbar.uso-medidor > trough > block.uso-ok { background-color: @accent_bg_color; }
+levelbar.uso-medidor > trough > block.uso-alto { background-color: @warning_color; }
+levelbar.uso-medidor > trough > block.uso-critico { background-color: @error_color; }
 """

@@ -5,6 +5,8 @@
 
 VITRINE_FOTOS="1.5:/tmp/meio.png,5:/tmp/fim.png" (segundos:arquivo) e VITRINE_PAUSA
 (segundos entre as linhas do agente falso) para ver a resposta no meio da geração.
+VITRINE_TAM="1920x1000" (tamanho da janela), VITRINE_ANEXO=/img.png (anexa uma
+imagem ao pedido), VITRINE_SO_COMPOR=1 (não envia: mostra o anexo no composer).
 """
 import json
 import os
@@ -41,17 +43,41 @@ class Vitrine(A.App):
     def do_activate(self):
         w = A.MainWindow(self)
         w.unmaximize()
-        w.set_default_size(1100, 900)
+        larg, alt = (int(x) for x in os.environ.get("VITRINE_TAM", "1100x900").split("x"))
+        w.set_default_size(larg, alt)
         w.present()
 
         def enviar():
             w.text_input_buf.set_text("Revise o app.py e me diga o que corrigir")
+            # VITRINE_ANEXO=/caminho.png → manda o pedido com essa imagem anexada
+            if os.environ.get("VITRINE_ANEXO"):
+                w._adicionar_anexo(os.environ["VITRINE_ANEXO"])
+            if os.environ.get("VITRINE_SO_COMPOR"):
+                return False  # só mostra o composer com o anexo, sem enviar
             w._on_enviar()
             return False
         GLib.timeout_add(400, enviar)
 
+        # VITRINE_ACAO="busca:termo" ou "painel" → executa depois da resposta
+        acao = os.environ.get("VITRINE_ACAO", "")
+        def agir():
+            if acao.startswith("busca:"):
+                w._abrir_busca()
+                w.busca_entrada.set_text(acao[6:])
+                w._buscar()
+            elif acao == "painel":
+                w._abrir_painel_uso()
+            return False
+        if acao:
+            GLib.timeout_add(2500, agir)
+
         def foto(caminho, tentativa=0):
             from gi.repository import Gtk
+            if os.environ.get("VITRINE_TOPO") and tentativa == 0:  # VITRINE_TOPO=1: rola até o início
+                w.seguir_fim = False
+                w.scroller.get_vadjustment().set_value(0)
+                GLib.timeout_add(150, foto, caminho, 1)
+                return False
             larg, alt = w.get_width(), w.get_height()
             pintura = Gtk.WidgetPaintable.new(w)
             snap = Gtk.Snapshot()

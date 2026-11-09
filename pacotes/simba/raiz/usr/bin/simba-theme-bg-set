@@ -20,6 +20,10 @@ fi
 # Create symlink to the new background
 ln -nsf "$BACKGROUND" "$CURRENT_BACKGROUND_LINK"
 
+# Lembra a escolha: simba-theme-set mantém este papel ao trocar de tema.
+mkdir -p "$HOME/.local/state/simba"
+printf '%s\n' "$BACKGROUND" >"$HOME/.local/state/simba/papel-definido"
+
 # Update the live shell background immediately when it is running. The
 # background plugin also polls this symlink, but IPC avoids the visible delay.
 simba-shell -q background set "$BACKGROUND"

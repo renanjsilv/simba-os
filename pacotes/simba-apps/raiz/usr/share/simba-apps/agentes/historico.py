@@ -4,7 +4,6 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import sys
 import time
 import uuid
@@ -12,7 +11,7 @@ import uuid
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
 
 sys.path.insert(0, "/usr/share/simba-apps/idiomas")
 from simba_i18n import t as _t  # noqa: E402
@@ -398,7 +397,7 @@ class HistoricoMixin:
         for msg in self.conversa_mensagens:
             tipo = msg.get("tipo")
             if tipo == "user":
-                self._adicionar_bolha_usuario(msg.get("texto", ""), registro=False)
+                self._adicionar_bolha_usuario(msg.get("texto", ""), registro=False, anexos=msg.get("anexos"))
             elif tipo == "assistant":
                 widgets = self._adicionar_bolha_assistente(
                     msg.get("agente", ""),
@@ -473,13 +472,24 @@ class HistoricoMixin:
         )
 
     def _exportar_conversa(self):
+        """Pergunta onde salvar (antes gravava direto na pasta do projeto)."""
         if not self.conversa_mensagens:
+            self._adicionar_sistema(_t("Nada para exportar: a conversa está vazia."), registro=False)
             return
-        agora_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        titulo_limpo = re.sub(r"[^\w\-_\. ]", "_", self._titulo_conversa())[:30].strip()
-        nome_arq = f"conversa_{agora_str}_{titulo_limpo}.md"
-        destino = self.work_dir / nome_arq
+        titulo_limpo = re.sub(r"[^\w\-_\. ]", "_", self._titulo_conversa())[:40].strip() or "conversa"
+        dialog = Gtk.FileDialog(title=_t("Exportar conversa"))
+        dialog.set_initial_folder(Gio.File.new_for_path(str(self.work_dir)))
+        dialog.set_initial_name(f"{titulo_limpo}.md")
+        dialog.save(self, None, self._exportar_para)
 
+    def _exportar_para(self, dialog, resultado):
+        try:
+            arquivo = dialog.save_finish(resultado)
+        except GLib.Error:
+            return  # cancelado
+        if arquivo is None or not arquivo.get_path():
+            return
+        destino = Path(arquivo.get_path())
         linhas = [
             f"# {self._titulo_conversa()}\n",
             f"*Data: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}*\n",
@@ -489,22 +499,19 @@ class HistoricoMixin:
         for msg in self.conversa_mensagens:
             tipo = msg.get("tipo")
             if tipo == "user":
-                linhas.append(f"\n### 👤 {_t('Usuário')}\n\n{msg.get('texto', '')}\n")
+                anexos = "".join(f"\n- 📎 `{c}`" for c in msg.get("anexos") or [])
+                linhas.append(f"\n### 👤 {_t('Usuário')}\n\n{msg.get('texto', '')}{anexos}\n")
             elif tipo == "assistant":
                 agente = msg.get("agente", "")
                 nome = M.AGENTES.get(agente, {}).get("nome", agente or _t("IA"))
                 modelo = msg.get("modelo", "")
                 dur = f" · {msg['duracao']}" if msg.get("duracao") else ""
                 linhas.append(f"\n### 🤖 {nome} ({modelo}{dur})\n\n{msg.get('texto', '')}\n")
-
+            elif tipo == "handover":
+                linhas.append(f"\n> ⚡ {msg.get('antigo', '')} → {msg.get('proximo', '')}\n")
         try:
             destino.write_text("\n".join(linhas), encoding="utf-8")
-            subprocess.Popen([
-                "notify-send",
-                "-a", _t("Agentes de IA"),
-                "-i", "document-save-symbolic",
-                _t("Conversa exportada!"),
-                f"{_t('Salva com sucesso em:')} {destino.name}",
-            ])
-        except Exception as e:
-            self._adicionar_sistema(f"{_t('Erro ao exportar conversa:')} {e}")
+        except OSError as e:
+            self._adicionar_sistema(f"{_t('Erro ao exportar conversa:')} {e}", registro=False)
+            return
+        self._adicionar_sistema(f"{_t('Conversa exportada para')} {destino}", registro=False)

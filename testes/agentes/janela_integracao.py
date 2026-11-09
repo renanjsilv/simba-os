@@ -20,6 +20,15 @@ RAIZ = AQUI.parents[1] / "pacotes/simba-apps/raiz/usr/share/simba-apps/agentes"
 home = Path(tempfile.mkdtemp(prefix="agentes-teste-"))
 os.environ["HOME"] = str(home)
 os.environ["AGENTES_DEV"] = "1"
+os.environ.pop("XDG_CACHE_HOME", None)  # prints colados vão para o HOME temporário
+# captura de tela falsa: nunca fotografa a tela de verdade
+_bin = home / "bin"
+_bin.mkdir()
+(_bin / "simba-capture-screenshot").write_text(
+    "#!/bin/bash\nf=\"$SIMBA_SCREENSHOT_DIR/screenshot-teste.png\"\n"
+    "printf '\\x89PNG\\r\\n\\x1a\\n' > \"$f\"\necho \"$f\"\n")
+(_bin / "simba-capture-screenshot").chmod(0o755)
+os.environ["PATH"] = f"{_bin}:{os.environ['PATH']}"
 (home / ".config/agentes").mkdir(parents=True)
 (home / ".config/agentes/config.json").write_text(json.dumps(
     {"ordem": ["claude"], "inativos": [], "trocaAutomatica": True, "esperar": 8, "modelos": {}, "seguro": False}))
@@ -100,6 +109,14 @@ class Teste:
             return orig()
         w._render_parcial = espiar
 
+        print("0) janela parada não fica ocupando o processador")
+        import resource
+        yield 0.3
+        antes = resource.getrusage(resource.RUSAGE_SELF).ru_utime
+        yield 1.0
+        gasto = resource.getrusage(resource.RUSAGE_SELF).ru_utime - antes
+        checar(gasto < 0.3, f"CPU com a janela parada: {gasto:.2f}s em 1s")
+
         print("1) resposta com ferramenta, em tempo real")
         roteiro.append(("claude-ferramenta.ndjson", 0.15))
         self.enviar("o que tem nesta pasta?")
@@ -172,6 +189,99 @@ class Teste:
         dados = json.loads(next((home / ".local/state/simba/agents/conversas").glob("*.json")).read_text())
         checar(dados.get("sessoes", {}).get("claude"), "sessões gravadas no histórico")
         yield 0.1
+
+        print("8) colar um print (Ctrl+V com imagem) vira anexo e vai no pedido")
+        from gi.repository import Gdk
+        clip = w.text_input.get_clipboard()
+        pixels = GLib.Bytes.new(bytes([255, 0, 0, 255]) * 16)
+        textura = Gdk.MemoryTexture.new(4, 4, Gdk.MemoryFormat.R8G8B8A8, pixels, 16)
+        clip.set_content(Gdk.ContentProvider.new_for_value(textura))
+        w.text_input.grab_focus()
+        w.text_input.emit("paste-clipboard")
+        yield 0.8
+        checar(len(w.anexos_pendentes) == 1 and Path(w.anexos_pendentes[0]).is_file(), "print colado virou anexo (PNG salvo)")
+        checar(w.btn_enviar.get_sensitive(), "dá para enviar só com a imagem")
+        caminho = w.anexos_pendentes[0] if w.anexos_pendentes else "?"
+        roteiro.append(("claude-ferramenta.ndjson", 0.01))
+        self.enviar("o que tem no print?")
+        checar(caminho in chamadas[-1]["pedido"] and "o que tem no print?" in chamadas[-1]["pedido"],
+               "caminho da imagem vai no pedido ao agente")
+        ultima_user = [m for m in w.conversa_mensagens if m["tipo"] == "user"][-1]
+        checar(ultima_user.get("anexos") == [caminho] and ultima_user["texto"] == "o que tem no print?",
+               "anexo registrado na conversa (texto sem o caminho)")
+        checar(not w.anexos_pendentes and not w.box_anexos.get_visible(), "faixa de anexos limpa depois de enviar")
+        yield from self.esperar_fim()
+
+        print("9) Ctrl+V com texto continua colando texto")
+        clip.set_content(Gdk.ContentProvider.new_for_value("texto colado"))
+        w.text_input_buf.set_text("")
+        w.text_input.emit("paste-clipboard")
+        yield 0.5
+        ini, fim = w.text_input_buf.get_bounds()
+        checar(w.text_input_buf.get_text(ini, fim, True) == "texto colado" and not w.anexos_pendentes,
+               "texto colado normalmente, sem anexo")
+        w.text_input_buf.set_text("")
+
+        print("10) trocar o agente no meio da resposta não troca quem está respondendo")
+        roteiro.append(("claude-ferramenta.ndjson", 0.2))
+        self.enviar("pedido longo")
+        yield 0.2
+        w.dropdown.set_selected(0)
+        checar(w.agente_atual == "claude", "agente_atual continua sendo o que responde")
+        yield from self.esperar_fim()
+
+        print("11) busca na conversa (Ctrl+F)")
+        w._abrir_busca()
+        yield 0.5
+        foco = w.get_focus()
+        checar(foco is not None and foco.is_ancestor(w.busca_entrada), "Ctrl+F põe o foco no campo de busca")
+        w.busca_entrada.set_text("ARQUIVO")  # sem diferenciar maiúsculas/acentos
+        w._buscar()
+        n = len(w.busca_resultados)
+        checar(n >= 1, f"achou as ocorrências ({n})")
+        checar(" de " in w.busca_contagem.get_label(), "contagem 'n de m' na barra")
+        yield 0.5
+        checar(w._busca_ativa(), "barra continua aberta depois de achar")
+        antes = w.busca_indice
+        w._busca_ir(1)
+        checar(n == 1 or w.busca_indice != antes, "Enter vai para a próxima")
+        w.busca_entrada.set_text("zzz-nao-existe")
+        w._buscar()
+        checar(not w.busca_resultados, "termo inexistente: nada encontrado")
+        w._fechar_busca()
+        yield 0.2
+        checar(not w._busca_ativa(), "Esc/fechar some com a barra")
+        roteiro.append(("claude-ferramenta.ndjson", 0.05))
+        self.enviar("resposta enquanto busco")
+        w._abrir_busca()
+        yield from self.esperar_fim()
+        yield 0.2
+        foco = w.get_focus()
+        checar(foco is not None and (foco is w.busca_entrada or foco.is_ancestor(w.busca_entrada)),
+               "fim da resposta não rouba o foco da busca")
+        w._fechar_busca()
+
+        print("12) painel de uso e custo")
+        import painel
+        periodos, agentes = painel.coletar()
+        checar(periodos["hoje"]["respostas"] >= 1 and "claude" in agentes, "respostas de hoje somadas")
+        checar(periodos["30d"]["custo"] > 0, "custo somado do uso salvo")
+        w._abrir_painel_uso()
+        yield 0.8
+        dlg = w.get_visible_dialog()
+        checar(dlg is not None, "painel aberto sobre o chat")
+        conteudo = dlg.get_child().get_content().get_child() if dlg else None
+        conteudo = conteudo.get_child() if isinstance(conteudo, A.Gtk.Viewport) else conteudo
+        checar(isinstance(conteudo, A.Gtk.Box), "painel montou o conteúdo (cartões e tabela)")
+        if dlg:
+            dlg.close()
+
+        print("13) capturar área da tela anexa o print")
+        w._capturar_tela()
+        yield 1.5
+        checar(any(a.endswith("screenshot-teste.png") for a in w.anexos_pendentes), "print capturado virou anexo")
+        checar(w.get_visible(), "janela voltou depois da captura")
+        w._limpar_anexos()
 
 
 class AppTeste(A.App):

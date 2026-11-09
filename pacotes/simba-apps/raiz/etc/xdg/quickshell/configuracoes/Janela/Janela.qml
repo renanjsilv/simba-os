@@ -13,34 +13,77 @@ Scope {
   property var confirmacao: null
   readonly property bool aberta: carregador.active
 
-  readonly property var paginas: [
-    { id: "inicio", titulo: I18n.t("Início"), glifo: Icones.home },
+  // A lateral mostra grupos (como no Windows 11); as páginas de um grupo viram
+  // abas no topo do conteúdo. Os ids das páginas não mudaram: `configuracoes
+  // bluetooth`, a busca e os atalhos internos continuam abrindo a página certa.
+  readonly property var grupos: [
+    { id: "inicio", titulo: I18n.t("Início"), glifo: Icones.home, paginas: [
+      { id: "inicio", titulo: I18n.t("Início"), glifo: Icones.home } ] },
     { separador: true },
-    { id: "contas", titulo: I18n.t("Contas"), glifo: Icones.accountCircle },
-    { id: "personalizacao", titulo: I18n.t("Personalização"), glifo: Icones.palette },
-    { id: "janelas", titulo: I18n.t("Janelas e animações"), glifo: Icones.dockWindow },
-    { id: "tela", titulo: I18n.t("Tela"), glifo: Icones.monitor },
-    { id: "barra", titulo: I18n.t("Barra"), glifo: Icones.dockTop },
-    { id: "area", titulo: I18n.t("Área de trabalho"), glifo: Icones.viewGridOutline },
-    { separador: true },
-    { id: "bloqueio", titulo: I18n.t("Bloqueio e inatividade"), glifo: Icones.lockClock },
-    { id: "entrada", titulo: I18n.t("Teclado, mouse e touchpad"), glifo: Icones.keyboard },
-    { id: "som", titulo: I18n.t("Som"), glifo: Icones.volumeHigh },
-    { id: "rede", titulo: I18n.t("Rede e internet"), glifo: Icones.wifi },
-    { id: "bluetooth", titulo: I18n.t("Bluetooth"), glifo: Icones.bluetooth },
-    { id: "impressoras", titulo: I18n.t("Impressoras e scanners"), glifo: Icones.printer },
-    { id: "energia", titulo: I18n.t("Energia e bateria"), glifo: Icones.batteryHeart },
-    { id: "notificacoes", titulo: I18n.t("Notificações"), glifo: Icones.bell },
-    { separador: true },
-    { id: "atalhos", titulo: I18n.t("Atalhos de teclado"), glifo: Icones.keyboardOutline },
-    { id: "apps", titulo: I18n.t("Aplicativos padrão"), glifo: Icones.apps },
-    { id: "agentes", titulo: I18n.t("Agentes de IA"), glifo: Icones.robot },
-    { id: "restauracao", titulo: I18n.t("Restauração do sistema"), glifo: Icones.backupRestore },
-    { id: "sistema", titulo: I18n.t("Sistema"), glifo: Icones.informationOutline }
+    { id: "g-contas", titulo: I18n.t("Contas"), glifo: Icones.accountCircle, paginas: [
+      { id: "contas", titulo: I18n.t("Contas"), aba: I18n.t("Sua conta"), glifo: Icones.accountCircle },
+      { id: "bloqueio", titulo: I18n.t("Bloqueio e inatividade"), glifo: Icones.lockClock } ] },
+    { id: "g-sistema", titulo: I18n.t("Sistema"), glifo: Icones.laptop, paginas: [
+      { id: "tela", titulo: I18n.t("Tela"), glifo: Icones.monitor },
+      { id: "som", titulo: I18n.t("Som"), glifo: Icones.volumeHigh },
+      { id: "notificacoes", titulo: I18n.t("Notificações"), glifo: Icones.bell },
+      { id: "energia", titulo: I18n.t("Energia e bateria"), aba: I18n.t("Energia"), glifo: Icones.batteryHeart },
+      { id: "restauracao", titulo: I18n.t("Restauração do sistema"), aba: I18n.t("Restauração"), glifo: Icones.backupRestore },
+      { id: "sistema", titulo: I18n.t("Sobre o sistema"), aba: I18n.t("Sobre"), glifo: Icones.informationOutline } ] },
+    { id: "g-dispositivos", titulo: I18n.t("Bluetooth e dispositivos"), glifo: Icones.devices, paginas: [
+      { id: "bluetooth", titulo: I18n.t("Bluetooth"), glifo: Icones.bluetooth },
+      { id: "entrada", titulo: I18n.t("Teclado, mouse e touchpad"), aba: I18n.t("Teclado e mouse"), glifo: Icones.keyboard },
+      { id: "atalhos", titulo: I18n.t("Atalhos de teclado"), aba: I18n.t("Atalhos"), glifo: Icones.keyboardOutline },
+      { id: "impressoras", titulo: I18n.t("Impressoras e scanners"), aba: I18n.t("Impressoras"), glifo: Icones.printer } ] },
+    { id: "g-rede", titulo: I18n.t("Rede e internet"), glifo: Icones.wifi, paginas: [
+      { id: "rede", titulo: I18n.t("Rede e internet"), glifo: Icones.wifi } ] },
+    { id: "g-personalizacao", titulo: I18n.t("Personalização"), glifo: Icones.palette, paginas: [
+      { id: "personalizacao", titulo: I18n.t("Tema e papel de parede"), aba: I18n.t("Tema e fundo"), glifo: Icones.palette },
+      { id: "barra", titulo: I18n.t("Barra"), glifo: Icones.dockTop },
+      { id: "area", titulo: I18n.t("Área de trabalho"), glifo: Icones.viewGridOutline },
+      { id: "janelas", titulo: I18n.t("Janelas e animações"), aba: I18n.t("Janelas"), glifo: Icones.dockWindow } ] },
+    { id: "g-apps", titulo: I18n.t("Aplicativos"), glifo: Icones.apps, paginas: [
+      { id: "apps", titulo: I18n.t("Aplicativos padrão"), glifo: Icones.apps },
+      { id: "agentes", titulo: I18n.t("Agentes de IA"), glifo: Icones.robot } ] }
   ]
+  // todas as páginas, na ordem dos grupos (busca, Ctrl+PgUp/PgDn)
+  readonly property var paginas: {
+    var o = []
+    grupos.forEach(function(g) {
+      (g.paginas || []).forEach(function(p) { o.push(Object.assign({ grupo: g.id }, p)) })
+    })
+    return o
+  }
   function infoPagina(id) {
     for (var i = 0; i < paginas.length; i++) if (paginas[i].id === id) return paginas[i]
     return paginas[0]
+  }
+  function grupoDe(id) {
+    for (var i = 0; i < grupos.length; i++) {
+      var ps = grupos[i].paginas || []
+      for (var k = 0; k < ps.length; k++) if (ps[k].id === id) return grupos[i]
+    }
+    return grupos[0]
+  }
+  // última aba aberta de cada grupo: voltar ao grupo volta para ela
+  property var ultimaDoGrupo: ({})
+  Connections {
+    target: Navegacao
+    function onPaginaChanged() {
+      var m = Object.assign({}, j.ultimaDoGrupo)
+      m[j.grupoDe(Navegacao.pagina).id] = Navegacao.pagina
+      j.ultimaDoGrupo = m
+    }
+  }
+  function abrirGrupo(id) {
+    for (var i = 0; i < grupos.length; i++) {
+      var g = grupos[i]
+      if (g.id !== id) continue
+      var ultima = ultimaDoGrupo[id]
+      Navegacao.ir(ultima || g.paginas[0].id)
+      return
+    }
+    Navegacao.ir(id)
   }
   function paginaDaChave(chave) { return Busca.paginaDe(chave) || "inicio" }
 
@@ -97,7 +140,7 @@ Scope {
           }
         }
         function moverPagina(d) {
-          var ids = j.paginas.filter(function(p) { return !p.separador }).map(function(p) { return p.id })
+          var ids = j.paginas.map(function(p) { return p.id })
           var i = ids.indexOf(Navegacao.pagina)
           Navegacao.ir(ids[(i + d + ids.length) % ids.length])
         }
@@ -114,12 +157,12 @@ Scope {
             Layout.fillHeight: true
             Layout.preferredWidth: compacta ? 64 : 286
             compacta: raiz.compacta && !compactaBusca
-            paginas: j.paginas
+            paginas: j.grupos
             Behavior on Layout.preferredWidth { NumberAnimation { duration: Tema.medio; easing.type: Tema.curva } }
             onEscolhida: function(id) {
               if (id === "__busca") { compactaBusca = true; busca.forceActiveFocus(); return }
               busca.text = ""
-              Navegacao.ir(id)
+              j.abrirGrupo(id)
               raiz.forceActiveFocus()
             }
             onBuscaFoco: function(f) { if (!f && busca.text === "") compactaBusca = false }
@@ -142,7 +185,8 @@ Scope {
             Texto {
               anchors.verticalCenter: parent.verticalCenter
               x: 20
-              text: raiz.buscando ? I18n.t("Configurações  ›  Busca") : I18n.t("Configurações  ›  ") + j.infoPagina(Navegacao.pagina).titulo
+              text: raiz.buscando ? I18n.t("Configurações  ›  Busca") : I18n.t("Configurações  ›  ") + (j.grupoDe(Navegacao.pagina).paginas.length > 1
+                    ? j.grupoDe(Navegacao.pagina).titulo + "  ›  " : "") + j.infoPagina(Navegacao.pagina).titulo
               color: Tema.texto3
               font.pixelSize: Tema.tLegenda + 1
             }
@@ -227,10 +271,48 @@ Scope {
             anchors.topMargin: 40
             clip: true
 
+            // ── abas do grupo ────────────────────────────────────────────
+            Item {
+              id: abas
+              readonly property var grupo: j.grupoDe(Navegacao.pagina)
+              readonly property bool mostrar: !raiz.buscando && grupo.paginas.length > 1
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              height: mostrar ? 48 : 0
+              opacity: mostrar ? 1 : 0
+              visible: opacity > 0
+              Behavior on opacity { NumberAnimation { duration: Tema.rapido } }
+              Flickable {
+                // alinhado com a coluna das páginas (Pagina.qml)
+                width: Math.min(parent.width - 64, 940)
+                x: Math.round((parent.width - width) / 2)
+                y: 8
+                height: 36
+                clip: true
+                contentWidth: seletorAbas.width + 4
+                contentHeight: height
+                interactive: contentWidth > width
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+                Segmentado {
+                  id: seletorAbas
+                  x: 2
+                  y: 2
+                  opcoes: abas.grupo.paginas.map(function(p) { return { valor: p.id, rotulo: p.aba || p.titulo, glifo: p.glifo } })
+                  atual: Navegacao.pagina
+                  onEscolhido: function(v) { Navegacao.ir(v) }
+                }
+              }
+            }
+
             // ── page host ────────────────────────────────────────────────
             Loader {
               id: pagina
-              anchors.fill: parent
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              anchors.top: abas.bottom
               property string atual: ""
               opacity: raiz.buscando ? 0 : 1
               visible: opacity > 0

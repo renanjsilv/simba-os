@@ -109,6 +109,13 @@ Singleton {
     var over = separar(Preferencias.obter("hypr", {}))[0]
     var linhas = []
     if (Object.keys(over).length) linhas.push("hl.config(" + tabelaLua(over, 0) + ")")
+    if (Preferencias.obter("barraDesfoque", false)) {
+      // Vidro fosco atrás da barra: o desfoque cobre a barra inteira e a
+      // transparência da barra (simba-bar transparency) define o quanto da cor
+      // do tema fica por cima. Só a barra: os fantasmas de arrasto têm outro nome.
+      linhas.push("-- Barra com desfoque (Configurações › Personalização › Barra)")
+      linhas.push('hl.layer_rule({ match = { namespace = "^simba-bar$" }, blur = true })')
+    }
     var k = Number(Preferencias.obter("animVelocidade", 1.0))
     if (k > 0 && Math.abs(k - 1) > 0.001) {
       linhas.push("-- Velocidade das animações: " + k + I18n.t("× a duração padrão do Simba"))
@@ -163,6 +170,10 @@ Singleton {
     Preferencias.definir("animVelocidade", k)
     gravar.restart()
     recarregarDepois.restart()
+  }
+  function definirDesfoqueBarra(on) {
+    Preferencias.definir("barraDesfoque", on)
+    gravar.restart()
   }
   function definirGestos(on) {
     Preferencias.definir("gestos", on)

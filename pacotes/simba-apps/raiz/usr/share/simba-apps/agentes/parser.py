@@ -49,27 +49,27 @@ def descrever_ferramenta(nome, entrada):
     arquivo = Path(str(caminho)).name or str(caminho)
     consulta = entrada.get("query") or entrada.get("pattern") or entrada.get("url") or ""
     if cmd or low in ("bash", "shell", "run_command", "command_execution"):
-        return f"⚡ {_t('Executando:')} {_curto(cmd or nome, 60)}"
+        return f"{_t('Executando:')} {_curto(cmd or nome, 60)}"
     if low in ("read", "read_file", "view_file", "view"):
-        return f"⚡ {_t('Lendo:')} {arquivo or '…'}"
+        return f"{_t('Lendo:')} {arquivo or '…'}"
     if low in ("edit", "write", "multiedit", "write_to_file", "replace_file_content", "edit_file",
                "patch", "apply_patch", "file_change", "notebookedit"):
-        return f"⚡ {_t('Editando:')} {arquivo or '…'}"
+        return f"{_t('Editando:')} {arquivo or '…'}"
     if low in ("websearch", "search_web", "web_search"):
-        return f"⚡ {_t('Pesquisando na web:')} {_curto(consulta, 40)}"
+        return f"{_t('Pesquisando na web:')} {_curto(consulta, 40)}"
     if low in ("webfetch", "fetch", "web_fetch"):
-        return f"⚡ {_t('Abrindo:')} {_curto(consulta, 50)}"
+        return f"{_t('Abrindo:')} {_curto(consulta, 50)}"
     if low in ("grep", "glob", "search", "find", "codebase_search"):
-        return f"⚡ {_t('Procurando:')} {_curto(consulta or arquivo, 40)}"
+        return f"{_t('Procurando:')} {_curto(consulta or arquivo, 40)}"
     if low in ("list_dir", "ls", "list"):
-        return f"⚡ {_t('Listando:')} {arquivo or _t('arquivos')}"
+        return f"{_t('Listando:')} {arquivo or _t('arquivos')}"
     if low in ("task", "agent"):
         desc = entrada.get("description") or entrada.get("prompt") or ""
-        return f"⚡ {_t('Subagente:')} {_curto(desc, 50)}"
+        return f"{_t('Subagente:')} {_curto(desc, 50)}"
     if low in ("todowrite", "todo", "todo_list"):
-        return f"⚡ {_t('Atualizando a lista de tarefas')}"
+        return f"{_t('Atualizando a lista de tarefas')}"
     alvo = arquivo or consulta
-    return f"⚡ {nome}{': ' + _curto(alvo, 50) if alvo else ''}"
+    return f"{nome}{': ' + _curto(alvo, 50) if alvo else ''}"
 
 
 class AgentStreamParser:
@@ -379,13 +379,13 @@ class AgentStreamParser:
         if self.agente in SO_JSON:
             if re.search(r"\b(error|erro|fatal|panic|unauthori[sz]ed|limit|quota)\b", clean, re.I):
                 self._erro(clean)
-            self.on_status(f"⚡ {_curto(clean, 70)}")
+            self.on_status(f"{_curto(clean, 70)}")
             return
         m = re.match(r"^(?:Running command|Reading file|Editing file|Searching)\s*:?\s*(.*)", clean, re.I)
         if m:
-            self._status(f"⚡ {_curto(clean, 60)}")
+            self._status(f"{_curto(clean, 60)}")
             return
         if re.search(r"(?:Antigravity CLI|ctrl\+o to expand|\bcommands? \(\+\d+)", clean, re.I):
-            self.on_status(_t("⚡ Executando ações..."))
+            self.on_status(_t("Executando ações..."))
             return
         self._texto(clean + "\n")

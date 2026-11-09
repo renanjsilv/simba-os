@@ -15,6 +15,7 @@ from simba_i18n import t as _t  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import motor as M  # noqa: E402
+import marcas  # noqa: E402
 
 
 class CentralMixin:
@@ -240,13 +241,8 @@ class CentralMixin:
         self._atualizar_linhas_central(instalados)
 
     def _icone_agente(self, aid):
-        caminho = Path(f"/usr/share/simba/shell/plugins/agents/assets/{aid}.svg")
-        if caminho.exists():
-            img = Gtk.Image.new_from_file(str(caminho))
-        else:
-            img = Gtk.Image.new_from_icon_name("simba-agente")
-        img.set_pixel_size(24)
-        return img
+        # Mesmo logo da empresa usado no chat (marcas.py)
+        return marcas.imagem(marcas.icone_agente(aid, M.modelo_escolhido(aid, M.ler_config(verificar=False))), 24)
 
     def _opcoes_modelo(self, aid, atual):
         opcoes = [{"valor": "", "rotulo": _t("Padrão do agente")}]

@@ -3,7 +3,7 @@
 # bloqueio, sistema de idiomas (catálogos), atualização ("Atualizar tudo") e utilitários.
 pkgname=simba-apps
 pkgver=1.1.12
-pkgrel=15
+pkgrel=22
 pkgdesc="Simba OS: apps e ferramentas próprios (Configurações, Explorador, Gerenciador de Tarefas…)"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -23,4 +23,5 @@ install=simba-apps.install
 package() {
   cp -a "$startdir/raiz/." "$pkgdir/"
   install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 "$startdir/../../LICENSES/lobe-icons-MIT.txt" "$pkgdir/usr/share/licenses/$pkgname/lobe-icons-MIT.txt"
 }

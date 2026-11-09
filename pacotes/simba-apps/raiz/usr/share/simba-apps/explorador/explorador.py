@@ -1621,6 +1621,12 @@ class Janela(Adw.ApplicationWindow):
         campos = {}
         for chave, rotulo, segredo in prov.get("campos", []):
             r = Adw.PasswordEntryRow(title=rotulo) if segredo else Adw.EntryRow(title=rotulo)
+            if segredo:
+                # Campo de senha sem método de entrada: com fcitx5 no Wayland, o
+                # campo travava depois do 1º caractere (mesma correção do simba-senha).
+                texto = r.get_delegate()
+                if texto is not None:
+                    texto.set_property("im-module", "gtk-im-context-simple")
             g.add(r)
             campos[chave] = r
         estado = Gtk.Label(wrap=True, css_classes=["legenda"], margin_top=12, visible=False)
@@ -1752,7 +1758,7 @@ class Janela(Adw.ApplicationWindow):
 
     def _sobre(self):
         Adw.AboutDialog(application_name=_t("Explorador de Arquivos"), application_icon=APP_ID, version="1.0",
-                        developer_name=_t("Renan"), comments=_t("Gerenciador de arquivos no estilo do Windows 11 para o Simba OS."),
+                        developer_name=_t("Renan"), comments=_t("Gerenciador de arquivos do Simba OS."),
                         license_type=Gtk.License.MIT_X11).present(self)
 
     def _fechar_janela(self, *a):

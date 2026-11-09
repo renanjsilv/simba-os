@@ -117,7 +117,13 @@ Item {
       spacing: 1
       boundsBehavior: Flickable.StopAtBounds
       currentIndex: {
-        for (var i = 0; i < l.paginas.length; i++) if (l.paginas[i].id === Navegacao.pagina) return i
+        // a lateral lista grupos: vale o grupo que contém a página aberta
+        for (var i = 0; i < l.paginas.length; i++) {
+          var e = l.paginas[i]
+          if (e.id === Navegacao.pagina) return i
+          var ps = e.paginas || []
+          for (var k = 0; k < ps.length; k++) if (ps[k].id === Navegacao.pagina) return i
+        }
         return 0
       }
       highlightFollowsCurrentItem: false

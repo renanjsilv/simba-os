@@ -13,5 +13,9 @@ O restante (Configurações, Explorador de Arquivos, Gerenciador de Tarefas, Dra
 Boas-vindas, Gerar ISO, Conta, módulos da barra, sistema de idiomas e ferramentas) é do
 Simba OS, sob a licença MIT do arquivo LICENSE.
 
+Os logos das empresas de IA do chat Agentes de IA vêm do LobeHub Icons (MIT, Copyright (c)
+2023 LobeHub); texto em LICENSES/lobe-icons-MIT.txt e em agentes/logos/LICENSE. As marcas
+pertencem às respectivas empresas.
+
 Programas de terceiros instalados pelo sistema (Hyprland, Quickshell, Brave, apps do Flathub,
 modelos do Whisper, vozes do Piper etc.) mantêm as licenças dos seus autores.

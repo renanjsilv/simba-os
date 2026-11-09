@@ -3,6 +3,7 @@ import QtQuick 6.11
 import QtQuick.Effects
 import Quickshell
 import Quickshell.Hyprland
+import Quickshell.Wayland
 import Quickshell.Io
 import Quickshell.Widgets
 import Quickshell.Services.SystemTray
@@ -294,166 +295,204 @@ Item {
   property bool sobreSeta: false
 
   // ── a bandeja (seta aberta) ─────────────────────────────────────────────
-  PopupWindow {
+  // Camada transparente na tela inteira (acima de tudo, inclusive da barra):
+  // a caixa é desenhada ao lado da seta e qualquer clique fora dela fecha a
+  // bandeja. Antes era um PopupWindow + HyprlandFocusGrab, mas o grab não
+  // dispara no Hyprland atual e a bandeja ficava presa aberta.
+  PanelWindow {
     id: popup
     color: "transparent"
     visible: false
+    screen: seta.QsWindow.window ? seta.QsWindow.window.screen : null
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "simba-bandeja"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+    anchors { top: true; bottom: true; left: true; right: true }
+
     readonly property int celula: 38
     readonly property int colunas: Math.max(1, Math.min(5, root.totalNaSeta))
     property string dica: ""
     property bool arrastandoFora: false
-    implicitWidth: Math.max(colunas * celula + 20, 200)
-    implicitHeight: conteudo.implicitHeight + 20
+    readonly property int larg: Math.max(colunas * celula + 20, 200)
+    readonly property int alt: conteudo.implicitHeight + 20
 
-    anchor.item: seta
-    anchor.rect.x: root.vertical ? (root.posicao === "right" ? -implicitWidth - 4 : seta.width + 4) : seta.width / 2 - implicitWidth / 2
-    anchor.rect.y: root.vertical ? 0 : (root.posicao === "bottom" ? -implicitHeight - 4 : seta.height + 4)
-
-    function abrir() { dica = ""; visible = true }
-    function fechar() { visible = false; menu.visible = false }
-
-    HyprlandFocusGrab {
-      active: popup.visible && !menu.visible
-      windows: [popup]
-      onCleared: popup.fechar()
+    // posição da seta na tela, medida ao abrir
+    property real setaX: 0
+    property real setaY: 0
+    readonly property real caixaX: {
+      var x = root.vertical ? (root.posicao === "right" ? setaX - larg - 4 : setaX + seta.width + 4)
+                            : setaX + seta.width / 2 - larg / 2
+      return Math.max(0, Math.min(x, width - larg))
+    }
+    readonly property real caixaY: {
+      var y = root.vertical ? setaY : (root.posicao === "bottom" ? setaY - alt - 4 : setaY + seta.height + 4)
+      return Math.max(0, Math.min(y, height - alt))
     }
 
-    Rectangle {
-      id: caixa
+    function medir() {
+      var w = seta.QsWindow.window
+      var p = seta.mapToItem(null, 0, 0)
+      var sw = w && w.screen ? w.screen.width : 0
+      var sh = w && w.screen ? w.screen.height : 0
+      // a barra ocupa a borda inteira da tela
+      setaX = p.x + (w && root.posicao === "right" ? sw - w.width : 0)
+      setaY = p.y + (w && root.posicao === "bottom" ? sh - w.height : 0)
+    }
+    function abrir() { dica = ""; medir(); visible = true; teclas.forceActiveFocus() }
+    function fechar() { visible = false; menu.visible = false }
+
+    MouseArea {
       anchors.fill: parent
-      anchors.margins: 4
-      radius: 10
-      color: Color.popups.background
-      border.width: 1
-      border.color: Color.popups.border
+      acceptedButtons: Qt.AllButtons
+      onPressed: popup.fechar()
+      onWheel: popup.fechar()
+    }
+    Item { id: teclas; focus: true; Keys.onEscapePressed: popup.fechar() }
 
-      Column {
-        id: conteudo
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 6
-        spacing: 4
+    Item {
+      x: popup.caixaX
+      y: popup.caixaY
+      width: popup.larg
+      height: popup.alt
 
-        Text {
-          visible: root.totalNaSeta === 0
-          width: parent.width
-          padding: 8
-          wrapMode: Text.WordWrap
-          horizontalAlignment: Text.AlignHCenter
-          text: I18n.t("Arraste ícones da barra para a seta para escondê-los aqui.")
-          color: Color.popups.text
-          opacity: 0.7
-          font.family: root.fonte
-          font.pixelSize: 11
-        }
+      Rectangle {
+        id: caixa
+        anchors.fill: parent
+        anchors.margins: 4
+        radius: 10
+        color: Color.popups.background
+        border.width: 1
+        border.color: Color.popups.border
 
-        Grid {
-          id: grade
-          anchors.horizontalCenter: parent.horizontalCenter
-          columns: popup.colunas
-          spacing: 0
+        Column {
+          id: conteudo
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.margins: 6
+          spacing: 4
 
-          Repeater {
-            // apps primeiro, depois os ícones do Simba
-            model: root.appsNaSeta.map(function(it) { return { app: it } })
-                    .concat(root.widgetsOcultos.map(function(w) { return { widget: w } }))
-            delegate: Item {
-              id: tile
-              required property var modelData
-              readonly property bool ehApp: !!modelData.app
-              readonly property var info: ehApp ? null : root.infoWidget(modelData.widget)
-              readonly property string nome: ehApp ? root.nomeApp(modelData.app) : info.nome
-              width: popup.celula
-              height: popup.celula
-              z: tileArea.arrastou ? 10 : 0
-              transform: Translate { x: tileArea.dx; y: tileArea.dy }
+          Text {
+            visible: root.totalNaSeta === 0
+            width: parent.width
+            padding: 8
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
+            text: I18n.t("Arraste ícones da barra para a seta para escondê-los aqui.")
+            color: Color.popups.text
+            opacity: 0.7
+            font.family: root.fonte
+            font.pixelSize: 11
+          }
 
-              Rectangle {
-                anchors.fill: parent
-                anchors.margins: 2
-                radius: 7
-                color: Color.popups.text
-                opacity: tileArea.arrastou ? 0.16 : (tileArea.containsMouse ? 0.10 : 0)
-              }
-              IconImage {
-                visible: tile.ehApp
-                anchors.centerIn: parent
-                implicitSize: 18
-                source: tile.ehApp ? String(tile.modelData.app.icon || "") : ""
-                asynchronous: true
-              }
-              Text {
-                visible: !tile.ehApp
-                anchors.centerIn: parent
-                text: tile.info ? tile.info.glifo : ""
-                color: Color.popups.text
-                font.family: root.fonte
-                font.pixelSize: 18
-              }
-              MouseArea {
-                id: tileArea
-                anchors.fill: parent
-                hoverEnabled: true
-                preventStealing: true
-                acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-                cursorShape: arrastou ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-                property real x0: 0
-                property real y0: 0
-                property real dx: 0
-                property real dy: 0
-                property bool arrastou: false
-                function fora(m) {
-                  var p = mapToItem(caixa, m.x, m.y)
-                  return p.x < 0 || p.y < 0 || p.x > caixa.width || p.y > caixa.height
+          Grid {
+            id: grade
+            anchors.horizontalCenter: parent.horizontalCenter
+            columns: popup.colunas
+            spacing: 0
+
+            Repeater {
+              // apps primeiro, depois os ícones do Simba
+              model: root.appsNaSeta.map(function(it) { return { app: it } })
+                      .concat(root.widgetsOcultos.map(function(w) { return { widget: w } }))
+              delegate: Item {
+                id: tile
+                required property var modelData
+                readonly property bool ehApp: !!modelData.app
+                readonly property var info: ehApp ? null : root.infoWidget(modelData.widget)
+                readonly property string nome: ehApp ? root.nomeApp(modelData.app) : info.nome
+                width: popup.celula
+                height: popup.celula
+                z: tileArea.arrastou ? 10 : 0
+                transform: Translate { x: tileArea.dx; y: tileArea.dy }
+
+                Rectangle {
+                  anchors.fill: parent
+                  anchors.margins: 2
+                  radius: 7
+                  color: Color.popups.text
+                  opacity: tileArea.arrastou ? 0.16 : (tileArea.containsMouse ? 0.10 : 0)
                 }
-                onPressed: function(m) { arrastou = false; var p = mapToItem(caixa, m.x, m.y); x0 = p.x; y0 = p.y }
-                onPositionChanged: function(m) {
-                  if (!(pressedButtons & Qt.LeftButton)) return
-                  var p = mapToItem(caixa, m.x, m.y)
-                  if (!arrastou && Math.abs(p.x - x0) + Math.abs(p.y - y0) < 8) return
-                  arrastou = true
-                  dx = p.x - x0; dy = p.y - y0
-                  popup.arrastandoFora = fora(m)
+                IconImage {
+                  visible: tile.ehApp
+                  anchors.centerIn: parent
+                  implicitSize: 18
+                  source: tile.ehApp ? String(tile.modelData.app.icon || "") : ""
+                  asynchronous: true
                 }
-                onReleased: function(m) {
-                  if (!arrastou) return
-                  if (fora(m)) {
-                    if (tile.ehApp) root.helper(["app-mostrar", root.chaveApp(tile.modelData.app)])
-                    else root.helper(["mostrar", root.idWidget(tile.modelData.widget)])
+                Text {
+                  visible: !tile.ehApp
+                  anchors.centerIn: parent
+                  text: tile.info ? tile.info.glifo : ""
+                  color: Color.popups.text
+                  font.family: root.fonte
+                  font.pixelSize: 18
+                }
+                MouseArea {
+                  id: tileArea
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  preventStealing: true
+                  acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+                  cursorShape: arrastou ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                  property real x0: 0
+                  property real y0: 0
+                  property real dx: 0
+                  property real dy: 0
+                  property bool arrastou: false
+                  function fora(m) {
+                    var p = mapToItem(caixa, m.x, m.y)
+                    return p.x < 0 || p.y < 0 || p.x > caixa.width || p.y > caixa.height
                   }
-                  dx = 0; dy = 0; popup.arrastandoFora = false
-                  Qt.callLater(function() { tileArea.arrastou = false })
-                }
-                onCanceled: { dx = 0; dy = 0; arrastou = false; popup.arrastandoFora = false }
-                onClicked: function(m) {
-                  if (arrastou) return
-                  if (tile.ehApp) {
-                    root.cliqueApp(tile.modelData.app, m.button, tile, m)
-                    if (m.button === Qt.LeftButton && !tile.modelData.app.onlyMenu) popup.fechar()
-                  } else {
-                    Quickshell.execDetached(tile.info.cmd)
-                    popup.fechar()
+                  onPressed: function(m) { arrastou = false; var p = mapToItem(caixa, m.x, m.y); x0 = p.x; y0 = p.y }
+                  onPositionChanged: function(m) {
+                    if (!(pressedButtons & Qt.LeftButton)) return
+                    var p = mapToItem(caixa, m.x, m.y)
+                    if (!arrastou && Math.abs(p.x - x0) + Math.abs(p.y - y0) < 8) return
+                    arrastou = true
+                    dx = p.x - x0; dy = p.y - y0
+                    popup.arrastandoFora = fora(m)
                   }
+                  onReleased: function(m) {
+                    if (!arrastou) return
+                    if (fora(m)) {
+                      if (tile.ehApp) root.helper(["app-mostrar", root.chaveApp(tile.modelData.app)])
+                      else root.helper(["mostrar", root.idWidget(tile.modelData.widget)])
+                    }
+                    dx = 0; dy = 0; popup.arrastandoFora = false
+                    Qt.callLater(function() { tileArea.arrastou = false })
+                  }
+                  onCanceled: { dx = 0; dy = 0; arrastou = false; popup.arrastandoFora = false }
+                  onClicked: function(m) {
+                    if (arrastou) return
+                    if (tile.ehApp) {
+                      root.cliqueApp(tile.modelData.app, m.button, tile, m)
+                      if (m.button === Qt.LeftButton && !tile.modelData.app.onlyMenu) popup.fechar()
+                    } else {
+                      Quickshell.execDetached(tile.info.cmd)
+                      popup.fechar()
+                    }
+                  }
+                  onEntered: popup.dica = tile.nome
+                  onExited: if (popup.dica === tile.nome) popup.dica = ""
                 }
-                onEntered: popup.dica = tile.nome
-                onExited: if (popup.dica === tile.nome) popup.dica = ""
               }
             }
           }
-        }
 
-        Text {
-          visible: root.totalNaSeta > 0
-          width: parent.width
-          leftPadding: 4; rightPadding: 4
-          elide: Text.ElideRight
-          horizontalAlignment: Text.AlignHCenter
-          text: popup.arrastandoFora ? I18n.t("Solte para mostrar na barra") : (popup.dica || I18n.t("Arraste para fora para mostrar na barra"))
-          color: Color.popups.text
-          opacity: popup.dica || popup.arrastandoFora ? 0.85 : 0.5
-          font.family: root.fonte
-          font.pixelSize: 11
+          Text {
+            visible: root.totalNaSeta > 0
+            width: parent.width
+            leftPadding: 4; rightPadding: 4
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
+            text: popup.arrastandoFora ? I18n.t("Solte para mostrar na barra") : (popup.dica || I18n.t("Arraste para fora para mostrar na barra"))
+            color: Color.popups.text
+            opacity: popup.dica || popup.arrastandoFora ? 0.85 : 0.5
+            font.family: root.fonte
+            font.pixelSize: 11
+          }
         }
       }
     }

@@ -283,6 +283,22 @@ fi
 # Generate dynamic configs
 simba-theme-set-templates
 
+# Papel de parede escolhido pela pessoa (simba-theme-bg-set grava em
+# papel-definido): fica o mesmo em qualquer tema, claro ou escuro. Só volta a
+# seguir o tema se o arquivo sumiu ou se era um fundo de dentro do tema atual
+# (essa pasta é apagada logo abaixo, na troca).
+PINNED_BACKGROUND_FILE="$HOME/.local/state/simba/papel-definido"
+if [[ -f $PINNED_BACKGROUND_FILE ]]; then
+  pinned_background=$(<"$PINNED_BACKGROUND_FILE")
+  current_theme_real=$(realpath -m "$CURRENT_THEME_PATH")
+  if [[ -f $pinned_background && $pinned_background != "$current_theme_real"/* ]]; then
+    ln -nsf "$pinned_background" "$CURRENT_BACKGROUND_LINK"
+    SIMBA_THEME_SKIP_BACKGROUND=1
+  else
+    rm -f "$PINNED_BACKGROUND_FILE"
+  fi
+fi
+
 OLD_BACKGROUND_SNAPSHOT=""
 if [[ $THEME_HEADLESS != "1" && $SIMBA_THEME_SKIP_BACKGROUND != "1" ]]; then
   OLD_BACKGROUND_SNAPSHOT=$(snapshot_current_background)

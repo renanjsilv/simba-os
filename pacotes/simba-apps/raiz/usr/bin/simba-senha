@@ -17,10 +17,16 @@ import re
 import shlex
 import sys
 
-import gi
+# Sem método de entrada (fcitx5/IBus) neste diálogo: com o fcitx5 no Wayland, o
+# campo de senha do GTK4 travava depois do primeiro caractere. O contexto simples
+# do GTK ainda trata acentos e teclas mortas (á, ç, ~). Tem que vir antes do Gtk.
+os.environ["GTK_IM_MODULE"] = "gtk-im-context-simple"
+
+import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 sys.path.insert(0, "/usr/share/simba-apps/idiomas")
 try:
@@ -29,9 +35,36 @@ except ImportError:
     def _t(texto, *a):
         return texto
 
-NOMES = {"claude": "Claude Code", "codex": "Codex", "opencode": "OpenCode", "agy": "Antigravity",
-         "copilot": "GitHub Copilot", "cursor-agent": "Cursor", "grok": "Grok", "crush": "Crush",
-         "pi": "Pi", "draco": "Draco", "pkexec": "pkexec"}
+NOMES = {
+    "claude": "Claude Code",
+    "codex": "Codex",
+    "opencode": "OpenCode",
+    "agy": "Antigravity",
+    "antigravity": "Antigravity",
+    "copilot": "GitHub Copilot",
+    "cursor-agent": "Cursor",
+    "cursor": "Cursor",
+    "windsurf": "Windsurf",
+    "aider": "Aider",
+    "gemini": "Gemini",
+    "grok": "Grok",
+    "crush": "Crush",
+    "pi": "Pi",
+    "draco": "Draco",
+    "pkexec": "pkexec",
+    "code": "Visual Studio Code",
+    "pamac": "Pamac",
+    "pacman": "Pacman",
+    "yay": "Yay",
+    "simba": "Simba",
+    "simba-apps": "Simba Apps",
+    "simba-agentes": "Simba Agentes",
+}
+
+INTERPRETES = {
+    "bash", "sh", "zsh", "fish", "python", "python3", "env",
+    "node", "bun", "deno", "electron", "mise", "asdf", "sudo", "pkexec",
+}
 
 
 def _cmdline(pid):
@@ -50,6 +83,23 @@ def _pai(pid):
     except (OSError, ValueError):
         pass
     return 0
+
+
+def _normalizar_token(arg):
+    if not arg or arg.startswith("-"):
+        return ""
+    return Path(Path(arg).name).stem.lower()
+
+
+def _identificar_quem(args):
+    candidatos = [_normalizar_token(a) for a in args[:4]]
+    for c in candidatos:
+        if c in NOMES:
+            return NOMES[c]
+    for c in candidatos:
+        if c and c not in INTERPRETES and not c.startswith("python3."):
+            return c
+    return ""
 
 
 def contexto():
@@ -73,13 +123,14 @@ def contexto():
         if pid <= 1:
             break
         args = _cmdline(pid)
-        nomes = [Path(a).name for a in args[:3]]
-        achado = next((NOMES[n] for n in nomes if n in NOMES), None)
-        if achado:
-            quem = achado
-            break
-        if not quem and args and Path(args[0]).name not in ("bash", "sh", "zsh", "fish", "python3", "python", "env"):
-            quem = Path(args[0]).name
+        if args:
+            achado = _identificar_quem(args)
+            if achado:
+                if achado in NOMES.values():
+                    quem = achado
+                    break
+                if not quem:
+                    quem = achado
         pid = _pai(pid)
     return comando, quem
 
@@ -124,14 +175,26 @@ class Senha(Adw.Application):
             moldura = Gtk.Box()
             moldura.add_css_class("card")
             moldura.append(cmd)
-            caixa.append(moldura)
 
-        if re.search(r"try again|tente novamente|incorret", self.prompt or "", re.I):
+            rolagem = Gtk.ScrolledWindow()
+            rolagem.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            rolagem.set_max_content_height(140)
+            rolagem.set_propagate_natural_height(True)
+            rolagem.set_child(moldura)
+            caixa.append(rolagem)
+
+        teve_erro = bool(re.search(r"try again|tente novamente|incorret", self.prompt or "", re.I))
+        if teve_erro:
             erro = Gtk.Label(label=_t("Senha incorreta. Tente novamente."))
             erro.add_css_class("error")
             caixa.append(erro)
 
         self.entrada = Gtk.PasswordEntry(show_peek_icon=True)
+        if teve_erro:
+            self.entrada.add_css_class("error")
+        delegado = self.entrada.get_delegate()
+        if delegado is not None:  # reforço, caso GTK_IM_MODULE seja ignorado
+            delegado.set_property("im-module", "gtk-im-context-simple")
         self.entrada.set_property("placeholder-text", _t("Senha de %1").replace("%1", os.environ.get("USER", "")))
         self.entrada.connect("activate", lambda *_: self.confirmar(win))
         caixa.append(self.entrada)
@@ -141,21 +204,75 @@ class Senha(Adw.Application):
         cancelar.connect("clicked", lambda *_: win.close())
         ok = Gtk.Button(label=_t("Autorizar"))
         ok.add_css_class("suggested-action")
+        ok.set_sensitive(False)
         ok.connect("clicked", lambda *_: self.confirmar(win))
         botoes.append(cancelar)
         botoes.append(ok)
         caixa.append(botoes)
 
+        def _texto_mudou(*_):
+            texto = self.entrada.get_text()
+            ok.set_sensitive(bool(texto))
+            if self.entrada.has_css_class("error"):
+                self.entrada.remove_css_class("error")
+
+        self.entrada.connect("notify::text", _texto_mudou)
+
         tecla = Gtk.EventControllerKey()
-        tecla.connect("key-pressed", lambda _c, k, *_: (win.close(), True)[1] if k == 0xff1b else False)
+        tecla.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        tecla.connect("key-pressed", self.tecla_pressionada, win)
         win.add_controller(tecla)
 
         win.set_content(caixa)
+        win.connect("notify::is-active",
+                    lambda w, _p: self.entrada.grab_focus() if w.is_active() else None)
         win.present()
-        GLib.idle_add(self.entrada.grab_focus)
+        # idle_add de foco UMA vez. Antes a função devolvia True (o de grab_focus),
+        # então o idle se repetia sem parar: janela a 100% de CPU e teclas perdidas.
+        GLib.idle_add(self.focar_entrada)
+
+    def focar_entrada(self):
+        self.entrada.grab_focus()
+        return False
+
+    def entrada_tem_foco(self):
+        # No GtkPasswordEntry quem recebe o foco de verdade é o GtkText interno
+        # (o delegado); has_focus() na entrada fica False.
+        delegado = self.entrada.get_delegate()
+        return bool(delegado is not None and delegado.has_focus()) or self.entrada.has_focus()
+
+    def tecla_pressionada(self, _controle, chave, _codigo, estado, win):
+        if chave == Gdk.KEY_Escape:
+            win.close()
+            return True
+        if self.entrada_tem_foco():
+            return False  # caminho normal do GTK
+        # A entrada perdeu o foco (troca de janela, foco do gerenciador…). Devolve
+        # o foco e entrega esta tecla, para não perder o que a pessoa digitou.
+        self.entrada.grab_focus()
+        if chave == Gdk.KEY_BackSpace:
+            pos = self.entrada.get_position()
+            if pos > 0:
+                self.entrada.delete_text(pos - 1, pos)
+            return True
+        if chave in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+            self.confirmar(win)
+            return True
+        if estado & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK |
+                     Gdk.ModifierType.SUPER_MASK):
+            return False
+        codigo = Gdk.keyval_to_unicode(chave)
+        if codigo:
+            self.entrada.insert_text(chr(codigo), -1)
+            self.entrada.set_position(-1)
+            return True
+        return False
 
     def confirmar(self, win):
-        self.resultado = self.entrada.get_text()
+        texto = self.entrada.get_text()
+        if not texto:
+            return
+        self.resultado = texto
         win.close()
 
 

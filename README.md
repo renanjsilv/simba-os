@@ -44,9 +44,9 @@ Todo o sistema está em português do Brasil, com inglês como segunda opção. 
 um pacote pacman comum, com atualizações assinadas.
 
 > [!NOTE]
-> O Simba OS é um projeto pessoal em desenvolvimento ativo. A ISO pública e o repositório
-> de pacotes assinados ainda estão sendo preparados. Por enquanto, a forma de instalar é
-> gerar a ISO a partir de uma máquina com o Simba (veja [Instalação](#instalação)).
+> O Simba OS é um projeto pessoal em desenvolvimento ativo. O repositório de pacotes
+> assinados já está publicado e a ISO pública está em preparação. Por enquanto, a forma de instalar
+> é adicionar o repositório num Arch Linux existente ou gerar a ISO a partir de uma máquina com o Simba (veja [Instalação](#instalação)).
 
 ## O que vem no sistema
 

@@ -18,7 +18,7 @@ BASES = [HOME / ".local/share/icons", HOME / ".icons"] + \
 # Catálogo: família → como montar o nome da pasta do tema.
 #   cores: nomes aceitos (o 1º é o padrão, sem sufixo); escuro/claro: sufixos.
 CATALOGO = [
-    {"id": "fluent", "nome": "Fluent", "desc": "O visual do Windows 11", "pacote": "fluent-icon-theme-git", "fonte": "aur",
+    {"id": "fluent", "nome": "Fluent", "desc": "Ícones Fluent: modernos, coloridos e arredondados", "pacote": "fluent-icon-theme-git", "fonte": "aur",
      "base": "Fluent", "cores": ["standard", "green", "grey", "orange", "pink", "purple", "red", "yellow", "teal"],
      "escuro": "-dark", "claro": "-light"},
     {"id": "tela", "nome": "Tela Circle", "desc": "Ícones redondos, 14 cores", "pacote": "tela-circle-icon-theme-all", "fonte": "oficial",

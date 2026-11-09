@@ -1,0 +1,246 @@
+# Tema de inicialização do Simba OS — gerado por /usr/share/simba-apps/temas-boot/gerar
+# Logo no centro, anel de pontos girando embaixo; senha do disco num campo arredondado.
+# No boot, abre com o gato grande encolhendo até o tamanho do logo (abertura).
+# As linhas "cfg." abaixo são preenchidas pelo gerador.
+#CFG#
+
+W = Window.GetWidth();
+H = Window.GetHeight();
+escala = H / 1080;
+if (escala < 0.5) escala = 0.5;
+
+Window.SetBackgroundTopColor(cfg.fundo_r, cfg.fundo_g, cfg.fundo_b);
+Window.SetBackgroundBottomColor(cfg.fundo2_r, cfg.fundo2_g, cfg.fundo2_b);
+
+if (cfg.imagem_fundo) {
+  fundo.img = Image("fundo.png");
+  fundo.sprite = Sprite(fundo.img.Scale(W, H));
+  fundo.sprite.SetPosition(0, 0, -100);
+}
+
+centro_logo = H * 0.42;
+centro_anel = H * 0.70;
+
+if (cfg.cartao) {
+  cartao.img = Image("cartao.png");
+  cw = cartao.img.GetWidth() * escala;
+  ch = cartao.img.GetHeight() * escala;
+  cartao.sprite = Sprite(cartao.img.Scale(cw, ch));
+  cartao.sprite.SetPosition(W / 2 - cw / 2, H * 0.53 - ch / 2, -50);
+  centro_logo = H * 0.53 - ch * 0.18;
+  centro_anel = H * 0.53 + ch * 0.26;
+}
+
+logo.orig = Image("logo.png");
+# logo.png é gerado em dobro (300 px) para ficar nítido em telas 4K
+lw = logo.orig.GetWidth() * escala / 2;
+lh = logo.orig.GetHeight() * escala / 2;
+logo.sprite = Sprite(logo.orig.Scale(lw, lh));
+logo.sprite.SetPosition(W / 2 - lw / 2, centro_logo - lh / 2, 10);
+logo.sprite.SetOpacity(0);
+
+# ── abertura: um gato grande encolhe até virar a cabeça do pedido de senha ──
+# Só no boot. Termina exatamente no tamanho e na posição do logo (logo.sprite),
+# que então assume; o pedido de senha espera a abertura acabar.
+global.abertura = (Plymouth.GetMode() == "boot");
+abertura_dur = 1.6;
+if (global.abertura) {
+  grande.orig = Image("logo-grande.png");
+  grande.sprite = Sprite();
+  grande.sprite.SetZ(10);
+  grande.sprite.SetOpacity(0);
+  grande.h0 = H * 0.66;            # altura no começo
+  grande.razao = lw / lh;
+  global.pendente = 0;
+}
+
+# ── anel de pontos ───────────────────────────────────────────────────────────
+ponto.orig = Image("ponto.png");
+pd = 8 * escala;
+if (pd < 4) pd = 4;
+ponto.img = ponto.orig.Scale(pd, pd);
+raio = 22 * escala;
+for (i = 0; i < 5; i++) {
+  pontos[i] = Sprite(ponto.img);
+  pontos[i].SetOpacity(0);
+  pontos[i].SetZ(20);
+}
+
+global.n_quadro = 0;
+global.senha = 0;
+global.ja_pediu = 0;   # já mostrou o pedido de senha uma vez
+global.tentou = 0;     # o pedido sumiu (senha enviada) e pode voltar = senha errada
+
+fun posicionar_pontos(t) {
+  ciclo = 3.4;
+  ativo = 2.7;
+  for (i = 0; i < 5; i++) {
+    tau = t - i * 0.13;
+    if (tau < 0) {
+      pontos[i].SetOpacity(0);
+    } else {
+      tau = tau - Math.Int(tau / ciclo) * ciclo;
+      p = tau / ativo;
+      if (p > 1 || global.senha) {
+        pontos[i].SetOpacity(0);
+      } else {
+        # Duas voltas: devagar no alto, rápido embaixo.
+        a = 4 * Math.Pi * p;
+        th = a - 0.85 * Math.Sin(a);
+        pontos[i].SetX(W / 2 + raio * Math.Sin(th) - pd / 2);
+        pontos[i].SetY(centro_anel - raio * Math.Cos(th) - pd / 2);
+        op = 1;
+        if (p < 0.04) op = p / 0.04;
+        if (p > 0.96) op = (1 - p) / 0.04;
+        pontos[i].SetOpacity(op);
+      }
+    }
+  }
+}
+
+# ── texto (Desligando/Reiniciando, mensagens) ────────────────────────────────
+fun texto(t, tamanho) {
+  return Image.Text(t, cfg.texto_r, cfg.texto_g, cfg.texto_b, 1, "Cantarell " + tamanho);
+}
+
+modo = Plymouth.GetMode();
+rotulo_modo = "";
+if (modo == "shutdown") rotulo_modo = "Desligando";
+if (modo == "reboot") rotulo_modo = "Reiniciando";
+if (modo == "updates" || modo == "system-upgrade") rotulo_modo = "Atualizando o sistema";
+if (rotulo_modo != "") {
+  modo_txt.img = texto(rotulo_modo, Math.Int(16 * escala + 0.5));
+  modo_txt.sprite = Sprite(modo_txt.img);
+  modo_txt.sprite.SetPosition(W / 2 - modo_txt.img.GetWidth() / 2, centro_anel + raio + 26 * escala, 20);
+}
+
+msg.sprite = Sprite();
+msg.sprite.SetZ(20);
+fun mensagem(t) {
+  msg.img = texto(t, Math.Int(12 * escala + 0.5));
+  msg.sprite.SetImage(msg.img);
+  msg.sprite.SetPosition(W / 2 - msg.img.GetWidth() / 2, H * 0.92, 20);
+}
+Plymouth.SetMessageFunction(mensagem);
+
+# ── senha do disco ───────────────────────────────────────────────────────────
+campo.orig = Image("campo.png");
+fw = campo.orig.GetWidth() * escala;
+fh = campo.orig.GetHeight() * escala;
+campo.sprite = Sprite(campo.orig.Scale(fw, fh));
+campo.x = W / 2 - fw / 2;
+campo.y = centro_anel - fh / 2;
+campo.sprite.SetPosition(campo.x, campo.y, 30);
+campo.sprite.SetOpacity(0);
+prompt.sprite = Sprite();
+prompt.sprite.SetZ(30);
+bolinha.img = ponto.orig.Scale(pd + 1, pd + 1);
+global.bolinhas = [];
+
+fun esconder_senha() {
+  if (global.senha) global.tentou = 1;
+  global.senha = 0;
+  campo.sprite.SetOpacity(0);
+  prompt.sprite.SetOpacity(0);
+  for (i = 0; global.bolinhas[i]; i++) global.bolinhas[i].SetOpacity(0);
+}
+
+fun mostrar_senha(p, n) {
+  if (global.abertura) {
+    global.pendente = 1;
+    global.pendente_p = p;
+    global.pendente_n = n;
+    return;
+  }
+  global.senha = 1;
+  campo.sprite.SetOpacity(1);
+  # O texto do systemd vem em inglês e com o modelo do disco; aqui é sempre a senha do disco.
+  if (n >= 0) p = "Digite a senha para desbloquear o disco";
+  if (global.tentou && n == 0) p = "Senha incorreta. Tente de novo";
+  if (n > 0) global.tentou = 0;
+  global.ja_pediu = 1;
+  prompt.img = texto(p, Math.Int(13 * escala + 0.5));
+  prompt.sprite.SetImage(prompt.img);
+  prompt.sprite.SetPosition(W / 2 - prompt.img.GetWidth() / 2, campo.y - prompt.img.GetHeight() - 14 * escala, 30);
+  prompt.sprite.SetOpacity(1);
+  limite = Math.Int((fw - 40 * escala) / (pd + 7));
+  vis = n;
+  if (vis < 0) vis = 0;
+  if (vis > limite) vis = limite;
+  passo = pd + 7;
+  x0 = campo.x + 22 * escala;
+  for (i = 0; i < vis; i++) {
+    if (!global.bolinhas[i]) global.bolinhas[i] = Sprite(bolinha.img);
+    global.bolinhas[i].SetPosition(x0 + i * passo, campo.y + fh / 2 - (pd + 1) / 2, 31);
+    global.bolinhas[i].SetOpacity(1);
+  }
+  for (i = vis; global.bolinhas[i]; i++) global.bolinhas[i].SetOpacity(0);
+}
+
+fun cb_senha(p, n) { mostrar_senha(p, n); }
+fun cb_pergunta(p, e) {
+  mostrar_senha(p, -1);
+  prompt.img = texto(p + " " + e, Math.Int(13 * escala + 0.5));
+  prompt.sprite.SetImage(prompt.img);
+}
+Plymouth.SetDisplayPasswordFunction(cb_senha);
+Plymouth.SetDisplayQuestionFunction(cb_pergunta);
+Plymouth.SetDisplayNormalFunction(esconder_senha);
+
+fun quadro_abertura(t) {
+  p = t / abertura_dur;
+  if (p > 1) p = 1;
+  q = p - 1;
+  # posição: desacelera até parar (cúbica)
+  ep = 1 + q * q * q;
+  # tamanho: passa um pouco do ponto e volta, como quem pousa (back-out)
+  es = 1 + 2.2 * q * q * q + 1.2 * q * q;
+  h = grande.h0 + (lh - grande.h0) * es;
+  if (h < 4) h = 4;
+  w = h * grande.razao;
+  cy = H * 0.5 + (centro_logo - H * 0.5) * ep;
+  grande.sprite.SetImage(grande.orig.Scale(w, h));
+  grande.sprite.SetPosition(W / 2 - w / 2, cy - h / 2, 10);
+  op = t / 0.3;
+  if (op > 1) op = 1;
+  grande.sprite.SetOpacity(op);
+  if (cfg.cartao) {
+    oc = (p - 0.45) / 0.55;
+    if (oc < 0) oc = 0;
+    cartao.sprite.SetOpacity(oc);
+  }
+}
+
+if (global.abertura) {
+  logo.sprite.SetOpacity(0);
+  if (cfg.cartao) cartao.sprite.SetOpacity(0);
+}
+
+fun a_cada_quadro() {
+  global.n_quadro++;
+  t = global.n_quadro / 50;
+  if (global.abertura) {
+    if (t < abertura_dur) {
+      quadro_abertura(t);
+      return;
+    }
+    # fim da abertura: o logo normal assume no mesmo lugar e tamanho
+    global.abertura = 0;
+    grande.sprite.SetOpacity(0);
+    logo.sprite.SetOpacity(1);
+    if (cfg.cartao) cartao.sprite.SetOpacity(1);
+    global.inicio_pontos = t;
+    if (global.pendente) {
+      global.pendente = 0;
+      mostrar_senha(global.pendente_p, global.pendente_n);
+    }
+  }
+  if (!global.inicio_pontos) {
+    # sem abertura (desligar/reiniciar): o logo entra suave (0,4 s)
+    if (t < 0.4) logo.sprite.SetOpacity(t / 0.4); else logo.sprite.SetOpacity(1);
+    posicionar_pontos(t - 0.3);
+  } else {
+    posicionar_pontos(t - global.inicio_pontos);
+  }
+}
+Plymouth.SetRefreshFunction(a_cada_quadro);

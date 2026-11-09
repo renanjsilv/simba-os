@@ -1,0 +1,123 @@
+#!/bin/bash
+# Gera um tema de inicialização (Plymouth) do Simba OS.
+# Uso: gerar <variante> <pasta-de-saída>
+# Variantes: escuro | claro | vidro | bloom | aurora | marca
+#   marca usa MARCA_LOGO (PNG com o logo e o nome, ex.: Simba OS) e MARCA_NOME.
+#   vidro usa o papel de parede atual desfocado (gere de novo ao trocar o fundo).
+set -euo pipefail
+
+BASE="$(cd "$(dirname "$0")" && pwd)"
+variante=${1:?variante}
+saida=${2:?pasta}
+nome="simba-$variante"
+mkdir -p "$saida"
+rm -f "$saida"/*
+
+# símbolo do Simba OS (vai junto do gerador; recolorido para a variante)
+LOGO_SVG="$BASE/simba-simbolo.svg"   # cópia avulsa (pacote da marca)
+[ -f "$LOGO_SVG" ] || LOGO_SVG="$BASE/../simba-simbolo.svg"
+[ -f "$LOGO_SVG" ] || LOGO_SVG=/usr/share/simba/icon.png
+L=1280 A=720   # fundo (o Plymouth escala para a tela)
+
+# cor → "r, g, b" em 0..1 para o script
+rgb() { local h=${1#\#}; awk -v r=$((16#${h:0:2})) -v g=$((16#${h:2:2})) -v b=$((16#${h:4:2})) 'BEGIN { printf "%.3f, %.3f, %.3f", r/255, g/255, b/255 }'; }
+
+imagem_fundo=0 cartao=0
+case $variante in
+  escuro) fundo='#000000' fundo2='#000000' texto='#ffffff' logo='#ffffff' ponto='#ffffff' campo_bg='#1f1f1f' campo_borda='#3a3a3a' ;;
+  claro)  fundo='#f3f3f3' fundo2='#eaeef4' texto='#1b1b1b' logo='#1b1b1b' ponto='#005fb8' campo_bg='#ffffff' campo_borda='#c8c8c8' ;;
+  vidro)  fundo='#101418' fundo2='#101418' texto='#ffffff' logo='#ffffff' ponto='#ffffff' campo_bg='#ffffff26' campo_borda='#ffffff55'
+          imagem_fundo=1 cartao=1 ;;
+  bloom)  fundo='#030817' fundo2='#030817' texto='#ffffff' logo='#ffffff' ponto='#7cc8ff' campo_bg='#0b1630' campo_borda='#2f5fb8'
+          imagem_fundo=1 ;;
+  aurora) fundo='#eef3fb' fundo2='#eef3fb' texto='#14213d' logo='#14213d' ponto='#0067c0' campo_bg='#ffffffcc' campo_borda='#9db4d8'
+          imagem_fundo=1 ;;
+  marca)  if [ "${MARCA_CLARO:-0}" = 1 ]; then
+            fundo='#f4f4f2' fundo2='#f4f4f2' texto='#1b1b1b' logo='' ponto='#1b1b1b' campo_bg='#ffffff' campo_borda='#b5b5b2'
+          else
+            fundo='#000000' fundo2='#000000' texto='#ffffff' logo='' ponto='#ffffff' campo_bg='#1a1a1a' campo_borda='#3a3a3a'
+          fi
+          [ -f "${MARCA_LOGO:-}" ] || { echo "MARCA_LOGO não encontrado" >&2; exit 2; } ;;
+  *) echo "variante desconhecida: $variante" >&2; exit 2 ;;
+esac
+
+# Logo (símbolo do Simba recolorido), 150 px de altura em 1080p
+if [ "$variante" = marca ]; then
+  # logo da marca como está (o tema mostra pela metade: 600 px → 300 px em 1080p)
+  magick "$MARCA_LOGO" -trim +repage -resize 600x480 -strip "PNG32:$saida/logo.png"
+else
+  magick -background none -density 600 "$LOGO_SVG" -trim +repage -resize 300x300 -fill "$logo" -colorize 100 -strip "PNG32:$saida/logo.png"
+fi
+# Abertura do boot: o mesmo logo em 4× (1200 px), que encolhe até o tamanho do logo.png
+if [ "$variante" = marca ]; then
+  magick "$MARCA_LOGO" -trim +repage -resize 2400x1920 -strip "PNG32:$saida/logo-grande.png"
+else
+  magick -background none -density 2400 "$LOGO_SVG" -trim +repage -resize 1200x1200 -fill "$logo" -colorize 100 -strip "PNG32:$saida/logo-grande.png"
+fi
+# Ponto do anel (desenhado grande e reduzido = borda suave)
+magick -size 64x64 xc:none -fill "$ponto" -draw "circle 32,32 32,2" -resize 16x16 -strip "PNG32:$saida/ponto.png"
+# Campo de senha (pílula)
+magick -size 840x112 xc:none -fill "$campo_bg" -stroke "$campo_borda" -strokewidth 3 \
+  -draw "roundrectangle 2,2 837,109 54,54" -resize 420x56 -strip "PNG32:$saida/campo.png"
+
+case $variante in
+  vidro)
+    bg=$(readlink -f "$HOME/.local/state/simba/current/background" 2>/dev/null || true)
+    if [[ -f $bg ]]; then
+      magick "$bg" -resize "${L}x${A}^" -gravity center -extent "${L}x${A}" -blur 0x28 \
+        -fill '#000000' -colorize 28 -strip "PNG24:$saida/fundo.png"
+    else
+      magick -size "${L}x${A}" gradient:"#1d2b45"-"#0b0f18" -strip "PNG24:$saida/fundo.png"
+    fi
+    # Cartão de acrílico: vidro claro translúcido com borda e brilho no topo
+    magick -size 1040x760 xc:none \
+      -fill '#ffffff1f' -stroke '#ffffff48' -strokewidth 3 -draw "roundrectangle 2,2 1037,757 48,48" \
+      \( -size 1040x200 gradient:'#ffffff22'-'#ffffff00' \) -gravity north -compose over -composite \
+      -resize 520x380 -strip "PNG32:$saida/cartao.png"
+    ;;
+  bloom)
+    magick -size 1600x900 xc:"$fundo" \
+      \( -size 1500x1500 radial-gradient:'#1f6bffcc'-'#1f6bff00' \) -geometry +420-420 -compose screen -composite \
+      \( -size 1100x1100 radial-gradient:'#5cc8ffaa'-'#5cc8ff00' \) -geometry +820+180 -compose screen -composite \
+      \( -size 1300x1300 radial-gradient:'#6a3cffaa'-'#6a3cff00' \) -geometry -380+260 -compose screen -composite \
+      \( -size 800x800 radial-gradient:'#9be4ff55'-'#9be4ff00' \) -geometry +400+250 -compose screen -composite \
+      -blur 0x30 -resize "${L}x${A}!" -strip "PNG24:$saida/fundo.png"
+    ;;
+  aurora)
+    magick -size 1600x900 xc:"$fundo" \
+      \( -size 1500x1500 radial-gradient:'#9cc7ffcc'-'#9cc7ff00' \) -geometry +500-500 -compose multiply -composite \
+      \( -size 1200x1200 radial-gradient:'#c7b8ffaa'-'#c7b8ff00' \) -geometry -300+300 -compose multiply -composite \
+      \( -size 1000x1000 radial-gradient:'#a8f0e8aa'-'#a8f0e800' \) -geometry +900+250 -compose multiply -composite \
+      -blur 0x40 -resize "${L}x${A}!" -strip "PNG24:$saida/fundo.png"
+    ;;
+esac
+
+titulo=$(case $variante in escuro) echo "Simba — Escuro";; claro) echo "Simba — Claro";;
+  vidro) echo "Simba — Vidro (transparente)";; bloom) echo "Simba — Bloom";; aurora) echo "Simba — Aurora (claro)";;
+  marca) echo "${MARCA_NOME:-Marca}";; esac)
+
+cat >"$saida/$nome.plymouth" <<EOF
+[Plymouth Theme]
+Name=$titulo
+Description=Tema de inicialização do Simba OS ($variante), gerado por /usr/share/simba-apps/temas-boot.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/$nome
+ScriptFile=/usr/share/plymouth/themes/$nome/$nome.script
+ConsoleLogBackgroundColor=0x${fundo:1:6}
+MonospaceFont=Cantarell 11
+Font=Cantarell 11
+EOF
+
+cfg="cfg.fundo_r = $(rgb "$fundo" | cut -d, -f1); cfg.fundo_g = $(rgb "$fundo" | cut -d, -f2); cfg.fundo_b = $(rgb "$fundo" | cut -d, -f3);
+cfg.fundo2_r = $(rgb "$fundo2" | cut -d, -f1); cfg.fundo2_g = $(rgb "$fundo2" | cut -d, -f2); cfg.fundo2_b = $(rgb "$fundo2" | cut -d, -f3);
+cfg.texto_r = $(rgb "$texto" | cut -d, -f1); cfg.texto_g = $(rgb "$texto" | cut -d, -f2); cfg.texto_b = $(rgb "$texto" | cut -d, -f3);
+cfg.imagem_fundo = $imagem_fundo;
+cfg.cartao = $cartao;"
+python3 - "$BASE/tema.script" "$saida/$nome.script" "$cfg" <<'PY'
+import sys
+src, dst, cfg = sys.argv[1:]
+open(dst, "w").write(open(src).read().replace("#CFG#", cfg))
+PY
+echo "$saida"

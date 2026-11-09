@@ -1,0 +1,37 @@
+#!/bin/bash
+# Roda como root (pkexec), recebendo os temas por um tar na entrada padrão — o tar
+# é lido pelo usuário, então nada aqui segue links/arquivos da pasta pessoal.
+# Uso: tar -C build -cf - simba-* | pkexec /bin/bash -c "$(cat instalar-root)" instalar <tema-padrão>
+set -euo pipefail
+PATH=/usr/bin:/bin
+umask 022
+padrao=${1:?tema}
+case $padrao in
+  simba|simba-escuro|simba-claro|simba-vidro|simba-bloom|simba-aurora) ;;
+  *) echo "tema inválido: $padrao" >&2; exit 2 ;;
+esac
+tmp=$(mktemp -d /var/tmp/temas-boot.XXXXXX)   # 0700, dono root
+trap 'rm -rf "$tmp" /usr/share/plymouth/themes/.tmp-simba-*' EXIT
+tar -xf - -C "$tmp" --no-same-owner --no-same-permissions --no-overwrite-dir
+if [[ -n $(find "$tmp" -mindepth 1 ! -type f ! -type d -print -quit) ]]; then
+  echo "o pacote de temas contém links ou arquivos especiais" >&2; exit 3
+fi
+for n in simba-escuro simba-claro simba-vidro simba-bloom simba-aurora; do
+  src="$tmp/$n"
+  [[ -d $src ]] || continue
+  novo="/usr/share/plymouth/themes/.tmp-$n"
+  rm -rf "$novo"; mkdir -m 0755 "$novo"
+  for f in "$src"/*.png "$src/$n.plymouth" "$src/$n.script"; do
+    [[ -f $f ]] && install -m 0644 -o root -g root "$f" "$novo/"
+  done
+  rm -rf "/usr/share/plymouth/themes/$n"
+  mv "$novo" "/usr/share/plymouth/themes/$n"
+done
+# os temas com o nome antigo (prefixo win11) saem: viraram simba-*
+for velho in win11-escuro win11-claro win11-vidro win11-bloom win11-aurora; do
+  rm -rf "/usr/share/plymouth/themes/$velho"
+done
+[[ $padrao == simba || -f /usr/share/plymouth/themes/$padrao/$padrao.plymouth ]] || { echo "tema não instalado" >&2; exit 3; }
+plymouth-set-default-theme "$padrao"
+if command -v limine-mkinitcpio >/dev/null; then limine-mkinitcpio; else mkinitcpio -P; fi
+echo "Tema de inicialização: $padrao"

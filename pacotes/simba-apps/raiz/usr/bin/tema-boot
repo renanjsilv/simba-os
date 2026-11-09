@@ -1,16 +1,19 @@
 #!/bin/bash
-# Temas de inicialização (Plymouth) estilo Windows 11.
+# Temas de inicialização (Plymouth) do Simba OS.
 #   tema-boot listar            → id|título|ativo(1/0)
 #   tema-boot atual             → id do tema ativo
 #   tema-boot previa <id> <png> [senha]
 #   tema-boot aplicar <id>      → gera, instala (pede senha de administrador) e refaz o initramfs
-# ids: win11-escuro win11-claro win11-vidro win11-bloom win11-aurora simba
+# ids: simba-escuro simba-claro simba-vidro simba-bloom simba-aurora simba (Clássico)
 set -euo pipefail
-B="$HOME/.local/share/temas-boot"
-IDS=(win11-escuro win11-claro win11-vidro win11-bloom win11-aurora simba)
-declare -A TIT=([win11-escuro]="$(simba-t "Escuro")" [win11-claro]="$(simba-t "Claro")" [win11-vidro]="$(simba-t "Vidro (transparente)")"
-  [win11-bloom]="Bloom" [win11-aurora]="$(simba-t "Aurora (claro)")" [simba]="$(simba-t "Clássico")")
-atual() { sed -n 's/^Theme=//p' /etc/plymouth/plymouthd.conf 2>/dev/null | tail -1; }
+# o gerador vem no pacote; os temas gerados ficam no cache de quem usa
+B=/usr/share/simba-apps/temas-boot
+C="${XDG_CACHE_HOME:-$HOME/.cache}/temas-boot/build"
+IDS=(simba-escuro simba-claro simba-vidro simba-bloom simba-aurora simba)
+declare -A TIT=([simba-escuro]="$(simba-t "Escuro")" [simba-claro]="$(simba-t "Claro")" [simba-vidro]="$(simba-t "Vidro (transparente)")"
+  [simba-bloom]="Bloom" [simba-aurora]="$(simba-t "Aurora (claro)")" [simba]="$(simba-t "Clássico")")
+# temas instalados antes da troca de nome (win11-*) contam como o simba-* equivalente
+atual() { sed -n 's/^Theme=//p' /etc/plymouth/plymouthd.conf 2>/dev/null | tail -1 | sed 's/^win11-/simba-/'; }
 valido() { [[ " ${IDS[*]} " == *" $1 "* ]] || { echo "tema desconhecido: $1" >&2; exit 2; }; }
 case ${1:-} in
   listar)
@@ -23,15 +26,15 @@ case ${1:-} in
       magick -size 1366x768 "xc:rgb($(awk -F, '{printf "%d,%d,%d", $1*255, $2*255, $3*255}' <<<"$bg"))" \
         \( /usr/share/plymouth/themes/simba/logo.png -resize 400x \) -gravity center -composite "$3"
     else
-      "$B/gerar" "${2#win11-}" "$B/build/$2" >/dev/null 2>&1
-      "$B/previa" "$B/build/$2" "$3" "${4:-}"
+      "$B/gerar" "${2#simba-}" "$C/$2" >/dev/null 2>&1
+      "$B/previa" "$C/$2" "$3" "${4:-}"
     fi ;;
   aplicar)
     valido "$2"
-    for i in "${IDS[@]:0:5}"; do "$B/gerar" "${i#win11-}" "$B/build/$i" >/dev/null 2>&1; done
+    for i in "${IDS[@]:0:5}"; do "$B/gerar" "${i#simba-}" "$C/$i" >/dev/null 2>&1; done
     notify-send -a "$(simba-t "Inicialização")" -i preferences-desktop-theme "$(simba-t "Aplicando tema de inicialização")" "$(simba-t "%1 — confirme a senha de administrador. Leva cerca de 1 minuto." "${TIT[$2]}")" || true
     # O script vai como texto (não como caminho de arquivo) e os temas por tar na entrada padrão.
-    if tar -C "$B/build" -cf - "${IDS[@]:0:5}" | pkexec /bin/bash -c "$(cat "$B/instalar-root")" instalar "$2" >"$HOME/.cache/tema-boot.log" 2>&1; then
+    if tar -C "$C" -cf - "${IDS[@]:0:5}" | pkexec /bin/bash -c "$(cat "$B/instalar-root")" instalar "$2" >"$HOME/.cache/tema-boot.log" 2>&1; then
       notify-send -a "$(simba-t "Inicialização")" -i emblem-ok-symbolic "$(simba-t "Tema de inicialização aplicado")" "$(simba-t "%1 aparece no próximo boot." "${TIT[$2]}")" || true
     else
       notify-send -u critical -a "$(simba-t "Inicialização")" "$(simba-t "Falha ao aplicar o tema")" "$(simba-t "Veja %1" "~/.cache/tema-boot.log")" || true

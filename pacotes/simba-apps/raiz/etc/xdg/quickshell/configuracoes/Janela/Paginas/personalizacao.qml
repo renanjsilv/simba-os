@@ -18,7 +18,7 @@ Pagina {
   property string aplicandoTema: ""
   property string aplicandoFundo: ""
   property string filtro: "todos"
-  // Temas de inicialização (Plymouth) estilo Windows 11 — /usr/bin/tema-boot
+  // Temas de inicialização (Plymouth) do Simba OS — /usr/bin/tema-boot
   property var temasBoot: []
   // ── ícones (bin/icones) ──
   property var icones: null                 // catálogo: famílias, prévias, tema ativo
@@ -109,11 +109,11 @@ Pagina {
       })
     })
     // Prévias: geradas uma vez; a "Vidro" sempre (usa o papel de parede atual).
-    // Refaz a prévia se faltar ou se o modelo do tema mudou; a "Vidro" vem depois (é mais lenta).
-    var gerar = I18n.t("d=\"$HOME/.cache/temas-boot\"; m=\"$HOME/.local/share/temas-boot/tema.script\"; mkdir -p \"$d\"; ")
-    Sistema.sh(gerar + "for i in $(tema-boot listar | cut -d'|' -f1); do [[ $i == win11-vidro ]] && continue; [[ -f $d/$i.png && $d/$i.png -nt $m ]] || tema-boot previa $i \"$d/$i.png\"; done", function() {
+    // Refaz a prévia se faltar ou se o modelo do tema mudou (no Clássico, o logo); a "Vidro" vem depois (é mais lenta).
+    var gerar = I18n.t("d=\"$HOME/.cache/temas-boot\"; m=/usr/share/simba-apps/temas-boot/tema.script; mkdir -p \"$d\"; ")
+    Sistema.sh(gerar + "for i in $(tema-boot listar | cut -d'|' -f1); do [[ $i == simba-vidro ]] && continue; r=$m; [[ $i == simba ]] && r=/usr/share/plymouth/themes/simba/logo.png; [[ -f $d/$i.png && $d/$i.png -nt $r ]] || tema-boot previa $i \"$d/$i.png\"; done", function() {
       pg.previasBoot++
-      Sistema.sh(gerar + "tema-boot previa win11-vidro \"$d/win11-vidro.png\"", function() { pg.previasBoot++ })
+      Sistema.sh(gerar + "tema-boot previa simba-vidro \"$d/simba-vidro.png\"", function() { pg.previasBoot++ })
     })
   }
   function aplicarBoot(id, titulo) {
@@ -1091,8 +1091,8 @@ Pagina {
     spacing: 10
     Repeater {
       model: [
-        { id: "classico", titulo: I18n.t("Windows 11") },
-        { id: "moderno", titulo: I18n.t("Windows 11 (2025)") },
+        { id: "classico", titulo: I18n.t("Clássico") },
+        { id: "moderno", titulo: I18n.t("Moderno") },
         { id: "compacto", titulo: I18n.t("Compacto") },
         { id: "telaCheia", titulo: I18n.t("Tela cheia") }
       ]
@@ -1300,7 +1300,7 @@ Pagina {
 
   Secao {
     titulo: I18n.t("Inicialização")
-    detalhe: I18n.t("Tela que aparece ao ligar, desligar e reiniciar, no estilo do Windows 11. Pede a senha de administrador e vale a partir do próximo boot. “Vidro” usa o papel de parede atual.")
+    detalhe: I18n.t("Tela que aparece ao ligar, desligar e reiniciar. Pede a senha de administrador e vale a partir do próximo boot. “Vidro” usa o papel de parede atual.")
   }
   Ancora { chave: "temaBoot" }
   Flow {

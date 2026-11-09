@@ -1331,7 +1331,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // o janelas.lua manda de novo o estado (max/zona/solta) de cada janela
     g_pEventLoopManager->doLater([] { HyprlandAPI::invokeHyprctlCommand("eval", "if janelas and janelas.sincronizar then janelas.sincronizar() end"); });
 
-    return {"janelas", "Barras e controles de janela estilo Windows 11, decididos pelo protocolo", "renan", "1.0"};
+    return {"janelas", "Barras e controles de janela do Simba OS, decididos pelo protocolo", "renan", "1.0"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

@@ -1,0 +1,36 @@
+#!/bin/bash
+# Prévia aproximada (imagem) de um tema gerado: previa <pasta-do-tema> <saída.png> [senha]
+set -euo pipefail
+d=$1 out=$2 senha=${3:-}
+W=1366 H=768 e=$(awk "BEGIN{print $H/1080}")
+nome=$(basename "$d")
+cor=$(sed -n 's/^cfg.fundo_r = \([0-9.]*\); cfg.fundo_g =  *\([0-9.]*\); cfg.fundo_b =  *\([0-9.]*\);.*/\1 \2 \3/p' "$d/$nome.script")
+read -r r g b <<<"$cor"
+bgc=$(awk -v r=$r -v g=$g -v b=$b 'BEGIN{printf "#%02x%02x%02x", r*255, g*255, b*255}')
+args=(-size ${W}x${H} "xc:$bgc")
+[[ -f $d/fundo.png ]] && args+=(\( "$d/fundo.png" -resize "${W}x${H}!" \) -composite)
+cl=0.42 ca=0.70
+if [[ -f $d/cartao.png ]] && grep -q "cfg.cartao = 1" "$d/$nome.script"; then
+  cw=$(magick identify -format %w "$d/cartao.png"); ch=$(magick identify -format %h "$d/cartao.png")
+  sw=$(awk "BEGIN{print int($cw*$e)}"); sh=$(awk "BEGIN{print int($ch*$e)}")
+  args+=(\( "$d/cartao.png" -resize ${sw}x${sh}! \) -geometry +$(( (W-sw)/2 ))+$(awk "BEGIN{print int($H*0.53-$sh/2)}") -composite)
+  cl=$(awk "BEGIN{print ($H*0.53-$sh*0.18)/$H}"); ca=$(awk "BEGIN{print ($H*0.53+$sh*0.26)/$H}")
+fi
+lw=$(awk "BEGIN{print int(150*$e)}")
+args+=(\( "$d/logo.png" -resize ${lw}x${lw} \) -geometry +$(( (W-lw)/2 ))+$(awk "BEGIN{print int($H*$cl-$lw/2)}") -composite)
+pd=$(awk "BEGIN{p=int(7*$e); if(p<4)p=4; print p}")
+cy=$(awk "BEGIN{print $H*$ca}")
+if [[ -z $senha ]]; then
+  for th in 0 0.45 0.85 1.2 1.5; do
+    x=$(awk "BEGIN{print int($W/2+21*$e*sin($th)-$pd/2)}"); y=$(awk "BEGIN{print int($cy-21*$e*cos($th)-$pd/2)}")
+    args+=(\( "$d/ponto.png" -resize ${pd}x${pd} \) -geometry +$x+$y -composite)
+  done
+else
+  fw=$(awk "BEGIN{print int(420*$e)}"); fh=$(awk "BEGIN{print int(56*$e)}")
+  fy=$(awk "BEGIN{print int($cy-$fh/2)}")
+  args+=(\( "$d/campo.png" -resize ${fw}x${fh}! \) -geometry +$(( (W-fw)/2 ))+$fy -composite)
+  for i in 0 1 2 3 4 5 6; do
+    args+=(\( "$d/ponto.png" -resize $((pd+1))x$((pd+1)) \) -geometry +$(( (W-fw)/2 + 15 + i*(pd+7) ))+$(( fy + fh/2 - (pd+1)/2 )) -composite)
+  done
+fi
+magick "${args[@]}" "$out"

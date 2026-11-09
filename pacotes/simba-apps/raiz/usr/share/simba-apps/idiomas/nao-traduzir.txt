@@ -101,8 +101,6 @@
 "Wh"
 "Wi-Fi"
 "Windows"
-"Windows 11"
-"Windows 11 (2025)"
 "WordCraft"
 "Work"
 "XF86Back"

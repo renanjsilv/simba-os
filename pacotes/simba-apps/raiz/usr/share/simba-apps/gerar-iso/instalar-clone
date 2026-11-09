@@ -616,10 +616,16 @@ fi
 
 # ---------------------------------------------------------------- boot
 progresso 93 "$(t "Preparando a inicialização" "Preparing startup")"
+# Carregador do Limine na partição EFI: o clone de uma máquina já traz; o sistema da receita
+# não (foi montado sem partição EFI). --fallback também grava EFI/BOOT/BOOTX64.EFI, que liga
+# mesmo em placas que esquecem as entradas da NVRAM. O registro na NVRAM é feito logo abaixo.
+if [ ! -f "$T/boot/EFI/limine/limine_x64.efi" ] && [ ! -f "$T/boot/EFI/limine/BOOTX64.EFI" ]; then
+  x arch-chroot "$T" limine-install --fallback --no-efi-register || echo "aviso: limine-install" >> "$LOG"
+fi
 x arch-chroot "$T" limine-mkinitcpio || echo "aviso: limine-mkinitcpio" >> "$LOG"
 x arch-chroot "$T" limine-snapper-sync || true
 
-for l in '\EFI\limine\BOOTX64.EFI' '\EFI\BOOT\BOOTX64.EFI'; do
+for l in '\EFI\limine\limine_x64.efi' '\EFI\limine\BOOTX64.EFI' '\EFI\BOOT\BOOTX64.EFI'; do
   if [ -f "$T/boot${l//\\//}" ]; then
     x efibootmgr --create --disk "$DISK" --part 1 --label "$NOME_SISTEMA" --loader "$l" || true
     break
@@ -633,6 +639,8 @@ fi
 unset PASS1 PASS2
 
 progresso 99 "$(t "Finalizando" "Finishing")"
+# o registro da instalação fica no sistema (o do pendrive some ao desligar)
+install -m 600 "$LOG" "$T/var/log/simba-instalacao.log" 2>/dev/null || true
 sync
 umount -R "$T"
 cryptsetup close root

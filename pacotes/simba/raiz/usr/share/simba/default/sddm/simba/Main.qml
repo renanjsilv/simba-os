@@ -7,7 +7,18 @@ Rectangle {
   height: 480
   color: "#1a1b26"
 
-  property string currentUser: userModel.lastUser
+  // Instalação nova: ninguém entrou ainda e lastUser vem vazio. Usa o primeiro usuário
+  // da lista (NameRole = Qt.UserRole + 1); senão o login falha sempre.
+  property string currentUser: {
+    if (userModel.lastUser)
+      return userModel.lastUser
+    for (var i = 0; i < userModel.rowCount(); i++) {
+      var n = userModel.data(userModel.index(i, 0), Qt.UserRole + 1)
+      if (n)
+        return n.toString()
+    }
+    return ""
+  }
   property bool loginFailed: false
   property int sessionIndex: {
     for (var i = 0; i < sessionModel.rowCount(); i++) {

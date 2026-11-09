@@ -52,15 +52,20 @@ criar)
   [ -f "$iso" ] || die "ISO não encontrada: $iso"
   mkdir -p "$DISCOS"
   "${C[@]}" dominfo "$VM" >/dev/null 2>&1 && die "a VM $VM já existe (testar-vm apagar)"
+  # TESTAR_VM_3D=0: sem aceleração 3D (o "testar-vm tela" só consegue capturar assim)
+  if [ "${TESTAR_VM_3D:-1}" = 0 ]; then
+    VIDEO=(--video virtio --graphics vnc,listen=none)
+  else
+    VIDEO=(--video virtio,accel3d=yes --graphics spice,gl.enable=yes,listen=none,rendernode=/dev/dri/renderD128)
+  fi
   virt-install --connect qemu:///session --name "$VM" --osinfo archlinux \
     --memory 4096 --vcpus 4 --cpu host-passthrough \
     --boot uefi,firmware.feature0.name=secure-boot,firmware.feature0.enabled=no \
     --disk "path=$DISCOS/$VM.qcow2,size=40,format=qcow2,bus=virtio" \
     --cdrom "$iso" \
     --tpm emulator,model=tpm-crb,version=2.0 \
-    --video virtio,accel3d=yes \
-    --graphics spice,gl.enable=yes,listen=none,rendernode=/dev/dri/renderD128 \
-    --network "user,model=virtio,portForward0.proto=tcp,portForward0.range0.start=$SSH_PORTA,portForward0.range0.to=22" \
+    "${VIDEO[@]}" \
+    --network "user,model=virtio,backend.type=passt,portForward0.proto=tcp,portForward0.range0.start=$SSH_PORTA,portForward0.range0.to=22" \
     --sound default --noautoconsole
   echo "VM $VM criada e ligada. Veja a tela com: testar-vm tela"
   ;;

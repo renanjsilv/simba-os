@@ -55,3 +55,33 @@
 -- Enable touchpad gestures for moving focus (helpful on scrolling layout).
 -- hl.gesture({ fingers = 3, direction = "left", action = function() hl.dispatch(hl.dsp.focus({ direction = "l" })) end })
 -- hl.gesture({ fingers = 3, direction = "right", action = function() hl.dispatch(hl.dsp.focus({ direction = "r" })) end })
+
+-- CapsLock normal (maiúsculas) em vez de tecla Compose.
+hl.config({
+  input = {
+    kb_options = "",
+    -- Foco segue o mouse só ao cruzar a borda de outra janela: ao clicar numa
+    -- prévia da barra de tarefas, mexer o mouse não devolve o foco para a
+    -- janela flutuante que estiver embaixo do cursor.
+    mouse_refocus = false,
+    -- Foco no clique, como no Windows 11: passar o mouse não troca a janela
+    -- ativa (a rolagem continua indo para a janela sob o cursor). O
+    -- empilhamento do janelas.lua depende disso.
+    follow_mouse = 0,
+  },
+})
+
+-- Keys typed by wtype (Draco automates apps with it) must not trigger
+-- compositor shortcuts: wtype's first key lands on Esc's keycode and was
+-- firing the Draco cancel bind mid-task.
+hl.device({ name = "hl-virtual-keyboard-wtype", keybinds = false })
+
+-- >>> Configurações: gerado pelo app Configurações (Super+Espaço › Configurações). Edite pelo app. >>>
+hl.config({
+  input = {
+    touchpad = {
+      scroll_factor = 0.7,
+    },
+  },
+})
+-- <<< Configurações <<<

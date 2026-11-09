@@ -1,0 +1,19 @@
+{
+  "area": {
+    "tamanho": "pequeno"
+  },
+  "hypr": {
+    "input:touchpad:scroll_factor": 0.7,
+    "decoration:blur:enabled": true
+  },
+  "iniciar": {
+    "estilo": "classico",
+    "transparencia": 32,
+    "material": "transparente"
+  },
+  "icones": {
+    "tema": "simba",
+    "cor": "auto",
+    "modo": "auto"
+  }
+}

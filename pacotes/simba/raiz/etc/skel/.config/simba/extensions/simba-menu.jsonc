@@ -27,4 +27,13 @@
   // Example: replace the default About action by reusing the same id. Existing
   // fields are kept unless overridden.
   // "about": {"icon":"","label":"About","action":"simba-launch-or-focus-tui \"zsh -c 'fastfetch; read -k 1'\""},
+  // Configurações app (~/.config/quickshell/configuracoes)
+  "configuracoes": {"icon":"󰒓","label":"Configurações","description":"Tema, telas, bloqueio, teclado, som, rede…","action":"/usr/bin/configuracoes"},
+  "setup.configuracoes": {"icon":"󰒓","label":"Configurações (app)","action":"/usr/bin/configuracoes"},
+  "setup.monitors-app": {"icon":"󰍺","label":"Telas e projeção","action":"/usr/bin/configuracoes tela"},
+  // simba-marca: o nome que aparece no menu é Simba OS
+  "learn.simba": {"icon":"󰋗","iconFont":"","label":"Conheça o Simba OS","action":"boas-vindas"},
+  "update.simba": {"icon":"󰚰","iconFont":"","label":"Simba OS"},
+  "install.loja": {"icon":"󰏓","label":"Loja de apps","action":"simba-loja"},
+  "boasvindas": {"icon":"󰄛","label":"Boas-vindas ao Simba OS","action":"boas-vindas"}
 }

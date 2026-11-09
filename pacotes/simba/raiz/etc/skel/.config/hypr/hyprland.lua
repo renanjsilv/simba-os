@@ -18,6 +18,12 @@ require("default.hypr.simba")
 -- ~/.config/hypr files.
 require("hypr.monitors")
 require("hypr.input")
+-- Janelas estilo Windows 11 (abrem maximizadas, encaixe por zonas); antes do
+-- looknfeel, que escolhe o layout "lua:janelas".
+require("hypr.janelas")
+-- Foco sem mover o cursor (barra de tarefas, prévias).
+require("hypr.foco")
+require("hypr.super")
 require("hypr.bindings")
 require("hypr.looknfeel")
 require("hypr.autostart")
@@ -27,3 +33,4 @@ require("default.hypr.toggles")
 
 -- Add any other personal Hyprland configuration below.
 -- o.window("qemu", { workspace = "5" })
+

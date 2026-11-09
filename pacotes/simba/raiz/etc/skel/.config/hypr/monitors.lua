@@ -1,7 +1,7 @@
 -- See https://wiki.hypr.land/Configuring/Basics/Monitors/
 -- List current monitors and supported resolutions with: hyprctl monitors all
 
-local simba_gdk_scale = 2
+local simba_gdk_scale = 1
 local simba_monitor_scale = "auto"
 
 hl.env("GDK_SCALE", tostring(simba_gdk_scale))

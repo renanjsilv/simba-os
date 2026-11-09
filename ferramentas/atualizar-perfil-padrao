@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""atualizar-perfil-padrao — copia o visual do Simba da pasta pessoal de quem desenvolve para o
+perfil padrão de usuários novos (pacotes/simba/raiz/etc/skel), tirando o que é pessoal.
+
+O "jeito Simba" (barra embaixo, Menu Iniciar, janelas estilo Windows, Draco, tema White…) é
+ajustado no dia a dia pelos apps, na própria pasta pessoal. Esta ferramenta leva essa
+configuração para o pacote, numa lista fechada de arquivos e com limpeza explícita: o que não
+está aqui não vai. Rode depois de mudar o visual e revise o `git diff` antes do commit.
+
+  ferramentas/atualizar-perfil-padrao [--home /home/fulano]
+"""
+import argparse
+import json
+import re
+import shutil
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+SKEL = REPO / "pacotes/simba/raiz/etc/skel"
+
+# hypr: arquivos copiados; limpeza por arquivo logo abaixo
+HYPR = ["autostart.lua", "bindings.lua", "hyprland.lua", "input.lua", "looknfeel.lua",
+        "monitors.lua", "foco.lua", "janelas.lua", "super.lua"]
+# copiados como estão (relativos à pasta pessoal)
+COMO_ESTAO = [
+    ".config/simba/shell.toml",
+    ".config/simba/extensions/simba-menu.jsonc",
+    ".config/simba/hooks/theme-set.d/configuracoes-tema.sh",
+    ".config/simba/hooks/theme-set.d/icones-tema.sh",
+    ".config/simba/hooks/theme-set.d/simba-papeis.sh",
+    ".config/simba/hooks/font-set.d/configuracoes-tema.sh",
+    ".config/simba/backgrounds/.ocultos",
+    ".config/configuracoes/barra-centro-oculto.json",
+    ".config/configuracoes/central-substituidos.json",
+]
+PASTAS = [".config/simba/themes/black"]   # tema escuro do Simba (o White vem em /usr/share)
+
+
+def limpar_lua(nome, texto):
+    if nome == "hyprland.lua":
+        # Hydra/Proton: jogos de quem desenvolve, não do sistema
+        texto = re.sub(r"\n-- Logs do Proton[^\n]*\nhl\.env\(\"PROTON_LOG_DIR\"[^\n]*\n", "\n", texto)
+    if nome == "input.lua":
+        # bloco do wtype aparece duas vezes (edição repetida): fica um
+        bloco = re.search(r"\n-- Keys typed by wtype.*?keybinds = false \}\)\n", texto, re.S)
+        if bloco and texto.count(bloco.group(0)) > 1:
+            primeiro = texto.index(bloco.group(0)) + len(bloco.group(0))
+            texto = texto[:primeiro] + texto[primeiro:].replace(bloco.group(0), "\n", 1)
+    if nome == "bindings.lua":
+        # a calculadora do sistema é a do Simba (a do GNOME não vem instalada)
+        texto = texto.replace("uwsm-app -- gnome-calculator", "/usr/bin/calculadora")
+    texto = re.sub(r"\n{3,}", "\n\n", texto)
+    return texto
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--home", default=str(Path.home()))
+    home = Path(ap.parse_args().home)
+    escritos = []
+
+    def escrever(rel, conteudo, modo=0o644):
+        alvo = SKEL / rel
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        alvo.write_text(conteudo)
+        alvo.chmod(modo)
+        escritos.append(rel)
+
+    for f in HYPR:
+        origem = home / ".config/hypr" / f
+        if not origem.exists():
+            sys.exit(f"falta {origem}")
+        escrever(f".config/hypr/{f}", limpar_lua(f, origem.read_text()))
+
+    for rel in COMO_ESTAO:
+        origem = home / rel
+        if not origem.exists():
+            sys.exit(f"falta {origem}")
+        escrever(rel, origem.read_text(), origem.stat().st_mode & 0o777)
+
+    for rel in PASTAS:
+        destino = SKEL / rel
+        if destino.exists():
+            shutil.rmtree(destino)
+        shutil.copytree(home / rel, destino, symlinks=True)
+        escritos.append(rel + "/")
+
+    # barra: sem apps pessoais na bandeja e sem desligar o bloqueio por inatividade
+    shell = json.loads((home / ".config/simba/shell.json").read_text())
+    for lado in shell.get("bar", {}).get("layout", {}).values():
+        for w in lado:
+            if w.get("id") == "bandeja":
+                w["apps"] = []
+    shell.pop("idle", None)
+    escrever(".config/simba/shell.json", json.dumps(shell, ensure_ascii=False, indent=2) + "\n")
+
+    # Configurações: sem posições de ícones da área de trabalho e sem fixados pessoais no
+    # Menu Iniciar (usa os fixados padrão do Simba)
+    pref = json.loads((home / ".config/configuracoes/preferencias.json").read_text())
+    pref.get("area", {}).pop("posicoes", None)
+    pref.get("iniciar", {}).pop("fixados", None)
+    escrever(".config/configuracoes/preferencias.json", json.dumps(pref, ensure_ascii=False, indent=2) + "\n")
+
+    # nada com o nome de quem desenvolve (o plugin renan.lock é o nome atual do módulo de
+    # bloqueio, criado pelo simba-apps-usuario; não é dado pessoal)
+    usuario = home.name
+    for rel in escritos:
+        p = SKEL / rel
+        for arq in ([p] if p.is_file() else [x for x in p.rglob("*") if x.is_file() and not x.is_symlink()]):
+            t = arq.read_text(errors="ignore")
+            if f"/home/{usuario}" in t:
+                sys.exit(f"caminho pessoal em {arq}: revise antes de continuar")
+    print("\n".join(escritos))
+    print(f"\n{len(escritos)} itens em {SKEL.relative_to(REPO)}. Revise com: git diff --stat")
+
+
+if __name__ == "__main__":
+    main()

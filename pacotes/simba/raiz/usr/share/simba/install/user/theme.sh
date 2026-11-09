@@ -4,10 +4,10 @@ mkdir -p ~/.config/simba/themes
 if [[ ! -s $HOME/.local/state/simba/current/theme.name ]]; then
   # iso-chroot and provision-owner both run without a live session to notify.
   if [[ ${SIMBA_SETUP_CONTEXT:-runtime} != "runtime" ]]; then
-    SIMBA_THEME_HEADLESS=1 simba-theme-set "Tokyo Night"
+    SIMBA_THEME_HEADLESS=1 simba-theme-set "White"
     rm -f ~/.config/chromium/SingletonLock # otherwise archiso owns the Chromium singleton
   else
-    simba-theme-set "Tokyo Night"
+    simba-theme-set "White"
   fi
 fi
 simba-theme-set-pi --activate

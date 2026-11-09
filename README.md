@@ -114,7 +114,7 @@ e dê boot. O instalador pergunta disco, usuário e login automático.
 ```ini
 [simba-os]
 SigLevel = Required DatabaseRequired
-Server = https://github.com/__USUARIO__/simba-os/releases/download/repo
+Server = https://github.com/renanjsilv/simba-os/releases/download/repo
 ```
 
 ```bash

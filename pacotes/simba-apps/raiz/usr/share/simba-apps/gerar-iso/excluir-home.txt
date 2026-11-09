@@ -6,6 +6,13 @@
 .claude.json
 .claude.json.*
 
+# Chaves privadas e certificados soltos — nunca
+*.asc
+*.key
+*.pem
+*.pfx
+*.p12
+
 # Lixeira e metadados de cache
 .local/share/Trash
 .local/share/gvfs-metadata

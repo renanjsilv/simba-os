@@ -51,3 +51,48 @@ node_modules
 .local/share/org.localsend.localsend_app
 # Scripts soltos de quem gerou
 ativar-sudo-sem-senha.sh
+gerar-iso.sh
+instalar.sh
+package.json
+package-lock.json
+
+# Chaves privadas, certificados e segredos na home
+*.asc
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Ponto de montagem de nuvem (FUSE)
+Nuvem
+Nuvem/*
+
+# Agentes de IA: históricos, bancos e sessões locais
+.local/share/opencode
+.local/state/opencode
+.local/share/crush
+.local/share/aube
+.local/state/claude
+.local/state/gh
+.local/state/Simba
+.agents
+.hermes
+.pi
+
+# Ambientes, builds e caches de desenvolvimento locais
+.cargo
+.npm-global
+.npmrc
+.fltk
+.nv
+.pulse-cookie
+.steampath
+.steampid
+.local/share/simba-migracao
+.local/share/temas-boot
+.local/share/whisper-venv
+.local/share/aether
+.config/go
+.config/Omacom
+.config/aether
+.config/libvirt

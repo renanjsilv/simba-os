@@ -65,7 +65,7 @@ arch-chroot "$T" /usr/local/bin/marca-sistema
 
 # papel de parede: na pasta de fundos do tema atual e como fundo atual
 h="$T/home/$u"
-tema=$(cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || echo vantablack)
+tema=$(cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || echo white)   # sem tema ainda (primeiro login): o padrão do Simba
 bgbase="$h/.config/simba/backgrounds"
 [ -d "$h/.config/simba/backgrounds" ] && [ ! -d "$bgbase" ] && bgbase="$h/.config/simba/backgrounds"
 install -d -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$bgbase" "$bgbase/$tema"
@@ -74,5 +74,6 @@ install -m644 -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$pac/papel-de-par
 statedir="$h/.local/state/simba/current"
 [ -d "$h/.local/state/simba/current" ] && [ ! -d "$statedir" ] && statedir="$h/.local/state/simba/current"
 install -d -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$statedir"
-ln -nsf "$bgbase/$tema/00-${NOME// /-}.png" "$statedir/background"
+# o link vale no sistema instalado: sem o prefixo do disco montado ($T)
+ln -nsf "${bgbase#"$T"}/$tema/00-${NOME// /-}.png" "$statedir/background"
 chown -h "$(stat -c %u:%g "$h")" "$statedir/background"

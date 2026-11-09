@@ -39,7 +39,8 @@ for c in pacstrap arch-chroot mksquashfs mkarchiso xorriso; do
   command -v "$c" >/dev/null || pacman -S --needed --noconfirm arch-install-scripts squashfs-tools archiso libisoburn >/dev/null
 done
 
-desmontar() { set +e; for m in $(findmnt -Rno TARGET "$RAIZ" 2>/dev/null | sort -r); do umount -l "$m"; done; }
+# subshell: o "set +e" não pode vazar para o script (ele desligava a parada no primeiro erro)
+desmontar() ( set +e; for m in $(findmnt -Rno TARGET "$RAIZ" 2>/dev/null | sort -r); do umount -l "$m"; done; true )
 trap desmontar EXIT
 
 # ---------------------------------------------------------------- 1. pacotes
@@ -80,7 +81,10 @@ fi
 mapfile -t PACOTES < <(grep -vE '^\s*(#|$)' "$I/pacotes.txt" | tr -s ' \t' '\n' | grep .)
 info "${#PACOTES[@]} pacotes na receita"
 # -G: não copia o chaveiro desta máquina; o do sistema novo é criado logo abaixo
-pacstrap -C "$WORK/pacman.conf" -G "$RAIZ" "${PACOTES[@]}"
+pacstrap -C "$WORK/pacman.conf" -G "$RAIZ" "${PACOTES[@]}" || die "pacstrap falhou"
+for p in "${PACOTES[@]}"; do
+  pacman --root "$RAIZ" -Q "$p" >/dev/null 2>&1 || die "pacote da receita não ficou instalado: $p"
+done
 
 # ---------------------------------------------------------------- 2. sistema
 msg "Configuração do sistema (idioma, teclado, boot)"

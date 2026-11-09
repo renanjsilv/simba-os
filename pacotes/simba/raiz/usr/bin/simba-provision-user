@@ -102,22 +102,23 @@ for skill in "$SIMBA_PATH"/default/agents/skills/*/; do
   fi
 done
 
-mkdir -p ~/Downloads ~/Pictures ~/Videos ~/.config/gtk-3.0
-xdg-user-dirs-update --set TEMPLATES "$HOME"
-xdg-user-dirs-update --set PUBLICSHARE "$HOME"
-xdg-user-dirs-update --set DESKTOP "$HOME"
-rmdir ~/Templates ~/Public ~/Desktop 2>/dev/null || true
+# Simba: as pastas do usuário seguem o ~/.config/user-dirs.dirs (nomes em português, com
+# uma Área de Trabalho de verdade — a área de trabalho do Simba mostra os ícones dela)
+mkdir -p ~/.config/gtk-3.0
+xdg-user-dirs-update
 touch ~/.config/gtk-3.0/bookmarks
-for dir in Downloads Projects Pictures Videos; do
-  bookmark="file://$HOME/$dir $dir"
+for tipo in DOWNLOAD DOCUMENTS PICTURES VIDEOS; do
+  dir=$(xdg-user-dir "$tipo")
+  [[ -n $dir && $dir != "$HOME" ]] || continue
+  mkdir -p "$dir"
+  bookmark="file://$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$dir") $(basename "$dir")"
   grep -qxF "$bookmark" ~/.config/gtk-3.0/bookmarks || echo "$bookmark" >>~/.config/gtk-3.0/bookmarks
 done
 
 source "$SIMBA_INSTALL/user/all.sh"
 
 simba-refresh-applications
-env -u BROWSER XDG_CURRENT_DESKTOP= xdg-settings set default-web-browser chromium.desktop
-xdg-mime default HEY.desktop x-scheme-handler/mailto
+env -u BROWSER XDG_CURRENT_DESKTOP= xdg-settings set default-web-browser brave-browser.desktop
 
 if (( first_install )); then
   mkdir -p "$state_dir/migrations"

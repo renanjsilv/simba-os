@@ -48,6 +48,9 @@ msg "Simba OS $VERSAO — montando o sistema em $RAIZ"
 desmontar
 rm -rf "$WORK"
 mkdir -p "$RAIZ" "$CLONE"
+# ponto de montagem de verdade: sem isso o pacman dentro do arch-chroot não mede o espaço
+# livre (CheckSpace) e recusa instalar (ex.: os Craft, pacman -U)
+mount --bind "$RAIZ" "$RAIZ"
 
 # pacman.conf só com os repositórios oficiais e o [simba-os] (nada desta máquina)
 cat > "$WORK/pacman.conf" <<'EOF'

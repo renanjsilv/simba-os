@@ -12,7 +12,9 @@ if [[ -z $GH_USER ]]; then
   sed -i "s/^GH_USER=.*/GH_USER=\"\${SIMBA_GH_USER:-$GH_USER}\"/" "$R/ferramentas/config.sh"
 fi
 [[ -n $CHAVE ]] || { echo "crie a chave de assinatura antes: ferramentas/criar-chave" >&2; exit 1; }
-"$R/ferramentas/construir"
+# PUBLICAR_SEM_CONSTRUIR=1: publica os pacotes já construídos e assinados em dist/ (sem
+# recompilar, o que trocaria os arquivos e pediria a senha da chave de novo)
+[[ -n ${PUBLICAR_SEM_CONSTRUIR:-} ]] || "$R/ferramentas/construir"
 cd "$R/dist"
 rm -f "$REPO_NOME".db* "$REPO_NOME".files*
 # o GitHub troca ":" por "." no nome dos arquivos (época, ex.: brave-bin-1:1.2-1): renomeia

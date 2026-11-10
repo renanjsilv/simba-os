@@ -89,7 +89,7 @@ Scope {
 
   function fechar() { carregador.active = false }
   function focar() {
-    Sistema.solto(["hyprctl", "dispatch", 'hl.dsp.focus({ window = "class:com.renan.Configuracoes" })'])
+    Sistema.solto(["hyprctl", "dispatch", 'hl.dsp.focus({ window = "class:com.simba.Configuracoes" })'])
   }
   Connections {
     target: Navegacao
@@ -210,7 +210,7 @@ Scope {
               }
               Process {
                 id: acharEndereco
-                command: ["bash", "-c", "hyprctl clients -j | jq -r '[.[] | select(.class==\"com.renan.Configuracoes\")][0].address // empty'"]
+                command: ["bash", "-c", "hyprctl clients -j | jq -r '[.[] | select(.class==\"com.simba.Configuracoes\")][0].address // empty'"]
                 running: true
                 stdout: StdioCollector {
                   onStreamFinished: {

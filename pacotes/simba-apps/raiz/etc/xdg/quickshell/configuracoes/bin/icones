@@ -27,7 +27,7 @@ PREVIA = ["user-home", "folder-documents", "utilities-terminal", "web-browser", 
 
 
 # o tema Simba tem ícone próprio para cada app instalado: mostra apps de verdade
-PREVIA_SIMBA = ["com.renan.Explorador", "brave-desktop", "simba-loja", "com.renan.Configuracoes", "steam",
+PREVIA_SIMBA = ["com.simba.Explorador", "brave-desktop", "simba-loja", "com.simba.Configuracoes", "steam",
                 "spotify-client", "whatsapp", "foot"]
 
 

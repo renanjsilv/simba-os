@@ -58,7 +58,7 @@ Scope {
   }
   readonly property real alfaFundo: material === "solido" ? 1 : Math.max(0.12, 1 - transparencia)
   readonly property string visaoTodos: Preferencias.obter("iniciar.visaoTodos", "categoria")  // moderno
-  readonly property var fixadosPadrao: ["brave-browser", "com.renan.Explorador", "simba-loja", "com.renan.Configuracoes",
+  readonly property var fixadosPadrao: ["brave-browser", "com.simba.Explorador", "simba-loja", "com.simba.Configuracoes",
     "ai.storyteller.wordcraft", "ai.storyteller.gridcraft", "ai.storyteller.deckcraft", "com.simba.Draco",
     "foot", "WhatsApp", "spotify", "steam", "localsend", "org.gnome.TextEditor", "org.gnome.Calculator"]
   readonly property var fixados: {

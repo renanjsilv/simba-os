@@ -34,7 +34,7 @@ from operacoes import Operacoes, modo_texto  # noqa: E402
 from paginas import Computador, Detalhes, Inicio, Lateral, PaginaNuvem  # noqa: E402
 from vista import NOMES_VISAO, ORDENS, VISOES, Vista, normalizar  # noqa: E402
 
-APP_ID = "com.renan.Explorador"
+APP_ID = "com.simba.Explorador"
 ESPECIAIS = {"inicio": (_t("Início"), "user-home"), "galeria": (_t("Galeria"), "folder-pictures"),
              "computador": (_t("Este Computador"), "computer"), "nuvem": (_t("Nuvem"), "folder-remote"),
              "busca": (_t("Pesquisa"), "system-search")}

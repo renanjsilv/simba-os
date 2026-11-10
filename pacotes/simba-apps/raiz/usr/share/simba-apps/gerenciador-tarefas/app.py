@@ -30,7 +30,7 @@ import coleta as C  # noqa: E402
 import warnings  # noqa: E402
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-APP_ID = "com.renan.GerenciadorTarefas"
+APP_ID = "com.simba.GerenciadorTarefas"
 HOME = Path.home()
 
 CORES = {
@@ -312,7 +312,7 @@ class Janela(Adw.ApplicationWindow):
         caixa_raiz = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         cab = Adw.HeaderBar()
         titulo = Gtk.Box(spacing=8)
-        ic = Gtk.Image.new_from_icon_name("com.renan.GerenciadorTarefas")
+        ic = Gtk.Image.new_from_icon_name("com.simba.GerenciadorTarefas")
         ic.set_pixel_size(18)
         titulo.append(ic)
         titulo.append(Gtk.Label(label=_t("Gerenciador de Tarefas")))

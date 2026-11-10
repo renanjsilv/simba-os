@@ -7,14 +7,14 @@ GenericName[pt_BR]=Gerenciador de arquivos
 Comment=Browse your folders, drives and clouds
 Comment[pt_BR]=Navegue pelas suas pastas, discos e nuvens
 Exec=explorador %U
-Icon=com.renan.Explorador
+Icon=com.simba.Explorador
 Terminal=false
 Categories=System;Utility;Core;GTK;FileManager;
 MimeType=inode/directory;application/x-gnome-saved-search;
 Keywords=files;folders;explorer;file manager;nautilus;windows;
 Keywords[pt_BR]=arquivos;pastas;explorador;gerenciador;nautilus;windows;
 StartupNotify=true
-StartupWMClass=com.renan.Explorador
+StartupWMClass=com.simba.Explorador
 Actions=nova-janela;
 
 [Desktop Action nova-janela]

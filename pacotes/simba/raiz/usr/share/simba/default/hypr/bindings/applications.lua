@@ -21,9 +21,9 @@ if o.preinstalled_bindings_enabled() then
 
   o.bind("SUPER + SHIFT + A", "ChatGPT", { webapp = "https://chatgpt.com" })
   o.bind("SUPER + SHIFT + ALT + A", "Grok", { webapp = "https://grok.com" })
-  o.bind("SUPER + SHIFT + C", "Calendário", { webapp = "https://app.hey.com/calendar/weeks/" })
-  o.bind("SUPER + SHIFT + E", "E-mail", { webapp = "https://app.hey.com" })
-  o.bind("SUPER + SHIFT + ALT + E", "Novo e-mail", { webapp = "https://app.hey.com/messages/new?display=standalone&new_window=true" })
+  o.bind("SUPER + SHIFT + C", "Calendário", { webapp = "https://calendar.google.com/" })
+  o.bind("SUPER + SHIFT + E", "E-mail", { webapp = "https://mail.google.com/" })
+  o.bind("SUPER + SHIFT + ALT + E", "Novo e-mail", { webapp = "https://mail.google.com/mail/?view=cm" })
   o.bind("SUPER + SHIFT + Y", "YouTube", { webapp = "https://youtube.com/" })
   o.bind("SUPER + SHIFT + ALT + G", "WhatsApp", { webapp = "https://web.whatsapp.com/", focus = true })
   o.bind( "SUPER + SHIFT + CTRL + G", "Google Mensagens", { webapp = "https://messages.google.com/web/conversations", focus = true })

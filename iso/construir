@@ -132,11 +132,20 @@ rm -f "$RAIZ/root/montar-simba.sh"
 arch-chroot "$RAIZ" runuser -u "$USUARIO" -- env HOME="/home/$USUARIO" simba-apps-usuario >"$WORK/apps-usuario.log" 2>&1 \
   || info "aviso: simba-apps-usuario (ver $WORK/apps-usuario.log)"
 
+# Craft (WordCraft, GridCraft, DeckCraft, PdfCraft — de terceiros, MIT/Apache): vêm das
+# releases oficiais dos autores, com SHA-256 conferido; o timer mantém atualizados.
+msg "Apps Craft (releases oficiais)"
+arch-chroot "$RAIZ" simba-craft-atualizar 2>&1 | sed 's/^/    /' || die "simba-craft-atualizar falhou"
+for app in wordcraft gridcraft deckcraft pdfcraft; do
+  pacman --root "$RAIZ" -Q "ai.storyteller.$app" >/dev/null 2>&1 || die "Craft não instalado: $app"
+done
+arch-chroot "$RAIZ" systemctl enable simba-craft-atualizar.timer >/dev/null 2>&1
+
 # ---------------------------------------------------------------- limpeza
 msg "Limpando o que é de cada instalação"
 rm -rf "$RAIZ/etc/pacman.d/gnupg"            # o instalador cria um chaveiro novo
 : > "$RAIZ/etc/machine-id"
-rm -rf "$RAIZ"/var/cache/pacman/pkg/* "$RAIZ"/var/log/pacman.log "$RAIZ"/var/tmp/* "$RAIZ"/tmp/*
+rm -rf "$RAIZ"/var/cache/pacman/pkg/* "$RAIZ"/var/cache/simba-craft/* "$RAIZ"/var/log/pacman.log "$RAIZ"/var/tmp/* "$RAIZ"/tmp/*
 rm -rf "$RAIZ/root/.cache" "$RAIZ/home/$USUARIO/.cache"
 rm -f "$RAIZ/etc/ssh"/ssh_host_* 2>/dev/null || true
 

@@ -36,7 +36,7 @@ MAPA = [
     (f"{H}/.local/share/simba/sistema", APPS, "usr/share/simba-apps/sistema"),
     (f"{H}/.local/share/simba/simba-simbolo.svg", APPS, "usr/share/simba-apps/simba-simbolo.svg"),
     (f"{H}/.config/simba/bar/modules", APPS, "usr/share/simba-apps/barra"),
-    (f"{H}/.config/simba/plugins/renan.lock", APPS, "usr/share/simba-apps/bloqueio"),
+    (f"{H}/.config/simba/plugins/simbaos.bloqueio", APPS, "usr/share/simba-apps/bloqueio"),
     (f"{H}/.local/share/dbus-1/services/org.freedesktop.FileManager1.service", APPS, "usr/share/dbus-1/services/org.freedesktop.FileManager1.service"),
     (f"{H}/.local/share/dbus-1/services/org.freedesktop.impl.portal.desktop.simba.service", APPS, "usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.simba.service"),
     (f"{H}/.local/share/xdg-desktop-portal/portals/simba.portal", APPS, "usr/share/xdg-desktop-portal/portals/simba.portal"),

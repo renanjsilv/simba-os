@@ -102,8 +102,7 @@ def main():
     pref.get("iniciar", {}).pop("fixados", None)
     escrever(".config/configuracoes/preferencias.json", json.dumps(pref, ensure_ascii=False, indent=2) + "\n")
 
-    # nada com o nome de quem desenvolve (o plugin renan.lock é o nome atual do módulo de
-    # bloqueio, criado pelo simba-apps-usuario; não é dado pessoal)
+    # nada com o nome de quem desenvolve
     usuario = home.name
     for rel in escritos:
         p = SKEL / rel

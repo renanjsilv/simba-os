@@ -13,7 +13,7 @@
           "estiloIcones": "coloridos",
           "fixados": [
             "brave-browser",
-            "com.renan.Explorador",
+            "com.simba.Explorador",
             "simba-loja"
           ],
           "id": "tarefas",
@@ -66,14 +66,14 @@
     "transparent": true
   },
   "cloneSourceRestores": [
-    "renan.lock"
+    "simbaos.bloqueio"
   ],
   "disabledPlugins": [
     "simba.lock"
   ],
   "plugins": [
     {
-      "id": "renan.lock"
+      "id": "simbaos.bloqueio"
     }
   ],
   "version": 1

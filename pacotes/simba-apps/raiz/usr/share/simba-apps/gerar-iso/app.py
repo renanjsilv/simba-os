@@ -22,7 +22,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
 
-APP_ID = "com.renan.GerarIso"
+APP_ID = "com.simba.GerarIso"
 BASE = Path(__file__).resolve().parent
 ROOT = BASE / "gerar-iso-root"
 RUN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "gerar-iso"

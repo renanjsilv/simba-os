@@ -59,18 +59,18 @@ hl.layer_rule({ match = { namespace = "botoes-janela.*" }, no_anim = true, anima
 -- Configurações (~/.config/quickshell/configuracoes): abre maximizada como um
 -- app comum (janelas.lua); o botão restaurar a solta. Its layers animate themselves in QML.
 -- Opaque: its "Mica" background is the blurred wallpaper, not what is behind it.
-o.window("com.renan.Configuracoes", { tag = "-default-opacity" })
-o.window("com.renan.Configuracoes", { opacity = "1 1" })
+o.window("com.simba.Configuracoes", { tag = "-default-opacity" })
+o.window("com.simba.Configuracoes", { opacity = "1 1" })
 hl.layer_rule({ match = { namespace = "configuracoes-.*" }, no_anim = true, animation = "none" })
 -- Menu Iniciar: fundo acrílico quando o desfoque (decoration.blur) estiver ligado.
 hl.layer_rule({ match = { namespace = "configuracoes-iniciar" }, blur = true, ignore_alpha = 0.5 })
 
 -- Gerenciador de Tarefas (~/.local/share/gerenciador-tarefas, Ctrl+Shift+Esc): janela flutuante opaca
-o.window("com.renan.GerenciadorTarefas", { float = true })
-o.window("com.renan.GerenciadorTarefas", { center = true })
-o.window("com.renan.GerenciadorTarefas", { size = { 1060, 680 } })
-o.window("com.renan.GerenciadorTarefas", { tag = "-default-opacity" })
-o.window("com.renan.GerenciadorTarefas", { opacity = "1 1" })
+o.window("com.simba.GerenciadorTarefas", { float = true })
+o.window("com.simba.GerenciadorTarefas", { center = true })
+o.window("com.simba.GerenciadorTarefas", { size = { 1060, 680 } })
+o.window("com.simba.GerenciadorTarefas", { tag = "-default-opacity" })
+o.window("com.simba.GerenciadorTarefas", { opacity = "1 1" })
 
 -- Boas-vindas ao Simba OS (~/.local/share/boas-vindas): flutuante, centralizada, opaca
 o.window("com.simba.BoasVindas", { float = true })
@@ -105,12 +105,12 @@ hl.config({
 -- <<< Configurações <<<
 
 -- Explorador de Arquivos (~/.local/share/explorador): opaco, como o do Windows
-o.window("com.renan.Explorador", { tag = "-default-opacity" })
-o.window("com.renan.Explorador", { opacity = "1 1" })
+o.window("com.simba.Explorador", { tag = "-default-opacity" })
+o.window("com.simba.Explorador", { opacity = "1 1" })
 
 -- Gerar ISO (~/.local/share/gerar-iso/app.py): opaco
-o.window("com.renan.GerarIso", { tag = "-default-opacity" })
-o.window("com.renan.GerarIso", { opacity = "1 1" })
+o.window("com.simba.GerarIso", { tag = "-default-opacity" })
+o.window("com.simba.GerarIso", { opacity = "1 1" })
 
 -- Calculadora (substituta do Omacalc) flutuante, como era a do Simba
 o.window("org.gnome.Calculator", { float = true })

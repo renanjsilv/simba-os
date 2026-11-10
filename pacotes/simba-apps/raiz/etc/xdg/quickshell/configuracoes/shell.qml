@@ -1,4 +1,4 @@
-//@ pragma AppId com.renan.Configuracoes
+//@ pragma AppId com.simba.Configuracoes
 // Configurações: settings app, Win+P-style display switcher and desktop layer
 // (right-click menu + icons) for Simba, in one long-running Quickshell.
 //

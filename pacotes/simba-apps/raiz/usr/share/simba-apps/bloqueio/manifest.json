@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "renan.lock",
-  "name": "My Lock Screen",
+  "id": "simbaos.bloqueio",
+  "name": "Tela de bloqueio do Simba",
   "version": "1.0.0",
   "author": "Simba",
   "description": "Quickshell session lock with separate password and fingerprint PAM flows.",

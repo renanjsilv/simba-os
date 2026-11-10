@@ -21,7 +21,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-APP_ID = "com.renan.Transcrever"
+APP_ID = "com.simba.Transcrever"
 BASE = Path(__file__).resolve().parent
 WORKER = BASE / "worker.py"
 PYTHON = Path.home() / ".local/share/whisper-venv/bin/python"

@@ -30,6 +30,14 @@ declare -A S=(["_"]=KEY_MINUS ["+"]=KEY_EQUAL [">"]=KEY_DOT ["<"]=KEY_COMMA ["?"
   ['"']=KEY_APOSTROPHE ["{"]=KEY_LEFTBRACE ["}"]=KEY_RIGHTBRACE ["|"]=KEY_BACKSLASH ["~"]=KEY_GRAVE
   ["!"]=KEY_1 ["@"]=KEY_2 ["#"]=KEY_3 ["$"]=KEY_4 ["%"]=KEY_5 ["^"]=KEY_6 ["&"]=KEY_7 ["*"]=KEY_8 ["("]=KEY_9 [")"]=KEY_0)
 
+# TESTAR_VM_TECLADO=abnt2: a VM usa teclado brasileiro (o padrão é o americano)
+if [ "${TESTAR_VM_TECLADO:-us}" = abnt2 ]; then
+  K["/"]=KEY_RO; K[";"]=KEY_SLASH; K["'"]=KEY_GRAVE; K["["]=KEY_RIGHTBRACE; K["]"]=KEY_BACKSLASH
+  K["\\"]=KEY_102ND; unset 'K[`]'
+  S[":"]=KEY_SLASH; S["?"]=KEY_RO; S['"']=KEY_GRAVE; S["{"]=KEY_RIGHTBRACE; S["}"]=KEY_BACKSLASH
+  S["|"]=KEY_102ND; unset 'S[~]' 'S[^]'
+fi
+
 digitar() {
   local s=$1 i c
   for ((i = 0; i < ${#s}; i++)); do

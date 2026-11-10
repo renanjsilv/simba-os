@@ -53,6 +53,8 @@ class Claude(unittest.TestCase):
         self.assertEqual(p.sessao, "491b53f0-6b17-4a5e-961c-02b9bbd45d15")
         self.assertEqual(p.modelo, "claude-haiku-5-5")
         self.assertEqual(p.janelas, {"5h": 0.04, "7d": 0.0})
+        # quando cada limite zera (epoch do rate_limit_event), para o chat mostrar
+        self.assertEqual(p.voltas, {"5h": 1794160200, "7d": 1794733200})
         self.assertGreater(p.uso["saida"], 0)
         self.assertAlmostEqual(p.uso["custo"], 0.00292691, places=6)
         self.assertFalse(p.erro)

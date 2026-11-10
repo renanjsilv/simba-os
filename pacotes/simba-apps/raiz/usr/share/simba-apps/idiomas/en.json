@@ -2340,5 +2340,20 @@
  "Arraste ícones para a seta para escondê-los, e de dentro dela para fora para mostrar de novo.": "Drag icons onto the arrow to hide them, and drag them out of it to show them again.",
  "Gerenciador de arquivos do Simba OS.": "File manager for Simba OS.",
  "Moderno": "Modern",
- "Ícones Fluent: modernos, coloridos e arredondados": "Fluent icons: modern, colorful and rounded"
+ "Ícones Fluent: modernos, coloridos e arredondados": "Fluent icons: modern, colorful and rounded",
+ "usado": "used",
+ "zera": "resets",
+ "em": "in",
+ "Limite de uso de": "Usage limit for",
+ "hoje às": "today at",
+ "amanhã às": "tomorrow at",
+ "dia": "day",
+ "dias": "days",
+ "seg": "Mon",
+ "ter": "Tue",
+ "qua": "Wed",
+ "qui": "Thu",
+ "sex": "Fri",
+ "sáb": "Sat",
+ "dom": "Sun"
 }

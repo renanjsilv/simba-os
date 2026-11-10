@@ -527,6 +527,11 @@ end
 local function ajustar_todas()
   for _, w in ipairs(hl.get_windows() or {}) do
     if w.mapped and no_layout(w) then
+      -- marcada maximizada, mas o estado se perdeu (recarga da configuração): sem isto ela
+      -- nunca mais acompanhava a área útil (ex.: barra que cresceu ficava por baixo dela)
+      if not estado[w.address] and w.floating and w.fullscreen == 0 and tem_tag(w, MAX) then
+        estado[w.address] = { modo = "max" }
+      end
       if estado[w.address] and w.floating and not arrastada(w) then
         posicionar(w)  -- área útil mudou (monitor, barra): acompanha
       else
@@ -600,6 +605,35 @@ function janelas.reajustar() protegido(ajustar_todas) end
 for _, ev in ipairs({ "monitor.added", "monitor.removed", "monitor.layout_changed" }) do
   hl.on(ev, function() protegido(ajustar_todas) end)
 end
+
+-- A barra abre/fecha (reinício do shell) ou muda de altura sem reabrir (Configurações ›
+-- Barra, tema, fonte): o Hyprland não avisa a mudança de altura. Confere a área reservada
+-- dos monitores a cada 2 s (barato) e reajusta maximizadas e encaixadas quando muda —
+-- senão uma janela maximizada antes fica por cima da parte de cima da barra.
+local function reservas()
+  local p = {}
+  for _, m in ipairs(hl.get_monitors() or {}) do
+    local rl, rt, rr, rb = lados(m.reserved)
+    p[#p + 1] = tostring(m.name) .. ":" .. rl .. "," .. rt .. "," .. rr .. "," .. rb
+  end
+  return table.concat(p, ";")
+end
+local reservas_vistas = reservas()
+local vigia = hl.timer(function()
+  local agora = reservas()
+  if agora ~= reservas_vistas then
+    reservas_vistas = agora
+    protegido(ajustar_todas)
+  end
+end, { timeout = 2000, type = "repeat" })
+for _, ev in ipairs({ "layer.opened", "layer.closed" }) do
+  hl.on(ev, function()
+    hl.timer(function() protegido(ajustar_todas) end, { timeout = 400, type = "oneshot" })
+  end)
+end
+hl.on("config.unload", function()
+  if type(vigia) == "userdata" or type(vigia) == "table" then pcall(function() vigia:set_enabled(false) end) end
+end)
 
 -- Janelas que ainda estiverem lado a lado (instantes antes de virarem
 -- flutuantes): área útil inteira.

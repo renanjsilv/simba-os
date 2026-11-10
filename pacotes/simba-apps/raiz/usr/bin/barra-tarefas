@@ -510,7 +510,7 @@ def main(a):
         # quando a barra já estiver no tamanho novo, as janelas maximizadas e
         # encaixadas se ajustam à área útil nova (repete: o shell pode demorar)
         import subprocess
-        subprocess.Popen(["sh", "-c", "for t in 0.6 1.2; do sleep $t; hyprctl dispatch 'janelas.reajustar()' >/dev/null 2>&1; done"],
+        subprocess.Popen(["sh", "-c", "for t in 0.6 1.2; do sleep $t; hyprctl dispatch 'janelas.reajustar' >/dev/null 2>&1; done"],
                          start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return 0
     if cmd == "tamanho":

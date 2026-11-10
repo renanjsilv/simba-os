@@ -102,6 +102,12 @@ def main():
     pref.get("iniciar", {}).pop("fixados", None)
     escrever(".config/configuracoes/preferencias.json", json.dumps(pref, ensure_ascii=False, indent=2) + "\n")
 
+    # nomes antigos (antes da migração da pasta pessoal: rode o simba-migrate antes)
+    for rel in escritos:
+        p = SKEL / rel
+        for arq in ([p] if p.is_file() else [x for x in p.rglob("*") if x.is_file() and not x.is_symlink()]):
+            if re.search(r"com\.renan\.|renan\.lock", arq.read_text(errors="ignore")):
+                sys.exit(f"nome antigo (com.renan.*/renan.lock) em {arq}: rode simba-migrate na sua pasta pessoal antes")
     # nada com o nome de quem desenvolve
     usuario = home.name
     for rel in escritos:

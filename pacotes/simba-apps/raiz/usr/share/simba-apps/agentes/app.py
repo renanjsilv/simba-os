@@ -68,6 +68,42 @@ def formatar_uso(uso):
     return " · ".join(partes)
 
 
+_DIAS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+
+def _epoch_iso(iso):
+    """'2026-11-10T18:40:00Z' → epoch (0 se não der para ler)."""
+    try:
+        return datetime.fromisoformat(str(iso).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0
+
+
+def _quando(epoch, longo=False):
+    """Quando um limite zera: '15:40' hoje, 'amanhã 09:00', senão 'sex 09:00'."""
+    t = datetime.fromtimestamp(epoch)
+    hoje = datetime.now().date()
+    hora = t.strftime("%H:%M")
+    if t.date() == hoje:
+        return f"{_t('hoje às')} {hora}" if longo else hora
+    if (t.date() - hoje).days == 1:
+        return f"{_t('amanhã às')} {hora}" if longo else f"{_t('amanhã')} {hora}"
+    dia = _t(_DIAS[t.weekday()])
+    return f"{dia} {t.strftime('%d/%m')} {_t('às')} {hora}" if longo else f"{dia} {hora}"
+
+
+def _falta(seg):
+    """Tempo até zerar: '45 min', '2 h 10 min', '3 dias 4 h'."""
+    m = max(0, int(seg // 60))
+    if m < 60:
+        return f"{m} min"
+    h, m = divmod(m, 60)
+    if h < 24:
+        return f"{h} h {m:02d} min" if m else f"{h} h"
+    d, h = divmod(h, 24)
+    return f"{d} {_t('dia') if d == 1 else _t('dias')}" + (f" {h} h" if h else "")
+
+
 def definir_tamanho_pty(fd, linhas=40, colunas=120):
     try:
         ws = struct.pack("HHHH", linhas, colunas, 0, 0)
@@ -108,6 +144,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.sessoes = {}
         self.interrompido = False
         self.janelas_uso = {}
+        self.janelas_volta = {}   # agente → {"5h": epoch, "7d": epoch}: quando cada limite zera
+        # o horário de reinício passa: a cada minuto tira do rótulo as janelas que já zeraram
+        GLib.timeout_add_seconds(60, lambda: (self._atualizar_uso_ui(), True)[1])
         self.ativo_texto = ""
         self.render_fonte = 0
         self.gravador = voz.Gravador() if voz.disponivel() else None
@@ -1431,6 +1470,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 self.ativo_registro["modelo"] = meta["modelo"]
                 if getattr(self, "ativo_modelo", None):
                     self.ativo_modelo(meta["modelo"])
+        if meta.get("voltas"):
+            self.janelas_volta[agente] = meta["voltas"]
         if meta.get("janelas"):
             self.janelas_uso[agente] = meta["janelas"]
             self._atualizar_uso_ui()
@@ -1443,21 +1484,38 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             self.lbl_uso.set_visible(False)
             return
         janelas = dict(self.janelas_uso.get(agente) or {})
+        voltas = dict(self.janelas_volta.get(agente) or {})
+        agora = time.time()
+        # janela que já zerou: a porcentagem informada é velha
+        for k in [k for k, t in voltas.items() if t <= agora]:
+            janelas.pop(k, None)
+            voltas.pop(k, None)
         if not janelas:
             # Do widget de uso, só janelas que ainda não reiniciaram (dado velho engana)
             u = M.uso(agente)
             for chave, rotulo in (("sessao", "5h"), ("semana", "7d")):
-                if chave in u and M._futuro(u.get(f"{chave}Volta") or ""):
+                volta = M._futuro(u.get(f"{chave}Volta") or "")
+                if chave in u and volta:
                     janelas[rotulo] = u[chave]
+                    voltas[rotulo] = _epoch_iso(volta)
         if not janelas:
             self.lbl_uso.set_visible(False)
             return
-        partes = [f"{k} {round(v * 100)}%" for k, v in janelas.items() if k in ("5h", "7d")]
+        partes, dicas = [], []
+        nomes_jan = {"5h": _t("sessão de 5 horas"), "7d": _t("semana")}
+        for k in ("5h", "7d"):
+            if k not in janelas:
+                continue
+            texto = f"{k} {round(janelas[k] * 100)}%"
+            dica = f"{k} ({nomes_jan[k]}): {round(janelas[k] * 100)}% {_t('usado')}"
+            if voltas.get(k):
+                texto += f" ↻{_quando(voltas[k])}"
+                dica += f" — {_t('zera')} {_quando(voltas[k], longo=True)} ({_t('em')} {_falta(voltas[k] - agora)})"
+            partes.append(texto)
+            dicas.append(dica)
         self.lbl_uso.set_label("◔ " + " · ".join(partes))
         nome = M.AGENTES.get(agente, {}).get("nome", agente)
-        self.lbl_uso.set_tooltip_text(
-            f"{_t('Limite usado de')} {nome}: 5h = {_t('sessão de 5 horas')}, 7d = {_t('semana')}"
-        )
+        self.lbl_uso.set_tooltip_text(f"{_t('Limite de uso de')} {nome}\n" + "\n".join(dicas))
         alto = max(janelas.values()) >= 0.8
         if alto:
             self.lbl_uso.add_css_class("uso-alto")

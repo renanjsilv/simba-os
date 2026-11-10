@@ -238,13 +238,15 @@ class AgentStreamParser:
             return
         if t == "rate_limit_event":
             info = data.get("rate_limit_info") or {}
-            janelas = {}
+            janelas, voltas = {}, {}
             for nome, w in (info.get("unifiedWindows") or {}).items():
                 if isinstance(w, dict) and w.get("utilization") is not None:
                     rotulo = {"five_hour": "5h", "seven_day": "7d"}.get(nome, nome)
                     janelas[rotulo] = float(w["utilization"])
+                    if isinstance(w.get("resetsAt"), (int, float)):
+                        voltas[rotulo] = int(w["resetsAt"])  # quando a janela zera (epoch)
             if janelas:
-                self._meta(janelas=janelas)
+                self._meta(janelas=janelas, voltas=voltas or None)
             if info.get("status") == "rejected":
                 self.limite = True
                 self.limite_ate = info.get("resetsAt")

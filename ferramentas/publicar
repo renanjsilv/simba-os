@@ -32,6 +32,9 @@ gh release view "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" >/dev/null 2>&1 || \
     --notes "Pacotes do Simba OS para o pacman. Não baixe à mão: use a seção [$REPO_NOME] do pacman.conf." --latest=false
 arquivos=($mais_novos $(for f in $mais_novos; do echo "$f.sig"; done) "$REPO_NOME".db "$REPO_NOME".db.sig "$REPO_NOME".files "$REPO_NOME".files.sig)
 gh release upload "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --clobber "${arquivos[@]}"
+# trava: nunca limpar o release com uma lista incompleta (uma lista vazia apagaria tudo)
+esperados=$(( ${#PACOTES[@]} + ${#PUBLICAR_AUR[@]} ))
+[[ $(wc -w <<<"$mais_novos") -eq $esperados ]] || { echo "lista de pacotes incompleta: não apago nada do release" >&2; exit 1; }
 # tira do release pacotes de versões antigas
 for a in $(gh release view "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --json assets -q '.assets[].name'); do
   [[ $a == *.pkg.tar.zst* ]] || continue

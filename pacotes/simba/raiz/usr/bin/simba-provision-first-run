@@ -45,6 +45,14 @@ fi
 
 simba-provision-user "${finalize_user_args[@]}" || true
 
+# Simba: o tema do primeiro login (user/theme.sh) avisa a barra e o fundo pelo IPC do
+# simba-shell; se o shell subiu antes de estar pronto para ouvir, o aviso se perde e a
+# sessão fica com fundo preto e barra escura até reiniciar. Reiniciar aqui garante que
+# ele leia o tema já aplicado (se ainda não subiu, ele lê o tema certo ao subir).
+if [[ -n ${WAYLAND_DISPLAY:-} ]] && pgrep -u "$UID" -f "quickshell.*simba/shell" >/dev/null 2>&1; then
+  simba-restart-shell >/dev/null 2>&1 || true
+fi
+
 mkdir -p "$state_dir"
 
 FIRST_RUN_LOG="$state_dir/first-run.log"

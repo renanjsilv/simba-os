@@ -3,7 +3,7 @@
 # Derivado do Omarchy (MIT, ver /usr/share/licenses/simba/omarchy-MIT.txt).
 pkgname=simba
 pkgver=1.1.9
-pkgrel=6
+pkgrel=7
 pkgdesc="Simba OS: área de trabalho, ferramentas e configurações do sistema"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -23,6 +23,13 @@ package() {
   # plugins do Neovim para novos usuários, com as pastas .git (o lazy.nvim atualiza por elas)
   install -d "$pkgdir/etc/skel/.local/share/nvim"
   tar -C "$pkgdir/etc/skel/.local/share/nvim" -xf "$startdir/skel-nvim-lazy.tar.zst"
+  # pastas do usuário (as do etc/skel/.config/user-dirs.dirs): precisam existir antes do
+  # primeiro login, senão o xdg-user-dirs-update troca todas por $HOME e a Área de
+  # Trabalho do Simba passa a mostrar a pasta pessoal inteira
+  local d
+  for d in "Área de trabalho" Downloads Modelos Público Documentos Músicas Imagens Vídeos; do
+    install -d "$pkgdir/etc/skel/$d"
+  done
   install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/../../LICENSES/omarchy-MIT.txt" "$pkgdir/usr/share/licenses/$pkgname/omarchy-MIT.txt"
   install -Dm644 "$startdir/../../NOTICE" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"

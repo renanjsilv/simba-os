@@ -3,13 +3,18 @@
 # simba:summary=Install Spotify.
 # simba:requires-sudo=true
 
+# Spotify does not allow its client to be redistributed, so it is not shipped in the
+# [simba-os] repository: the Flathub package downloads it straight from Spotify.
+
 set -e
 
 echo "Installing Spotify..."
-simba-pkg-add spotify
+simba-pkg-add flatpak
+flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install -y --noninteractive --system flathub com.spotify.Client
 
 echo "Opening Spotify..."
-setsid uwsm-app -- /usr/bin/spotify >/dev/null 2>&1 &
+setsid uwsm-app -- flatpak run com.spotify.Client >/dev/null 2>&1 &
 
 echo ""
 echo "Spotify has been installed."

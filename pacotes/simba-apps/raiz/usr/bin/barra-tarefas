@@ -52,7 +52,7 @@ OPCOES_PADRAO = {
 TOML = os.path.expanduser("~/.config/simba/shell.toml")
 TAMANHOS = {"compacta": (22, 24), "normal": None, "confortavel": (32, 34), "grande": (38, 40)}
 FORMATO_ALT = "dddd, d 'de' MMMM 'de' yyyy"
-FIXADOS_PADRAO = ["org.gnome.Nautilus", "brave-browser", "foot", "WhatsApp", "spotify", "steam"]
+FIXADOS_PADRAO = ["org.gnome.Nautilus", "brave-browser", "foot", "WhatsApp", "com.spotify.Client", "steam"]
 
 
 def ler():

@@ -34,8 +34,8 @@ git jq gum bat eza fd fzf ripgrep zoxide starship tmux neovim
 wl-clipboard grim slurp wtype imagemagick inotify-tools socat plocate yay-bin
 
 # jogos: Steam (oficial, multilib) com os drivers 32 bits que ele pede (sem isso o pacman
-# escolhe um provedor qualquer de lib32-vulkan-driver). Hydra e Spotify ficam no [simba-os]
-# e são instalados pelo menu (Instalar), sem ocupar espaço na ISO
+# escolhe um provedor qualquer de lib32-vulkan-driver). o Spotify é instalado pelo
+# menu (Instalar) como Flatpak do Flathub, que baixa o programa direto do Spotify
 steam lib32-mesa lib32-vulkan-intel lib32-vulkan-radeon
 
 # Simba

@@ -60,7 +60,7 @@ Scope {
   readonly property string visaoTodos: Preferencias.obter("iniciar.visaoTodos", "categoria")  // moderno
   readonly property var fixadosPadrao: ["brave-browser", "com.simba.Explorador", "simba-loja", "com.simba.Configuracoes",
     "ai.storyteller.wordcraft", "ai.storyteller.gridcraft", "ai.storyteller.deckcraft", "com.simba.Draco",
-    "foot", "WhatsApp", "spotify", "steam", "localsend", "org.gnome.TextEditor", "org.gnome.Calculator"]
+    "foot", "WhatsApp", "spotify", "com.spotify.Client", "steam", "localsend", "org.gnome.TextEditor", "org.gnome.Calculator"]
   readonly property var fixados: {
     var l = Preferencias.obter("iniciar.fixados", fixadosPadrao) || []
     var _ = DesktopEntries.applications.values

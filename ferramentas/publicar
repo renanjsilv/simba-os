@@ -12,6 +12,10 @@ if [[ -z $GH_USER ]]; then
   sed -i "s/^GH_USER=.*/GH_USER=\"\${SIMBA_GH_USER:-$GH_USER}\"/" "$R/ferramentas/config.sh"
 fi
 [[ -n $CHAVE ]] || { echo "crie a chave de assinatura antes: ferramentas/criar-chave" >&2; exit 1; }
+# pacotes do AUR republicados com versão nova (ex.: correção de segurança do Brave): só avisa
+if ! atrasados=$("$R/ferramentas/verificar-aur" --silencioso); then
+  printf 'AVISO: receitas do AUR atrasadas — atualize e construa antes de publicar:\n%s\n' "$atrasados" >&2
+fi
 # PUBLICAR_SEM_CONSTRUIR=1: publica os pacotes já construídos e assinados em dist/ (sem
 # recompilar, o que trocaria os arquivos e pediria a senha da chave de novo)
 [[ -n ${PUBLICAR_SEM_CONSTRUIR:-} ]] || "$R/ferramentas/construir"

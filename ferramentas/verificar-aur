@@ -1,0 +1,29 @@
+#!/bin/bash
+# verificar-aur — compara as receitas do AUR guardadas em pacotes-aur/ com a versão atual no AUR.
+# Quem republica um pacote passa a responder pelas correções de segurança dele (ex.: brave-bin):
+# rode antes de publicar, ou de vez em quando. Sai com 1 se alguma receita estiver atrasada.
+#   verificar-aur              lista tudo
+#   verificar-aur --silencioso só imprime as atrasadas
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+source "$R/ferramentas/config.sh"
+silencioso=${1:-}
+args=$(printf '&arg[]=%s' "${PUBLICAR_AUR[@]}")
+json=$(curl -fsS --max-time 20 "https://aur.archlinux.org/rpc/v5/info?${args#&}") \
+  || { echo "não consegui consultar o AUR" >&2; exit 2; }
+atrasados=0
+for i in "${!PACOTES_AUR[@]}"; do
+  receita=${PACOTES_AUR[$i]} nome=${PUBLICAR_AUR[$i]}
+  local_v=$(cd "$R/pacotes-aur/$receita" && makepkg --printsrcinfo 2>/dev/null | awk -v n="$nome" '
+    /^\tepoch = /{e=$3} /^\tpkgver = /{v=$3} /^\tpkgrel = /{r=$3}
+    END{ printf "%s%s-%s", (e ? e ":" : ""), v, r }')
+  aur_v=$(jq -r --arg n "$nome" '.results[] | select(.Name == $n) | .Version' <<<"$json")
+  if [[ -z $aur_v ]]; then
+    echo "?  $nome: não está mais no AUR (receita $local_v)"; atrasados=1
+  elif [[ $(vercmp "$local_v" "$aur_v") -lt 0 ]]; then
+    echo "↑  $nome: $local_v → $aur_v   (ferramentas/construir-aur --atualizar $receita)"; atrasados=1
+  elif [[ -z $silencioso ]]; then
+    echo "✓  $nome: $local_v"
+  fi
+done
+exit $atrasados

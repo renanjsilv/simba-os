@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# simba:summary=Review and optionally remove orphaned system packages after updates
+# simba:requires-sudo=true
+
+set -e
+
+mapfile -t orphans < <(pacman -Qtdq 2>/dev/null || true)
+(( ${#orphans[@]} )) || exit 0
+
+echo -e "\e[32m\nPacotes órfãos do sistema\e[0m"
+printf '  %s\n' "${orphans[@]}"
+echo
+
+if [[ ! -t 0 || ! -t 1 ]]; then
+  echo "${#orphans[@]} pacote(s) órfão(s) encontrado(s). Rode simba-update-orphan-pkgs num terminal para revisar ou remover."
+  echo
+  exit 0
+fi
+
+if ! gum confirm --affirmative "Sim" --negative "Não" --default=false "Remover ${#orphans[@]} pacote(s) órfão(s)?"; then
+  echo "Os pacotes órfãos foram mantidos."
+  echo
+  exit 0
+fi
+
+echo -e "\e[32m\nRemovendo os pacotes órfãos\e[0m"
+sudo pacman -Rns "${orphans[@]}"
+echo

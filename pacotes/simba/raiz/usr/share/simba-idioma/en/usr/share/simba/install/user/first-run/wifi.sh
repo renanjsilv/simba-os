@@ -1,5 +1,5 @@
 notify_update() {
-  simba-notification-send -u critical -g  "Update System" "Click to update the system." \
+  simba-notification-send -u normal -t 20000 -g  "Update System" "Click to update the system." \
     --exec simba-launch-floating-terminal-with-presentation simba-update
 }
 

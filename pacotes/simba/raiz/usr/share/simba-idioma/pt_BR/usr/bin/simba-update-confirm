@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# simba:summary=Pede confirmação antes de começar a atualização
+
+gum style --border normal --padding "1 2" \
+  "Pronto para atualizar?" \
+  "" \
+  "• Não dá para interromper a atualização depois de começar!" \
+  "• Deixe o computador na tomada ou com a bateria carregada"
+
+echo
+
+if ! gum confirm --affirmative "Sim" --negative "Não" --no-show-help "Continuar com a atualização?"; then
+  echo "Atualização cancelada"
+  exit 1
+fi

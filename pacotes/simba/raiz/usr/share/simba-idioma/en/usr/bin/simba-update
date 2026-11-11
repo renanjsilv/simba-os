@@ -1,0 +1,63 @@
+#!/bin/bash
+
+# simba:summary=Update Simba and system packages
+# simba:args=[-y]
+# simba:examples=simba update | simba update -y
+# simba:requires-sudo=true
+
+set -e
+
+if [[ -z ${SIMBA_UPDATE_LOGGED:-} ]]; then
+  script_command=$(printf '%q ' "$0" "$@")
+  exec env SIMBA_UPDATE_LOGGED=1 script -qefc "$script_command" "/tmp/simba-update.log"
+fi
+
+if ! simba-update-lock held; then
+  exec simba-update-lock run "$0" "$@"
+fi
+
+trap 'echo ""; echo -e "\033[0;31mSomething went wrong during the update!\n\nPlease review the output above carefully, correct the error, and retry the update.\033[0m"' ERR
+trap 'simba-update-stay-awake stop' EXIT
+
+simba-update-requires-free-space
+
+# -y is a promise not to ask anything. Steps that would need an answer report
+# and move on instead of waiting on a prompt nobody is here to give.
+[[ ${1:-} != "-y" ]] || export SIMBA_UPDATE_UNATTENDED=1
+
+if [[ ${1:-} == "-y" ]] || simba-update-confirm; then
+  # Before the snapshot: the cache is on the snapshotted subvolume, so pruning
+  # after it frees nothing until that snapshot ages out.
+  simba-update-pkg-prune
+
+  # 127 means Snapper is deliberately absent. Any other failure already said
+  # what went wrong, and a missing snapshot is not worth blocking an update
+  # over, but it must not pass for one either.
+  simba-snapshot create || (($? == 127)) ||
+    echo -e "\e[33mContinuing the update without a snapshot.\e[0m" >&2
+
+  simba-update-stay-awake start
+
+  simba-update-keyring
+
+  # Migrations ship with the packages installed here and are written against
+  # them, so everything below waits on this finishing. An upgrade that stopped
+  # takes the update with it rather than migrating against what is still on disk.
+  simba-update-system-pkgs
+  simba-migrate
+  simba-hook post-update
+  simba-update-aur-pkgs
+  simba-update-mise
+  simba-update-orphan-pkgs
+
+  simba-update-analyze-logs
+  simba-update-status
+
+  # Release update-owned inhibitors before offering a reboot. A confirmed
+  # reboot can terminate this process before its EXIT trap gets a chance to
+  # remove the persistent Stay Awake marker.
+  simba-update-stay-awake stop
+  trap - EXIT
+
+  simba-update-restart
+fi

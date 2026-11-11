@@ -89,7 +89,7 @@ while IFS=$'\t' read -r name file marker <&3; do
   [[ -n $name ]] || continue
 
   if [[ ! -f $marker ]]; then
-    echo -e "\e[32m\nRunning migration (${name%.sh})\e[0m"
+    echo -e "\e[32m\nAplicando a migração (${name%.sh})\e[0m"
     SIMBA_PATH="$SIMBA_PATH" bash -euo pipefail "$file" 3<&-
     mkdir -p "$(dirname "$marker")"
     touch "$marker"

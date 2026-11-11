@@ -49,6 +49,15 @@ paleta() {
     [ "$tam" -ge "$t" ] || continue
     if setfont -C /dev/tty1 "ter-v${t}b" >> "$LOG" 2>&1 || setfont "ter-v${t}b" >> "$LOG" 2>&1; then break; fi
   done
+  # a 1ª tela saía deslocada para a direita: ela media a largura do console ainda com a fonte
+  # antiga (mais colunas). Espera o tamanho novo aparecer antes de desenhar.
+  # (a fonte padrão tem 8 px de largura: com a nova, cabem menos colunas que largura/8)
+  local i
+  for i in $(seq 20); do
+    medir
+    [ "$COLS" -le $(( $(cut -d, -f1 /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 1024) / 8 - 1 )) ] && break
+    sleep 0.1
+  done
   printf '\e[?25l\e[0;37;40m\e[2J\e[H'
 }
 
@@ -61,7 +70,12 @@ export GUM_INPUT_PROMPT_FOREGROUND=7 GUM_INPUT_CURSOR_FOREGROUND=15 GUM_INPUT_PL
   GUM_CHOOSE_SHOW_HELP=false GUM_INPUT_SHOW_HELP=false GUM_CONFIRM_SHOW_HELP=false
 
 COLS=80 LINES_=30
-medir() { COLS=$(tput cols 2>/dev/null || echo 80); LINES_=$(tput lines 2>/dev/null || echo 30); }
+# stty lê o tamanho do próprio terminal (o tput prefere $COLUMNS/$LINES, que podem estar velhos)
+medir() {
+  local l c
+  if read -r l c < <(stty size 2>/dev/null) && [ "${c:-0}" -gt 0 ]; then COLS=$c LINES_=$l
+  else COLS=$(tput cols 2>/dev/null || echo 80); LINES_=$(tput lines 2>/dev/null || echo 30); fi
+}
 # texto centralizado (largura visível sem os códigos de cor)
 centro() {
   local l vis pad
@@ -262,7 +276,10 @@ tela_resumo() {
     printf '%s\t%s\n' "$(t "Disco" "Disk")" "$(printf '%s' "$DISK_DESC" | sed 's/  */ /g')"
     printf '%s\t%s\n' "$(t "Vídeo" "Graphics")" "$(desc_video | cut -c1-60)"
     printf '%s\t%s\n' "$(t "Entrada" "Sign-in")" "$( [ "$AUTO_LOGIN" = s ] && t "automática, sem senha" "automatic, no password" || t "com senha" "with password")"
-  } | while IFS=$'\t' read -r k v; do printf '%*s\e[1;30m%-12s\e[0;37m%s\n' $REC '' "$k" "$v"; done
+  } | while IFS=$'\t' read -r k v; do
+    # recuo por caracteres (o %-12s do printf conta bytes: "Vídeo" saía uma coluna antes)
+    printf '%*s\e[1;30m%s%*s\e[0;37m%s\n' $REC '' "$k" $(( 12 - ${#k} )) '' "$v"
+  done
   printf '\n%*s\e[31m%s\e[0;37m\n\n' $REC '' "$(t "Todo o conteúdo do disco será apagado." "Everything on the disk will be erased.")"
   gum confirm --padding "0 0 0 $REC" --affirmative "$(t "Instalar" "Install")" --negative "$(t "Voltar" "Back")" --default=false "$(t "Instalar agora?" "Install now?")"
 }
@@ -516,7 +533,7 @@ fi
 # ---------------------------------------------------------------- marca
 if [ -x "$MARCA/aplicar" ]; then
   progresso 89 "$(t "Aplicando a identidade do $NOME_SISTEMA" "Applying the $NOME_SISTEMA look")"
-  x bash "$MARCA/aplicar" "$MARCA" "$T" "${NEW_USER:-$OLD_USER}" || echo "aviso: marca não aplicada" >> "$LOG"
+  x env SYS_LANG="$SYS_LANG" bash "$MARCA/aplicar" "$MARCA" "$T" "${NEW_USER:-$OLD_USER}" || echo "aviso: marca não aplicada" >> "$LOG"
 fi
 
 # ---------------------------------------------------------------- identidade

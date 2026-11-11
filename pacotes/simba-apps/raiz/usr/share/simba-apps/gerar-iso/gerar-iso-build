@@ -321,6 +321,7 @@ else
   "$SRC/marca/logo-terminal" "$WORK/marca/logo.png" 40 "$WORK/marca/logo.ans"
 fi
 install -m755 "$SRC/marca/aplicar" "$WORK/marca/aplicar"
+cp -r "$SRC/marca/sddm" "$WORK/marca/"   # tela de login da marca (aplicar)
 rm -f "$WORK/marca/nome.png"
 
 # ---------------------------------------------------------------- ISO live

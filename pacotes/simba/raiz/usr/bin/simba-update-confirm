@@ -10,7 +10,7 @@ gum style --border normal --padding "1 2" \
 
 echo
 
-if ! gum confirm "Continuar com a atualização?"; then
+if ! gum confirm --affirmative "Sim" --negative "Não" --no-show-help "Continuar com a atualização?"; then
   echo "Atualização cancelada"
   exit 1
 fi

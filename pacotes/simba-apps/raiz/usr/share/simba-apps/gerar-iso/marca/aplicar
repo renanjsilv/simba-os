@@ -77,3 +77,48 @@ install -d -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$statedir"
 # o link vale no sistema instalado: sem o prefixo do disco montado ($T)
 ln -nsf "${bgbase#"$T"}/$tema/00-${NOME// /-}.png" "$statedir/background"
 chown -h "$(stat -c %u:%g "$h")" "$statedir/background"
+
+# tela de login com as mesmas cores e logo da tela de inicialização (antes ficava a escura
+# do pacote, destoando do resto num tema claro). Fica fora dos pacotes: atualização não desfaz.
+src="$pac/sddm"
+if [ -f "$src/Main.qml" ] && [ -f "$T/usr/share/plymouth/themes/simba-marca/logo.png" ]; then
+  d="$T/usr/share/sddm/themes/simba-marca"
+  install -d "$d"
+  install -m644 "$src/Main.qml" "$d/Main.qml"
+  install -m644 "$T/usr/share/plymouth/themes/simba-marca/logo.png" "$d/logo.png"
+  if [ "${CLARO:-0}" = 1 ]; then
+    cores='fundo=#f4f4f2
+texto=#1b1b1b
+ponto=#1b1b1b
+campoFundo=#ffffff
+campoBorda=#b5b5b2'
+  else
+    cores='fundo=#000000
+texto=#ffffff
+ponto=#ffffff
+campoFundo=#1a1a1a
+campoBorda=#3a3a3a'
+  fi
+  if [ "${SYS_LANG:-}" = en_US ]; then   # o idioma escolhido no instalador
+    textos='textoEntrar=Type your password to sign in
+textoErro=Wrong password. Try again.'
+  else
+    textos='textoEntrar=Digite a senha para entrar
+textoErro=Senha incorreta. Tente de novo.'
+  fi
+  printf '[General]\n%s\nerro=#c42b1c\n%s\n' "$cores" "$textos" > "$d/theme.conf"
+  cat > "$d/metadata.desktop" <<META
+[SddmGreeterTheme]
+Name=$NOME
+Description=Tela de login com a identidade do $NOME
+Type=sddm-theme
+Version=1.0
+QtVersion=6
+MainScript=Main.qml
+ConfigFile=theme.conf
+META
+  install -Dm644 /dev/stdin "$T/etc/sddm.conf.d/zz-marca.conf" <<CONF
+[Theme]
+Current=simba-marca
+CONF
+fi

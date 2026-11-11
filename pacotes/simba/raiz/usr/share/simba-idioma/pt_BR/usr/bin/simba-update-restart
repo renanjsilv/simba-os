@@ -1,0 +1,51 @@
+#!/bin/bash
+
+# simba:summary=Prompt for required reboot or service restarts after updates
+
+echo
+
+confirm_reboot() {
+  gum confirm --affirmative "Sim" --negative "Não" "$1" && { simba-system-reboot; exit 0; }
+}
+
+running_kernel=$(uname -r)
+kernel_updated=true
+
+for kernel in /usr/lib/modules/*/vmlinuz; do
+  if [[ -f $kernel ]] && pacman -Qo "$kernel" &>/dev/null; then
+    installed_kernel=$(basename "$(dirname "$kernel")")
+
+    if [[ $installed_kernel == $running_kernel ]]; then
+      kernel_updated=false
+      break
+    fi
+  fi
+done
+
+if [[ $kernel_updated == "true" ]]; then
+  confirm_reboot "O kernel do Linux foi atualizado. Reiniciar agora?"
+elif [[ -f $HOME/.local/state/simba/reboot-required ]]; then
+  confirm_reboot "As atualizações pedem para reiniciar. Reiniciar agora?"
+fi
+
+running_hyprland=$(readlink /proc/$(pgrep -x Hyprland)/exe 2>/dev/null)
+if [[ $running_hyprland == *"(deleted)"* ]]; then
+  confirm_reboot "O Hyprland foi atualizado. Reiniciar agora?"
+fi
+
+for file in "$HOME"/.local/state/simba/restart-*-required; do
+  if [[ -f $file ]]; then
+    filename=$(basename "$file")
+    service=$(echo "$filename" | sed 's/restart-\(.*\)-required/\1/')
+    echo "Reiniciando $service"
+    simba-state clear "$filename"
+    simba-restart-"$service"
+  fi
+done
+
+# Updates routinely replace the shell's QML, and a stale process can lazy-load
+# new files into old code. A restart failure (locked session, ssh, TTY) only
+# prints its reason: the next update or login gets a fresh shell anyway.
+echo -e "\e[32m\nReiniciando a interface\e[0m"
+echo "Todos os componentes foram recarregados"
+simba-restart-shell || true

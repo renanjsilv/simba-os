@@ -16,7 +16,7 @@ if ! simba-update-lock held; then
   exec simba-update-lock run "$0" "$@"
 fi
 
-trap 'echo ""; echo -e "\033[0;31mSomething went wrong during the update!\n\nPlease review the output above carefully, correct the error, and retry the update.\033[0m"' ERR
+trap 'echo ""; echo -e "\033[0;31mAlgo deu errado durante a atualização!\n\nConfira as mensagens acima, corrija o erro e tente atualizar de novo.\033[0m"' ERR
 trap 'simba-update-stay-awake stop' EXIT
 
 simba-update-requires-free-space
@@ -34,7 +34,7 @@ if [[ ${1:-} == "-y" ]] || simba-update-confirm; then
   # what went wrong, and a missing snapshot is not worth blocking an update
   # over, but it must not pass for one either.
   simba-snapshot create || (($? == 127)) ||
-    echo -e "\e[33mContinuing the update without a snapshot.\e[0m" >&2
+    echo -e "\e[33mContinuando a atualização sem um ponto de restauração.\e[0m" >&2
 
   simba-update-stay-awake start
 

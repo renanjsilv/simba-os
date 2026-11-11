@@ -53,7 +53,12 @@ cd "$R"
 PUBLICAR_SEM_CONSTRUIR=1 "$R/ferramentas/publicar"
 
 echo "── 2/4 montando a ISO (demora)"
-sudo SIMBA_ISO_CANAL=teste "$R/iso/construir"
+# uma 2ª tentativa: falhas de download (pacote corrompido no cache ou espelho no meio da
+# sincronização) somem sozinhas — o pacman apaga o arquivo ruim e baixa de novo
+if ! sudo SIMBA_ISO_CANAL=teste "$R/iso/construir"; then
+  echo "── a montagem falhou; tentando mais uma vez em 1 min"; sleep 60
+  sudo SIMBA_ISO_CANAL=teste "$R/iso/construir"
+fi
 
 echo "── 3/4 conferência"
 SAIDA=/mnt/dados/simba-iso; [ -d $SAIDA ] || SAIDA=/var/tmp/simba-iso

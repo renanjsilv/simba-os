@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# simba:summary=Install and launch Hydra.
+# simba:group=install
+# simba:name=gaming hydra
+
+# Hydra is not shipped in the [simba-os] repository: it is built from the AUR
+# (hydra-launcher-bin, which downloads the official release) only when asked for.
+
+set -e
+
+echo "Installing Hydra..."
+simba-pkg-aur-add hydra-launcher-bin
+
+echo "Opening Hydra..."
+setsid uwsm-app -- gtk-launch hydralauncher >/dev/null 2>&1 &

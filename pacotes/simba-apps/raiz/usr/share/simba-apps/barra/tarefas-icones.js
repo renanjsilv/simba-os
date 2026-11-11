@@ -41,7 +41,7 @@ var REGRAS = [
   [/zoom|meet|mpv|vlc|celluloid|totem|video|kdenlive|obs/, "video"],
   [/docker|lazydocker|podman/, "docker"],
   [/hydra|heroic|lutris|bottles/, "controle"], [/duckstation|retroarch|pcsx|dolphin-emu|ppsspp|emulat/, "controle2"],
-  [/transcrever|voxtype|draco|audacity|recorder/, "microfone"],
+  [/transcrever|voxtype|audacity|recorder/, "microfone"],
   [/gerar-iso|iso|brasero/, "disco"], [/disk usage|baobab|gnome-disks|gparted|discos/, "dados"],
   [/virt-manager|qemu|virtualbox|boxes|remmina/, "monitor"], [/anydesk|rustdesk|teamviewer/, "remoto"],
   [/calculator|calculadora|qalculate/, "calculadora"], [/text-editor|gedit|kate|mousepad|editor de texto/, "editar"],
@@ -78,5 +78,7 @@ function glifo(id, classe, nome, categorias) {
 function mascara(id, classe, nome) {
   var chave = chaveDe(id, classe, nome)
   if (/(^|\|)brave(-browser)?(\||$)/.test(chave)) return "icones/brave.png"
+  // Draco: o mesmo símbolo do ícone do app (círculo com anel), não um microfone genérico
+  if (/draco/.test(chave)) return "icones/draco.png"
   return ""
 }

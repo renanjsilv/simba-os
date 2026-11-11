@@ -109,6 +109,10 @@ Item {
   property real barDragOffsetX: 0
   property real barDragOffsetY: 0
   property bool barMoveActive: false
+  // Simba: a barra fica travada na borda (como no Windows). Arrastar o meio dela para
+  // outra borda só funciona com "bar": { "movable": true } no shell.json — a barra de
+  // tarefas do Simba é feita para ficar na horizontal.
+  property bool barMovable: false
   property string barMoveCandidate: ""
   property var barMoveWindow: null
   property var barMoveScreen: null
@@ -600,6 +604,7 @@ Item {
     var config = Util.isPlainObject(barConfig) ? barConfig : fallbackBarConfig
 
     position = normalizePosition(config.position)
+    barMovable = config.movable === true
     transparency = transparencyFromConfig(config)
     setRequestedTransparency(transparency >= 0.5)
     centerAnchor = Util.canonicalWidgetId(config.centerAnchor || "")
@@ -1675,7 +1680,7 @@ Item {
     pressAndHoldInterval: 200
 
     function startDrag(x, y) {
-      if (dragging) return
+      if (dragging || !root.barMovable) return
       dragging = true
       root.beginBarMove(root.targetWindow(gestureArea))
       var scenePoint = gestureArea.mapToItem(null, x, y)

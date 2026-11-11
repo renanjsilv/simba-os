@@ -1,8 +1,12 @@
 #!/bin/bash
 # simba-loja — abre a Loja de apps do Simba OS (Bazaar: apps do Flathub, atualizados
 # automaticamente pelo simba-flatpak-atualizar.timer).
+# Bazaar nativo (pacote "bazaar" do Arch, dependência do simba-apps): funciona desde o 1º boot
+if command -v bazaar >/dev/null 2>&1; then
+  exec bazaar "$@"
+fi
 if flatpak info io.github.kolunmi.Bazaar >/dev/null 2>&1; then
   exec flatpak run io.github.kolunmi.Bazaar "$@"
 fi
-notify-send -a "Loja" -i system-software-install "Loja de apps" "A loja ainda está sendo instalada. Tente de novo em instantes."
+notify-send -a "Loja" -i system-software-install "Loja de apps" "A Loja não está instalada. Instale o pacote bazaar (Atualizar tudo resolve)."
 exit 1

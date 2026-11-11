@@ -54,7 +54,10 @@ ShellRoot {
   Timer { id: novaLeitura; interval: 500; onTriggered: arquivoCores.reload() }
 
   // ---------- regras por classe ----------
-  property var regras: ({ mostrar: [], ocultar: [] })
+  property var regras: ({ mostrar: [], ocultar: ocultarPadrao })
+  // Apps do Simba que desenham os próprios botões de janela: nunca ganham os daqui
+  // (valem mesmo sem config.json, ex. numa instalação nova).
+  readonly property var ocultarPadrao: ["^com\\.simba\\.Configuracoes$"]
   FileView {
     path: root.home + "/.config/botoes-janela/config.json"
     watchChanges: true
@@ -62,9 +65,9 @@ ShellRoot {
     onLoaded: {
       try {
         const j = JSON.parse(text())
-        root.regras = { mostrar: j.mostrar || [], ocultar: j.ocultar || [] }
+        root.regras = { mostrar: j.mostrar || [], ocultar: root.ocultarPadrao.concat(j.ocultar || []) }
       } catch (e) {
-        root.regras = { mostrar: [], ocultar: [] }
+        root.regras = { mostrar: [], ocultar: root.ocultarPadrao }
       }
       root.recalcular()
     }

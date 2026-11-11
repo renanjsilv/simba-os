@@ -1,3 +1,4 @@
+//@ pragma AppId com.simba.Draco
 // Draco settings window (Super+F10, or `draco config`; opens by itself when F10 is
 // pressed and no AI is configured yet).
 //
@@ -593,13 +594,11 @@ ShellRoot {
       RowLayout {
         spacing: 14
         Layout.fillWidth: true
-        Rectangle {
-          width: 44; height: 44; radius: 22
-          gradient: Gradient {
-            GradientStop { position: 0; color: shell.mix(shell.fg, shell.bg, 0.05) }
-            GradientStop { position: 1; color: shell.mix(shell.fg, shell.bg, 0.55) }
-          }
-          Rectangle { x: 10; y: 8; width: 12; height: 9; radius: 5; color: Qt.rgba(shell.bg.r, shell.bg.g, shell.bg.b, 0.45) }
+        // mesmo ícone do Menu Iniciar e da barra de tarefas
+        Image {
+          Layout.preferredWidth: 44; Layout.preferredHeight: 44
+          sourceSize: Qt.size(88, 88)
+          source: "file:///usr/share/icons/hicolor/scalable/apps/com.simba.Draco.svg"
         }
         ColumnLayout {
           spacing: 0

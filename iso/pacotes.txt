@@ -21,12 +21,12 @@ mesa vulkan-intel vulkan-radeon intel-media-driver
 # área de trabalho
 hyprland hyprland-guiutils hyprpicker hyprsunset uwsm sddm quickshell
 xdg-desktop-portal-hyprland xdg-desktop-portal-gtk qt6-wayland qt6-imageformats gtk4-layer-shell webp-pixbuf-loader
-noto-fonts noto-fonts-emoji ttf-jetbrains-mono-nerd woff2-font-awesome
+noto-fonts noto-fonts-emoji cantarell-fonts ttf-jetbrains-mono-nerd woff2-font-awesome
 gnome-themes-extra yaru-icon-theme gnome-keyring
 
 # aplicativos
 brave-bin nautilus nautilus-python sushi gnome-disk-utility gnome-text-editor evince imv mpv file-roller
-foot btop fastfetch flatpak rclone tesseract tesseract-data-eng webkitgtk-6.0
+foot btop fastfetch flatpak bazaar mise rclone tesseract tesseract-data-eng webkitgtk-6.0
 gvfs-mtp gvfs-smb udiskie ffmpegthumbnailer xdg-terminal-exec
 
 # terminal

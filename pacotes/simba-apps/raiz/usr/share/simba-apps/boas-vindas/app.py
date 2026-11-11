@@ -426,16 +426,19 @@ class Janela(Adw.ApplicationWindow):
 
     # ── navegação ─────────────────────────────────────────────────────
     def ir(self, passo):
+        # Conta a partir da página de DESTINO, não da posição: durante a animação a posição
+        # ainda está na página anterior, e um clique rápido "voltava" para ela (parecia travar).
         n = self.carrossel.get_n_pages()
-        atual = round(self.carrossel.get_position())
-        alvo = atual + passo
+        alvo = getattr(self, "destino", round(self.carrossel.get_position())) + passo
         if alvo >= n:
             self.concluir()
             return
         if 0 <= alvo < n:
+            self.destino = alvo
             self.carrossel.scroll_to(self.carrossel.get_nth_page(alvo), True)
 
     def pagina_mudou(self, carrossel, indice):
+        self.destino = indice  # também quando a pessoa arrasta o carrossel
         n = carrossel.get_n_pages()
         ultima = indice >= n - 1
         self.voltar.set_sensitive(indice > 0)
@@ -472,8 +475,17 @@ class Janela(Adw.ApplicationWindow):
             self.toast(_t("Não foi possível abrir agora."))
 
     def entrar_google(self):
-        self.abrir(["configuracoes", "contas"])
-        # acompanha o login feito na Configurações
+        # Já conectado: o botão vira "Gerenciar a conta" e leva às Configurações.
+        if getattr(self, "conectado", False) or not shutil.which("conta"):
+            self.abrir(["configuracoes", "contas"])
+            return
+        # Abre o login do Google direto no navegador (o próprio `conta entrar` faz isso)
+        if not rodar(["conta", "entrar"]):
+            self.toast(_t("Não foi possível abrir agora."))
+            return
+        self.conta_estado.set_label(_t("Termine o login na janela do navegador…"))
+        self.conta_estado.set_visible(True)
+        # acompanha o login até terminar (até 2 minutos)
         self.tentativas_conta = 40
         GLib.timeout_add_seconds(3, self._vigiar_conta)
 
@@ -501,6 +513,10 @@ class Janela(Adw.ApplicationWindow):
                 self.conta_botao.set_child(Adw.ButtonContent(label=_t("Gerenciar a conta"),
                                                              icon_name="avatar-default-symbolic"))
                 self.conta_botao.remove_css_class("suggested-action")
+            elif st.get("erro") and not st.get("entrando") and getattr(self, "tentativas_conta", 0):
+                # ex.: backup criptografado pede a senha — isso é feito em Contas
+                self.conta_estado.set_label(st["erro"])
+                self.conta_estado.set_visible(True)
             elif st.get("boas_vindas"):
                 self.conta_estado.set_label(_t("Tem um backup no Drive? Entre para trazer tudo de volta."))
                 self.conta_estado.set_visible(True)
@@ -528,7 +544,7 @@ class Janela(Adw.ApplicationWindow):
     def abrir_loja(self):
         if shutil.which("simba-loja") and rodar(["simba-loja"]):
             return
-        self.toast(_t("A loja está sendo instalada — tente de novo em alguns minutos."))
+        self.toast(_t("Não foi possível abrir a Loja."))
 
     def atualizar_office(self):
         algum = False

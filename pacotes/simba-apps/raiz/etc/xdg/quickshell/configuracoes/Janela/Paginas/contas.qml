@@ -233,7 +233,50 @@ Pagina {
   }
 
   // ── entrar ───────────────────────────────────────────────────────────────
-  Secao { visible: !pg.conectado; titulo: I18n.t("Entrar"); detalhe: I18n.t("Abre o login do Google no navegador. O app só enxerga a pasta “Simba Conta” que ele mesmo cria no seu Drive.") }
+  // O botão do Google vem primeiro e em destaque; a criptografia é uma opção abaixo dele.
+  Rectangle {
+    Layout.fillWidth: true
+    visible: !pg.conectado && !(pg.s && pg.s.boas_vindas)
+    implicitHeight: colEntrar.implicitHeight + 56
+    radius: Tema.raioGrande
+    gradient: Gradient {
+      orientation: Gradient.Horizontal
+      GradientStop { position: 0; color: Qt.rgba(Tema.realce.r, Tema.realce.g, Tema.realce.b, 0.22) }
+      GradientStop { position: 1; color: Qt.rgba(Tema.realce.r, Tema.realce.g, Tema.realce.b, 0.06) }
+    }
+    border.width: 1
+    border.color: Qt.rgba(Tema.realce.r, Tema.realce.g, Tema.realce.b, 0.40)
+    Ancora { chave: "contaEntrar"; anchors.top: parent.top; width: parent.width }
+    RowLayout {
+      anchors.fill: parent
+      anchors.margins: 28
+      spacing: 24
+      Glifo { Layout.alignment: Qt.AlignTop; g: Icones.accountCircle; tamanho: 56; color: Tema.realce }
+      ColumnLayout {
+        id: colEntrar
+        Layout.fillWidth: true
+        spacing: 8
+        Texto { text: I18n.t("Entre com sua conta Google"); font.pixelSize: 24; font.weight: Font.DemiBold; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+        Texto {
+          Layout.fillWidth: true
+          wrapMode: Text.WordWrap
+          color: Tema.texto2
+          text: I18n.t("Abre o login do Google no navegador. O app só enxerga a pasta “Simba Conta” que ele mesmo cria no seu Drive.") +
+                (pg.s && !pg.s.rclone ? " " + I18n.t("Na primeira vez instala o rclone (pede a senha de administrador).") : "")
+        }
+        Botao {
+          Layout.topMargin: 8
+          texto: pg.s && pg.s.entrando ? I18n.t("Termine o login no navegador…") : I18n.t("Entrar com o Google")
+          glifo: Icones.accountCircle
+          tipo: "primario"
+          ocupado: !!(pg.s && pg.s.entrando)
+          habilitado: !pg.ocupado && (!pg.usarCripto || pg.senhaCripto.length >= 6)
+          onClicado: pg.entrar()
+        }
+      }
+    }
+  }
+  Secao { visible: !pg.conectado; titulo: I18n.t("Opções"); detalhe: I18n.t("Escolha antes de entrar.") }
   Cartao {
     visible: !pg.conectado
     Linha {
@@ -249,19 +292,6 @@ Pagina {
       titulo: I18n.t("Senha do backup")
       descricao: pg.senhaCripto.length > 0 && pg.senhaCripto.length < 6 ? I18n.t("Use pelo menos 6 caracteres") : I18n.t("Anote num lugar seguro")
       Campo { id: campoCripto; width: 240; echoMode: TextInput.Password; dica: I18n.t("mínimo 6 caracteres"); onTextChanged: pg.senhaCripto = text }
-    }
-    Linha {
-      chave: "contaEntrar"
-      glifo: Icones.accountCircle
-      titulo: pg.s && pg.s.entrando ? I18n.t("Termine o login na janela do navegador…") : I18n.t("Entrar com o Google")
-      descricao: pg.s && !pg.s.rclone ? I18n.t("Na primeira vez instala o rclone (pede a senha de administrador).") : I18n.t("Use a mesma conta em todas as suas máquinas.")
-      Botao {
-        texto: I18n.t("Entrar com o Google")
-        tipo: "primario"
-        ocupado: !!(pg.s && pg.s.entrando)
-        habilitado: !pg.ocupado && (!pg.usarCripto || pg.senhaCripto.length >= 6)
-        onClicado: pg.entrar()
-      }
     }
   }
 

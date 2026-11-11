@@ -1060,6 +1060,7 @@
  "Não deu certo": "That didn't work",
  "Não entendi nada": "I didn't catch that",
  "Não foi possível abrir agora.": "Couldn't open it right now.",
+ "Não foi possível abrir a Loja.": "Couldn't open the Store.",
  "Não foi possível abrir esta pasta.": "Couldn't open this folder.",
  "Não foi possível aplicar (senha cancelada?)": "Couldn't apply (password cancelled?)",
  "Não foi possível aplicar o tema": "Couldn't apply the theme",
@@ -2355,5 +2356,8 @@
  "qui": "Thu",
  "sex": "Fri",
  "sáb": "Sat",
- "dom": "Sun"
+ "dom": "Sun",
+ "Entre com sua conta Google": "Sign in with your Google account",
+ "Opções": "Options",
+ "Escolha antes de entrar.": "Choose before signing in."
 }

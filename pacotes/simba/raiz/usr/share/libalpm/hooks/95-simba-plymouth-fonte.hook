@@ -1,0 +1,14 @@
+# O tema de boot do Simba usa a fonte Cantarell. O Plymouth copia a fonte para o initramfs
+# quando ele é gerado: sem a Cantarell, pegava uma fonte qualquer (a Noto Naskh Arabic) e o
+# texto acima do campo da senha do disco virava quadradinhos. Quando a fonte chega (ou muda),
+# refaz o initramfs uma vez para a tela de senha já usar a fonte certa.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = cantarell-fonts
+
+[Action]
+Description = Atualizando a fonte da tela de inicialização...
+When = PostTransaction
+Exec = /bin/sh -c "if command -v limine-mkinitcpio >/dev/null; then limine-mkinitcpio; else mkinitcpio -P; fi >/dev/null 2>&1 || true"

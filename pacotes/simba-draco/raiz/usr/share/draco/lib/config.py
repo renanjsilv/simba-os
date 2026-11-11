@@ -536,6 +536,20 @@ def login():
     maximize the browser during the login, then bring it back."""
     win, drwin = "^Draco: configurações$", os.path.join(CODIGO, "bin", "dr-win")
     sh = lambda *a: subprocess.run([drwin, *a], capture_output=True)
+    # Numa instalação nova o Claude Code ainda não existe (vive no mise da pessoa): instala
+    # antes, pelo mesmo caminho do app Agentes de IA, senão o botão não fazia nada.
+    if not os.path.exists(CLAUDE):
+        subprocess.Popen(["notify-send", "-a", "Draco", "-i", "dialog-information", "Draco",
+                          "Instalando o Claude Code… o login abre no navegador em seguida."])
+        try:
+            subprocess.run(["agentes", "instalar", "claude"], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        if not os.path.exists(CLAUDE):
+            subprocess.Popen(["notify-send", "-a", "Draco", "-u", "critical", "Draco",
+                              "Não consegui instalar o Claude Code. Verifique a internet e tente de novo."])
+            return
     braves = lambda: {c["address"] for c in json.loads(subprocess.run(
         ["hyprctl", "clients", "-j"], capture_output=True, text=True).stdout or "[]")
         if c.get("class") == "brave-browser"}

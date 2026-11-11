@@ -8,7 +8,8 @@ set -euo pipefail
 R="$(cd "$(dirname "$0")/.." && pwd)"
 ISO=${1:?uso: testar-iso-boot <iso> [minutos]}
 PRAZO=$(( ${2:-8} * 60 ))
-export TESTAR_VM=simba-fumaca TESTAR_VM_3D=0
+# porta própria: não bate com a VM de teste (simba-teste, 2222) se ela estiver ligada
+export TESTAR_VM=simba-fumaca TESTAR_VM_3D=0 TESTAR_VM_SSH=2223
 C=(virsh -q -c qemu:///session)
 
 limpar() { "$R/ferramentas/testar-vm" apagar >/dev/null 2>&1 || true; }

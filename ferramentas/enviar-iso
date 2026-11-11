@@ -1,0 +1,16 @@
+#!/bin/bash
+# enviar-iso — envia a ISO da versão atual (iso/VERSAO) e o .sha256 para o SourceForge, na pasta
+# <versão>/ do projeto simba-os. Pede a senha do SourceForge (ou usa a chave SSH, se cadastrada).
+# Se a conexão cair, rode de novo: continua de onde parou.
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+VERSAO=$(cat "$R/iso/VERSAO")
+SF_USUARIO=${SF_USUARIO:-renanjsilva}
+SAIDA=/mnt/dados/simba-iso; [ -d $SAIDA ] || SAIDA=/var/tmp/simba-iso
+ISO="$SAIDA/simba-os-$VERSAO-x86_64.iso"
+[ -f "$ISO" ] && [ -f "$ISO.sha256" ] || { echo "falta $ISO ou o .sha256 (rode ferramentas/lancar-iso)" >&2; exit 1; }
+(cd "$SAIDA" && sha256sum -c "$(basename "$ISO").sha256")
+rsync -avP --partial -e ssh "$ISO" "$ISO.sha256" \
+  "$SF_USUARIO@frs.sourceforge.net:/home/frs/project/simba-os/$VERSAO/"
+echo "✓ enviada: https://sourceforge.net/projects/simba-os/files/$VERSAO/"
+echo "  (marque a .iso como Default download no site e atualize o link no README)"

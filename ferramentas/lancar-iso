@@ -1,0 +1,46 @@
+#!/bin/bash
+# lancar-iso — gera a ISO nova do Simba OS de ponta a ponta. As senhas são pedidas TODAS no
+# começo (chave GPG e administrador); o resto roda sozinho e pode levar mais de uma hora.
+#
+#   1. assina os pacotes novos de dist/ e publica no canal de teste ([simba-os-testing])
+#   2. monta a ISO com o canal de teste (sudo iso/construir, SIMBA_ISO_CANAL=teste)
+#   3. gera o .sha256
+#
+# Depois: testar a ISO na VM (ferramentas/testar-vm), ferramentas/promover e enviar ao
+# SourceForge (ferramentas/enviar-iso).
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+source "$R/ferramentas/config.sh"
+VERSAO=$(cat "$R/iso/VERSAO")
+LOG="${XDG_CACHE_HOME:-$HOME/.cache}/simba-lancar-iso.log"
+exec > >(tee "$LOG") 2>&1
+echo "── Simba OS $VERSAO — log em $LOG"
+
+echo "── senhas (só agora no começo)"
+sudo -v                                        # administrador (fica valendo durante o build)
+( while sleep 50; do sudo -n true 2>/dev/null || exit; done ) &   # mantém o sudo vivo
+MANTER=$!
+trap 'kill $MANTER 2>/dev/null || true' EXIT
+
+echo "── 1/3 assinando pacotes novos e publicando no canal de teste"
+cd "$R/dist"
+for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do
+  f=$(ls "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | sort -V | tail -1)
+  [[ -n $f ]] || continue
+  [[ -f $f.sig && $f.sig -nt $f ]] || { echo "   assinando $f"; gpg --batch --yes -u "$CHAVE" --detach-sign "$f"; }
+done
+cd "$R"
+PUBLICAR_SEM_CONSTRUIR=1 "$R/ferramentas/publicar"
+
+echo "── 2/3 montando a ISO (demora)"
+sudo SIMBA_ISO_CANAL=teste "$R/iso/construir"
+
+echo "── 3/3 conferência"
+SAIDA=/mnt/dados/simba-iso; [ -d $SAIDA ] || SAIDA=/var/tmp/simba-iso
+ISO="$SAIDA/simba-os-$VERSAO-x86_64.iso"
+[ -f "$ISO" ] || { echo "ISO não encontrada: $ISO" >&2; exit 1; }
+(cd "$SAIDA" && sha256sum "$(basename "$ISO")" > "$(basename "$ISO").sha256")
+ls -lh "$ISO"
+cat "$ISO.sha256"
+notify-send -a "Simba OS" -i emblem-ok-symbolic "ISO $VERSAO pronta" "$ISO" 2>/dev/null || true
+echo "✓ ISO pronta. Próximo: teste na VM e ferramentas/enviar-iso"

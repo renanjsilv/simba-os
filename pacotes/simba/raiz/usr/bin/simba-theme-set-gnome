@@ -27,8 +27,10 @@ fi
 
 # Change gnome icon theme color
 GNOME_ICONS_THEME=$HOME/.local/state/simba/current/theme/icons.theme
-if [[ -f $GNOME_ICONS_THEME ]]; then
-  gsettings set org.gnome.desktop.interface icon-theme "$(<$GNOME_ICONS_THEME)"
+# só um tema de ícones que exista: um nome inexistente some com os ícones da barra
+icons=$( [[ -f $GNOME_ICONS_THEME ]] && cat "$GNOME_ICONS_THEME" )
+if [[ -n $icons && ( -d /usr/share/icons/$icons || -d $HOME/.local/share/icons/$icons ) ]]; then
+  gsettings set org.gnome.desktop.interface icon-theme "$icons"
 else
   gsettings set org.gnome.desktop.interface icon-theme "Yaru-blue"
 fi

@@ -1,16 +1,32 @@
 #!/bin/bash
 # enviar-iso — envia a ISO da versão atual (iso/VERSAO) e o .sha256 para o SourceForge, na pasta
-# <versão>/ do projeto simba-os. Pede a senha do SourceForge (ou usa a chave SSH, se cadastrada).
+# <versão>/ do projeto simba-os (a pasta é criada se não existir). Usa a chave SSH
+# ~/.ssh/sourceforge (cadastrada em sourceforge.net/auth/shell_services); sem ela, pede a senha.
 # Se a conexão cair, rode de novo: continua de onde parou.
+#   enviar-iso --conferir      só testa o acesso
+#   ENVIAR_SEM_SENHA=1         falha em vez de pedir senha (uso sem ninguém no computador)
 set -euo pipefail
 R="$(cd "$(dirname "$0")/.." && pwd)"
 VERSAO=$(cat "$R/iso/VERSAO")
 SF_USUARIO=${SF_USUARIO:-renanjsilva}
+SSH=(ssh -o ConnectTimeout=30 -o ServerAliveInterval=30)
+[ -f ~/.ssh/sourceforge ] && SSH+=(-i ~/.ssh/sourceforge -o IdentitiesOnly=yes)
+[ -n "${ENVIAR_SEM_SENHA:-}" ] && SSH+=(-o BatchMode=yes)
+DESTINO="$SF_USUARIO@frs.sourceforge.net:/home/frs/project/simba-os"
+if [ "${1:-}" = --conferir ]; then
+  rsync --list-only -e "${SSH[*]}" "$DESTINO/" >/dev/null ||
+    { echo "sem acesso ao SourceForge pela chave SSH (cadastre ~/.ssh/sourceforge.pub)" >&2; exit 1; }
+  echo "   acesso ao SourceForge ok"; exit 0
+fi
 SAIDA=/mnt/dados/simba-iso; [ -d $SAIDA ] || SAIDA=/var/tmp/simba-iso
 ISO="$SAIDA/simba-os-$VERSAO-x86_64.iso"
 [ -f "$ISO" ] && [ -f "$ISO.sha256" ] || { echo "falta $ISO ou o .sha256 (rode ferramentas/lancar-iso)" >&2; exit 1; }
 (cd "$SAIDA" && sha256sum -c "$(basename "$ISO").sha256")
-rsync -avP --partial -e ssh "$ISO" "$ISO.sha256" \
-  "$SF_USUARIO@frs.sourceforge.net:/home/frs/project/simba-os/$VERSAO/"
+# envio com tentativas: a conexão do frs às vezes cai em arquivos grandes (--partial continua)
+for t in 1 2 3 4 5; do
+  rsync -av --partial --progress -e "${SSH[*]}" "$ISO" "$ISO.sha256" "$DESTINO/$VERSAO/" && break
+  [ $t = 5 ] && { echo "envio falhou 5 vezes" >&2; exit 1; }
+  echo "   conexão caiu, tentando de novo em 30 s ($t/5)"; sleep 30
+done
 echo "✓ enviada: https://sourceforge.net/projects/simba-os/files/$VERSAO/"
 echo "  (marque a .iso como Default download no site e atualize o link no README)"

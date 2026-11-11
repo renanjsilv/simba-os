@@ -1,14 +1,19 @@
 #!/bin/bash
-# lancar-iso — gera a ISO nova do Simba OS de ponta a ponta. As senhas são pedidas TODAS no
-# começo (chave GPG e administrador); o resto roda sozinho e pode levar mais de uma hora.
+# lancar-iso — gera a ISO nova do Simba OS e publica no SourceForge, de ponta a ponta. As senhas
+# são pedidas TODAS no começo (administrador e chave GPG); o resto roda sozinho (mais de uma hora)
+# e avisa com uma notificação no fim ou se der erro.
 #
 #   1. assina os pacotes novos de dist/ e publica no canal de teste ([simba-os-testing])
 #   2. monta a ISO com o canal de teste (sudo iso/construir, SIMBA_ISO_CANAL=teste)
-#   3. gera o .sha256
+#   3. conferência: .sha256 e teste rápido na VM (ferramentas/testar-iso-boot: a ISO inicia
+#      e o instalador sobe); se falhar, não envia
+#   4. envia para o SourceForge, pasta <versão>/ (ferramentas/enviar-iso, chave SSH ~/.ssh/sourceforge)
 #
-# Depois: testar a ISO na VM (ferramentas/testar-vm), ferramentas/promover e enviar ao
-# SourceForge (ferramentas/enviar-iso).
-set -euo pipefail
+# Se a máquina desligar no meio: rode de novo (as sobras da montagem são apagadas no começo).
+# Se cair só no envio: ferramentas/enviar-iso continua de onde parou.
+# SIMBA_SEM_ENVIO=1: para depois do teste, sem enviar.
+# Depois: teste completo na VM (ferramentas/testar-vm) e ferramentas/promover.
+set -Eeuo pipefail
 R="$(cd "$(dirname "$0")/.." && pwd)"
 source "$R/ferramentas/config.sh"
 VERSAO=$(cat "$R/iso/VERSAO")
@@ -16,13 +21,28 @@ LOG="${XDG_CACHE_HOME:-$HOME/.cache}/simba-lancar-iso.log"
 exec > >(tee "$LOG") 2>&1
 echo "── Simba OS $VERSAO — log em $LOG"
 
+avisar() { notify-send -a "Simba OS" -i "$1" "$2" "$3" 2>/dev/null || true; }
+trap 'avisar dialog-error-symbolic "ISO $VERSAO: erro" "Parou na linha $LINENO. Log: $LOG"' ERR
+
 echo "── senhas (só agora no começo)"
 sudo -v                                        # administrador (fica valendo durante o build)
 ( while sleep 50; do sudo -n true 2>/dev/null || exit; done ) &   # mantém o sudo vivo
 MANTER=$!
 trap 'kill $MANTER 2>/dev/null || true' EXIT
 
-echo "── 1/3 assinando pacotes novos e publicando no canal de teste"
+if [ -z "${SIMBA_SEM_ENVIO:-}" ]; then
+  echo "── conferindo o acesso ao SourceForge (chave SSH)"
+  ENVIAR_SEM_SENHA=1 "$R/ferramentas/enviar-iso" --conferir
+fi
+
+# sobras de uma montagem interrompida (ex.: a máquina desligou): só pastas sem nada montado
+for w in /mnt/dados/gerar-iso/.work-* /var/tmp/gerar-iso/.work-*; do
+  [ -d "$w" ] || continue
+  if findmnt -rno TARGET | grep -q "^$w"; then echo "   ainda montado, deixo: $w"; continue; fi
+  echo "   apagando sobra: $w"; sudo rm -rf "$w"
+done
+
+echo "── 1/4 assinando pacotes novos e publicando no canal de teste"
 cd "$R/dist"
 for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do
   f=$(ls "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | sort -V | tail -1)
@@ -32,15 +52,23 @@ done
 cd "$R"
 PUBLICAR_SEM_CONSTRUIR=1 "$R/ferramentas/publicar"
 
-echo "── 2/3 montando a ISO (demora)"
+echo "── 2/4 montando a ISO (demora)"
 sudo SIMBA_ISO_CANAL=teste "$R/iso/construir"
 
-echo "── 3/3 conferência"
+echo "── 3/4 conferência"
 SAIDA=/mnt/dados/simba-iso; [ -d $SAIDA ] || SAIDA=/var/tmp/simba-iso
 ISO="$SAIDA/simba-os-$VERSAO-x86_64.iso"
 [ -f "$ISO" ] || { echo "ISO não encontrada: $ISO" >&2; exit 1; }
 (cd "$SAIDA" && sha256sum "$(basename "$ISO")" > "$(basename "$ISO").sha256")
 ls -lh "$ISO"
 cat "$ISO.sha256"
-notify-send -a "Simba OS" -i emblem-ok-symbolic "ISO $VERSAO pronta" "$ISO" 2>/dev/null || true
-echo "✓ ISO pronta. Próximo: teste na VM e ferramentas/enviar-iso"
+"$R/ferramentas/testar-iso-boot" "$ISO"
+
+if [ -n "${SIMBA_SEM_ENVIO:-}" ]; then
+  avisar emblem-ok-symbolic "ISO $VERSAO pronta" "$ISO"
+  echo "✓ ISO pronta (sem envio). Próximo: ferramentas/enviar-iso"; exit 0
+fi
+echo "── 4/4 enviando para o SourceForge ($VERSAO/)"
+ENVIAR_SEM_SENHA=1 "$R/ferramentas/enviar-iso"
+avisar emblem-ok-symbolic "ISO $VERSAO publicada" "https://sourceforge.net/projects/simba-os/files/$VERSAO/"
+echo "✓ pronto. Próximo: teste completo na VM e ferramentas/promover"

@@ -1,0 +1,46 @@
+#!/bin/bash
+# testar-iso-boot — teste rápido antes de publicar: liga a ISO numa VM descartável e confere se o
+# sistema de instalação iniciou e o instalador está rodando (pelo agente do QEMU dentro da VM:
+# nada de teclas nem da tela). Não instala nada; o teste completo continua sendo à mão.
+#
+#   testar-iso-boot <iso> [minutos]     sai com 0 se o instalador subiu dentro do prazo (padrão 8)
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+ISO=${1:?uso: testar-iso-boot <iso> [minutos]}
+PRAZO=$(( ${2:-8} * 60 ))
+export TESTAR_VM=simba-fumaca TESTAR_VM_3D=0
+C=(virsh -q -c qemu:///session)
+
+limpar() { "$R/ferramentas/testar-vm" apagar >/dev/null 2>&1 || true; }
+trap limpar EXIT
+limpar
+"$R/ferramentas/testar-vm" criar "$ISO" >/dev/null
+
+agente() { "${C[@]}" qemu-agent-command "$TESTAR_VM" --timeout 5 "$1" 2>/dev/null; }
+
+# roda um comando na VM pelo agente e devolve a saída
+na_vm() {
+  local pid r i
+  pid=$(agente "{\"execute\":\"guest-exec\",\"arguments\":{\"path\":\"$1\",\"arg\":$2,\"capture-output\":true}}" |
+    jq -r '.return.pid') || return 1
+  for i in $(seq 20); do
+    r=$(agente "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}") || return 1
+    [ "$(jq -r '.return.exited' <<<"$r")" = true ] && { jq -r '.return["out-data"] // ""' <<<"$r" | base64 -d; return 0; }
+    sleep 1
+  done
+  return 1
+}
+
+echo "   ligando a ISO na VM (prazo $((PRAZO / 60)) min)"
+inicio=$SECONDS
+until agente '{"execute":"guest-ping"}' >/dev/null; do
+  (( SECONDS - inicio < PRAZO )) || { echo "✗ o sistema de instalação não respondeu em $((PRAZO / 60)) min" >&2; exit 1; }
+  sleep 10
+done
+echo "   sistema de instalação no ar ($((SECONDS - inicio)) s)"
+until [ "$(na_vm /usr/bin/systemctl '["is-active","instalador.service"]' | tr -d '\n')" = active ] &&
+      na_vm /usr/bin/pgrep '["-f","instalar-clone"]' | grep -q .; do
+  (( SECONDS - inicio < PRAZO )) || { echo "✗ o instalador não iniciou" >&2; exit 1; }
+  sleep 10
+done
+echo "✓ a ISO iniciou e o instalador está rodando ($((SECONDS - inicio)) s)"

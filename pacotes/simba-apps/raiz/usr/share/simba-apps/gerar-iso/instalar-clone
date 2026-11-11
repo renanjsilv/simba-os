@@ -40,23 +40,25 @@ paleta() {
   printf '\e%%G'                      # console em UTF-8 (os blocos do logo)
   kbd_mode -u 2>/dev/null || true
   setvtrgb "$f" >> "$LOG" 2>&1 || true
-  # fonte do console proporcional à tela (~36 linhas)
-  local alt
-  alt=$(cut -d, -f2 /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 768)
-  local tam=$(( alt / 36 ))
-  # a maior que couber; se o kernel recusar um tamanho, tenta o próximo menor
-  for t in 32 28 24 22 20 18 16 14; do
-    [ "$tam" -ge "$t" ] || continue
-    if setfont -C /dev/tty1 "ter-v${t}b" >> "$LOG" 2>&1 || setfont "ter-v${t}b" >> "$LOG" 2>&1; then break; fi
-  done
-  # a 1ª tela saía deslocada para a direita: ela media a largura do console ainda com a fonte
-  # antiga (mais colunas). Espera o tamanho novo aparecer antes de desenhar.
-  # (a fonte padrão tem 8 px de largura: com a nova, cabem menos colunas que largura/8)
-  local i
-  for i in $(seq 20); do
+  # fonte do console proporcional à tela (~36 linhas). O instalador começa antes de o console
+  # gráfico do kernel assumir a tela (ele espera o Plymouth sair de vez, alguns segundos
+  # depois do "plymouth quit"): até lá o setfont falha e a largura medida é a errada, e a 1ª
+  # tela saía deslocada. Tenta de novo até a fonte entrar (até ~30 s).
+  local alt larg tam t i ok=0
+  for i in $(seq 60); do
+    alt=$(cut -d, -f2 /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 768)
+    larg=$(cut -d, -f1 /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 1024)
+    tam=$(( alt / 36 )); [ "$tam" -ge 14 ] || break   # tela pequena: fica a fonte padrão
+    # a maior que couber; se o kernel recusar um tamanho, tenta o próximo menor
+    for t in 32 28 24 22 20 18 16 14; do
+      [ "$tam" -ge "$t" ] || continue
+      if setfont -C /dev/tty1 "ter-v${t}b" >> "$LOG" 2>&1 || setfont "ter-v${t}b" >> "$LOG" 2>&1; then ok=1; break; fi
+    done
     medir
-    [ "$COLS" -le $(( $(cut -d, -f1 /sys/class/graphics/fb0/virtual_size 2>/dev/null || echo 1024) / 8 - 1 )) ] && break
-    sleep 0.1
+    # fonte nova = mais larga que a padrão (8 px): cabem menos colunas que largura/8
+    [ "$ok" = 1 ] && [ "$COLS" -lt $(( larg / 8 )) ] && break
+    [ -e /sys/class/graphics/fb0 ] || break      # sem framebuffer: fica a fonte padrão
+    ok=0; printf '\e[2J' ; sleep 0.5
   done
   printf '\e[?25l\e[0;37;40m\e[2J\e[H'
 }

@@ -76,7 +76,10 @@ class Operacoes(GObject.Object):
             self.perguntar(nome, resposta)
             return False
         GLib.idle_add(no_gtk)
-        ev.wait()
+        # espera a resposta, mas o botão Cancelar continua valendo
+        while not ev.wait(0.3):
+            if self.cancelar.is_set():
+                raise Cancelado()
         return r.get("x", "pular")
 
     # ── copiar / mover ─────────────────────────────────────────────────────
@@ -118,22 +121,37 @@ class Operacoes(GObject.Object):
             self._prog(f"{verbo} “{nome}” · {tamanho(estado['feito'])} de {tamanho(total)}",
                        min(1.0, estado["feito"] / total))
 
-        for orig in origens:
+        def tratar(orig, destino):
+            nonlocal politica
             orig = str(orig).rstrip("/") or "/"
             nome = os.path.basename(orig)
             alvo = Path(destino) / nome
             if os.path.abspath(orig) == os.path.abspath(str(alvo)):
                 if mover:
-                    continue
+                    return
                 alvo = nome_livre(destino, nome)          # colar na mesma pasta: "nome (2)"
             elif str(alvo).startswith(orig + "/"):
                 raise OSError(_t("não dá para colocar “%1” dentro dela mesma", nome))
             elif alvo.exists() or alvo.is_symlink():
+                if (os.path.isdir(orig) and not os.path.islink(orig)
+                        and alvo.is_dir() and not alvo.is_symlink()):
+                    # pasta com o mesmo nome: junta o conteúdo (como no Windows); só os
+                    # arquivos repetidos perguntam. Antes "Substituir" apagava a pasta do
+                    # destino inteira e deixava só o que veio.
+                    for e in sorted(os.scandir(orig), key=lambda e: e.name):
+                        tratar(e.path, str(alvo))
+                    if mover:
+                        try:
+                            os.rmdir(orig)                # só some se ficou vazia (nada pulado)
+                        except OSError:
+                            pass
+                    return
                 r = politica or self._pergunta(nome)
                 if r.endswith("-todos"):
                     politica = r = r[:-6]
                 if r == "pular":
-                    continue
+                    avancar(self._total([orig]), nome)
+                    return
                 if r == "ambos":
                     alvo = nome_livre(destino, nome)
                 else:  # substituir
@@ -146,7 +164,7 @@ class Operacoes(GObject.Object):
                     os.rename(orig, alvo)                 # mesmo disco: instantâneo
                     avancar(self._total([str(alvo)]), nome)
                     feitos.append((str(alvo), orig))
-                    continue
+                    return
                 except OSError:
                     pass
             self._copiar_item(orig, str(alvo), avancar)
@@ -156,6 +174,9 @@ class Operacoes(GObject.Object):
                 else:
                     os.unlink(orig)
             feitos.append((str(alvo), orig))
+
+        for orig in origens:
+            tratar(orig, destino)
         if feitos:
             self.desfazer_pilha.append(("mover" if mover else "copiar", feitos))
         n = len(feitos)

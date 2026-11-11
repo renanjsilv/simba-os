@@ -256,7 +256,6 @@ class Janela(Adw.ApplicationWindow):
         self.raiz.add_bottom_bar(self._barra_status())
         self._painel(self.cfg.get("painel", ""))
 
-        self.ops.perguntar = self._conflito
         self._sinais_ops = [self.ops.connect("progresso", self._progresso), self.ops.connect("terminou", self._terminou)]
         self.connect("close-request", self._fechar_janela)
         vm = Gio.VolumeMonitor.get()
@@ -1784,8 +1783,20 @@ class App(Adw.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_OPEN)
         self.ops = Operacoes()
+        # o copiador é um só para todas as janelas: a pergunta de conflito vai para a janela
+        # ativa (antes ia para a última aberta, que podia estar atrás, em outra área de
+        # trabalho ou fechada, e a cópia ficava esperando uma resposta que nunca vinha)
+        self.ops.perguntar = self._conflito
         self.estilo = None
         self.servico = False     # iniciado pelo D-Bus (FileManager1): sem janela inicial
+
+    def _conflito(self, nome, responder):
+        jan = self.get_active_window() or next(iter(self.get_windows()), None)
+        if jan is None:
+            responder("pular")
+            return
+        jan.present()
+        jan._conflito(nome, responder)
 
     def do_startup(self):
         Adw.Application.do_startup(self)

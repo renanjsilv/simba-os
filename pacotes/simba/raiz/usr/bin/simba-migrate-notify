@@ -21,9 +21,9 @@ pending_migrations=$(simba-migrate --pending 2>/dev/null) || exit 0
 pending_count=$(printf '%s\n' "$pending_migrations" | sed '/^[[:space:]]*$/d' | wc -l)
 
 if (( pending_count == 1 )); then
-  message="Click to run 1 pending migration."
+  message="Clique para aplicar 1 migração pendente."
 else
-  message="Click to run $pending_count pending migrations."
+  message="Clique para aplicar $pending_count migrações pendentes."
 fi
 
 # This runs from simba-migrate-notify.service after graphical-session.target,

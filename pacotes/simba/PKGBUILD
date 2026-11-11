@@ -3,7 +3,7 @@
 # Derivado do Omarchy (MIT, ver /usr/share/licenses/simba/omarchy-MIT.txt).
 pkgname=simba
 pkgver=1.1.9
-pkgrel=12
+pkgrel=13
 pkgdesc="Simba OS: área de trabalho, ferramentas e configurações do sistema"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -29,6 +29,12 @@ package() {
   local d
   for d in "Área de trabalho" Downloads Modelos Público Documentos Músicas Imagens Vídeos; do
     install -d "$pkgdir/etc/skel/$d"
+  done
+  # usuário novo já nasce com todas as migrações deste pacote aplicadas (senão o primeiro
+  # login avisa "migração pendente" de cada migração nova que ninguém lembrou de marcar)
+  local m
+  for m in "$pkgdir"/usr/share/simba/migrations/*.sh; do
+    install -Dm644 /dev/null "$pkgdir/etc/skel/.local/state/simba/migrations/${m##*/}"
   done
   install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 "$startdir/../../LICENSES/omarchy-MIT.txt" "$pkgdir/usr/share/licenses/$pkgname/omarchy-MIT.txt"

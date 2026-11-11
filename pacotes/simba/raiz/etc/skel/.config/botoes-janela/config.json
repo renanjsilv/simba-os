@@ -1,0 +1,12 @@
+{
+  "mostrar": [
+    "^imv$"
+  ],
+  "ocultar": [
+    "^com\\.simba\\.Configuracoes$"
+  ],
+  "cliente": [
+    "^foot$",
+    "^footclient$"
+  ]
+}

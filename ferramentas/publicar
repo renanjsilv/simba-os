@@ -1,47 +1,27 @@
 #!/bin/bash
-# publicar — atualiza o repositório pacman do Simba OS no GitHub Releases (tag "repo"):
-# constrói o que mudou, assina, gera o banco (repo-add) e envia. As instalações recebem pelo
-# "Atualizar tudo" (pacman -Syu) através da seção [simba-os] do /etc/pacman.conf.
+# publicar — constrói o que mudou, assina e envia para o CANAL DE TESTE ([simba-os-testing],
+# release "repo-testing"). Teste numa VM ou máquina com `simba-canal teste` e, se estiver tudo
+# certo, leve os mesmos arquivos para todo mundo com `ferramentas/promover`.
+#
+#   publicar            → canal de teste
+#   publicar --direto   → direto para o [simba-os] (só emergência: correção de segurança etc.)
+#
+# PUBLICAR_SEM_CONSTRUIR=1: publica os pacotes já construídos e assinados em dist/ (sem
+# recompilar, o que trocaria os arquivos e pediria a senha da chave de novo)
 set -euo pipefail
 R="$(cd "$(dirname "$0")/.." && pwd)"
 source "$R/ferramentas/config.sh"
-command -v gh >/dev/null || { echo "instale o GitHub CLI: sudo pacman -S github-cli" >&2; exit 1; }
-gh auth status >/dev/null 2>&1 || { echo "entre no GitHub antes: gh auth login" >&2; exit 1; }
-if [[ -z $GH_USER ]]; then
-  GH_USER=$(gh api user -q .login)
-  sed -i "s/^GH_USER=.*/GH_USER=\"\${SIMBA_GH_USER:-$GH_USER}\"/" "$R/ferramentas/config.sh"
-fi
-[[ -n $CHAVE ]] || { echo "crie a chave de assinatura antes: ferramentas/criar-chave" >&2; exit 1; }
+source "$R/ferramentas/repo.sh"
+checar_gh
 # pacotes do AUR republicados com versão nova (ex.: correção de segurança do Brave): só avisa
 if ! atrasados=$("$R/ferramentas/verificar-aur" --silencioso); then
   printf 'AVISO: receitas do AUR atrasadas — atualize e construa antes de publicar:\n%s\n' "$atrasados" >&2
 fi
-# PUBLICAR_SEM_CONSTRUIR=1: publica os pacotes já construídos e assinados em dist/ (sem
-# recompilar, o que trocaria os arquivos e pediria a senha da chave de novo)
 [[ -n ${PUBLICAR_SEM_CONSTRUIR:-} ]] || "$R/ferramentas/construir"
-cd "$R/dist"
-rm -f "$REPO_NOME".db* "$REPO_NOME".files*
-# o GitHub troca ":" por "." no nome dos arquivos (época, ex.: brave-bin-1:1.2-1): renomeia
-# antes do repo-add, para o banco já apontar para o nome que o GitHub vai guardar
-for f in *:*.pkg.tar.zst *:*.pkg.tar.zst.sig; do [[ -e $f ]] && mv -f "$f" "${f//:/.}"; done
-# só a versão mais nova de cada pacote entra no banco
-mais_novos=$(for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do ls -t "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | head -1; done)
-repo-add -s -k "$CHAVE" "$REPO_NOME.db.tar.zst" $mais_novos
-# o GitHub não guarda links: troca os links .db/.files por cópias
-for f in "$REPO_NOME".db "$REPO_NOME".files "$REPO_NOME".db.sig "$REPO_NOME".files.sig; do
-  [[ -L $f ]] && cp --remove-destination "$(readlink -f "$f")" "$f"
-done
-gh release view "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" >/dev/null 2>&1 || \
-  gh release create "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --title "Repositório de pacotes" \
-    --notes "Pacotes do Simba OS para o pacman. Não baixe à mão: use a seção [$REPO_NOME] do pacman.conf." --latest=false
-arquivos=($mais_novos $(for f in $mais_novos; do echo "$f.sig"; done) "$REPO_NOME".db "$REPO_NOME".db.sig "$REPO_NOME".files "$REPO_NOME".files.sig)
-gh release upload "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --clobber "${arquivos[@]}"
-# trava: nunca limpar o release com uma lista incompleta (uma lista vazia apagaria tudo)
-esperados=$(( ${#PACOTES[@]} + ${#PUBLICAR_AUR[@]} ))
-[[ $(wc -w <<<"$mais_novos") -eq $esperados ]] || { echo "lista de pacotes incompleta: não apago nada do release" >&2; exit 1; }
-# tira do release pacotes de versões antigas
-for a in $(gh release view "$RELEASE_TAG" -R "$GH_USER/$GH_REPO" --json assets -q '.assets[].name'); do
-  [[ $a == *.pkg.tar.zst* ]] || continue
-  printf '%s\n' "${arquivos[@]}" | grep -qxF "$a" || gh release delete-asset "$RELEASE_TAG" "$a" -R "$GH_USER/$GH_REPO" -y
-done
-echo "✓ publicado: https://github.com/$GH_USER/$GH_REPO/releases/tag/$RELEASE_TAG"
+if [[ ${1:-} == --direto ]]; then
+  echo "ATENÇÃO: publicando direto no canal estável, sem passar pelo teste" >&2
+  enviar_repo "$RELEASE_TAG" "$REPO_NOME" "$R/dist"
+else
+  enviar_repo "$TESTE_TAG" "$TESTE_NOME" "$R/dist"
+  echo "Teste com 'simba-canal teste' + 'Atualizar tudo'; depois: ferramentas/promover"
+fi

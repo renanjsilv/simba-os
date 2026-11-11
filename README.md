@@ -116,9 +116,14 @@ O sistema vem com 18 papéis de parede próprios, claros e escuros.
 
 ### Pela ISO
 
-1. Numa máquina com o Simba OS, abra **Gerar ISO** e escolha o modo **Distribuível**.
-2. Grave a ISO num pendrive (por exemplo, com `dd` ou o Fedora Media Writer).
-3. Dê boot pelo pendrive. O instalador pergunta o disco, o usuário e se o login deve ser automático.
+**[Baixar o Simba OS 0.1.0](https://sourceforge.net/projects/simba-os/files/0.1.0/)** (4,0 GB, x86_64, UEFI)
+
+O passo a passo completo, do download ao primeiro uso, está em **[docs/INSTALAR.md](docs/INSTALAR.md)**:
+conferir o download, gravar o pendrive, dar boot, as perguntas do instalador e problemas comuns.
+
+> [!NOTE]
+> Versão 0.1 (beta inicial): testada em máquina virtual e em poucos computadores. Problemas e
+> sugestões são bem-vindos nas [Issues](https://github.com/renanjsilv/simba-os/issues).
 
 ### Num Arch Linux já instalado
 
@@ -160,8 +165,15 @@ Cada `pacotes/<pacote>/raiz/` espelha o sistema instalado: `raiz/usr/bin/x` vira
 ferramentas/construir simba-apps                 # gera dist/simba-apps-*.pkg.tar.zst
 sudo pacman -U dist/simba-apps-*.pkg.tar.zst     # instala e testa localmente
 
-ferramentas/publicar                             # assina, gera o banco e envia ao GitHub Releases
+ferramentas/publicar                             # assina e envia ao canal de TESTE
+ferramentas/promover                             # leva os mesmos arquivos ao canal estável
 ```
+
+Toda atualização passa primeiro pelo canal de teste (`[simba-os-testing]`, release `repo-testing`).
+Numa VM ou máquina de teste, `simba-canal teste` + **Atualizar tudo**; se estiver tudo certo,
+`ferramentas/promover` copia exatamente os pacotes testados (sem recompilar) para o `[simba-os]`.
+`ferramentas/publicar --direto` pula o teste: só para emergências, como correção de segurança.
+`ferramentas/verificar-aur` avisa quando um pacote do AUR republicado (ex.: `brave-bin`) tem versão nova.
 
 Na primeira publicação, rode `ferramentas/criar-chave` para gerar a chave GPG de assinatura.
 A chave privada fica só na máquina de quem publica.

@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# simba:summary=Show or switch the Simba OS update channel (stable or testing).
+# simba:args=[estado|teste|estavel]
+# simba:requires-sudo=true
+
+# The testing channel ([simba-os-testing]) gets updates a few days before everyone else.
+# It sits ABOVE [simba-os] in /etc/pacman.conf, so its packages win while it is on.
+
+set -e
+
+CONF=/etc/pacman.conf
+SECAO=simba-os-testing
+
+ativo() { grep -q "^\[$SECAO\]" "$CONF"; }
+
+case "${1:-estado}" in
+estado)
+  if ativo; then echo "Canal: teste ([$SECAO] ativo)"; else echo "Canal: estável"; fi
+  ;;
+teste)
+  if ativo; then echo "O canal de teste já está ativo."; exit 0; fi
+  servidor=$(awk '/^\[simba-os\]/{s=1;next} /^\[/{s=0} s && /^Server *=/{sub(/^Server *= */,"");print;exit}' "$CONF")
+  [[ -n $servidor ]] || { echo "Não achei a seção [simba-os] em $CONF." >&2; exit 1; }
+  servidor="${servidor%/repo}/repo-testing"
+  bloco="# Canal de teste do Simba OS (simba-canal estavel para sair)\n[$SECAO]\nSigLevel = Required DatabaseRequired\nServer = $servidor\n"
+  tmp=$(mktemp)
+  awk -v b="$bloco" '/^\[simba-os\]/ && !f { printf "%s\n", b; f=1 } { print }' "$CONF" >"$tmp"
+  sudo install -m 644 "$tmp" "$CONF"
+  rm -f "$tmp"
+  echo "Canal de teste ativado. Rode 'Atualizar tudo' para receber as atualizações em teste."
+  ;;
+estavel | estável)
+  if ! ativo; then echo "Já está no canal estável."; exit 0; fi
+  tmp=$(mktemp)
+  awk -v s="[$SECAO]" '
+    /^# Canal de teste do Simba OS/ { next }
+    $0 == s { skip=1; next }
+    skip && /^\[/ { skip=0 }
+    skip && /^[[:space:]]*$/ { skip=0; next }
+    !skip { print }' "$CONF" >"$tmp"
+  sudo install -m 644 "$tmp" "$CONF"
+  rm -f "$tmp"
+  echo "Voltou ao canal estável. O que veio do teste continua instalado até a próxima versão estável."
+  ;;
+*)
+  echo "Uso: simba-canal [estado|teste|estavel]" >&2
+  exit 1
+  ;;
+esac

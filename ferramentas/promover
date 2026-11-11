@@ -1,0 +1,20 @@
+#!/bin/bash
+# promover — leva para o canal estável ([simba-os], release "repo") EXATAMENTE os pacotes que
+# estão no canal de teste: baixa os arquivos assinados do release "repo-testing" (nada é
+# recompilado) e refaz só o banco do [simba-os]. Pede a senha da chave para assinar o banco.
+set -euo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+source "$R/ferramentas/config.sh"
+source "$R/ferramentas/repo.sh"
+checar_gh
+t=$(mktemp -d)
+trap 'rm -rf "$t"' EXIT
+gh release download "$TESTE_TAG" -R "$GH_USER/$GH_REPO" -D "$t" -p '*.pkg.tar.zst' -p '*.pkg.tar.zst.sig'
+# as assinaturas baixadas precisam conferir com a chave antes de irem para todo mundo
+for f in "$t"/*.pkg.tar.zst; do
+  gpg --batch --quiet --verify "$f.sig" "$f" 2>/dev/null || { echo "assinatura inválida: $(basename "$f")" >&2; exit 1; }
+done
+echo "── vai para o [simba-os]:"
+(cd "$t" && ls *.pkg.tar.zst | sed 's/^/   /')
+if [[ -t 0 ]]; then read -rp "Promover estes pacotes para todo mundo? [s/N] " r; [[ $r == [sS] ]] || exit 1; fi
+enviar_repo "$RELEASE_TAG" "$REPO_NOME" "$t"

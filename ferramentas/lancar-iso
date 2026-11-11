@@ -27,7 +27,7 @@ cd "$R/dist"
 for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do
   f=$(ls "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | sort -V | tail -1)
   [[ -n $f ]] || continue
-  [[ -f $f.sig && $f.sig -nt $f ]] || { echo "   assinando $f"; gpg --batch --yes -u "$CHAVE" --detach-sign "$f"; }
+  [[ -s $f.sig && $f.sig -nt $f ]] || { echo "   assinando $f"; gpg --batch --yes -u "$CHAVE" --detach-sign "$f"; }
 done
 cd "$R"
 PUBLICAR_SEM_CONSTRUIR=1 "$R/ferramentas/publicar"

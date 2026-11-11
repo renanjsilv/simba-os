@@ -25,7 +25,7 @@ enviar_repo() {
     local mais_novos p f
     mais_novos=$(for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do
       ls "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | sort -V | tail -1; done)
-    for f in $mais_novos; do [[ -f $f.sig ]] || { echo "sem assinatura: $f" >&2; exit 1; }; done
+    for f in $mais_novos; do [[ -s $f.sig ]] || { echo "sem assinatura: $f" >&2; exit 1; }; done
     # trava: nunca publicar (nem limpar o release) com uma lista incompleta
     local esperados=$(( ${#PACOTES[@]} + ${#PUBLICAR_AUR[@]} ))
     [[ $(wc -w <<<"$mais_novos") -eq $esperados ]] || {

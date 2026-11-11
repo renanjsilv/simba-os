@@ -72,6 +72,13 @@ Include = /etc/pacman.d/mirrorlist
 SigLevel = Required DatabaseRequired
 Server = https://github.com/renanjsilv/simba-os/releases/download/repo
 EOF
+# SIMBA_ISO_CANAL=teste: monta com o canal de teste ([simba-os-testing], também assinado) na
+# frente do [simba-os] — para gerar e testar a ISO antes de promover os pacotes. Só vale para a
+# montagem: o pacman.conf do sistema instalado vem do pacote simba (canal estável).
+if [ "${SIMBA_ISO_CANAL:-}" = teste ]; then
+  sed -i '/^\[simba-os\]/i [simba-os-testing]\nSigLevel = Required DatabaseRequired\nServer = https://github.com/renanjsilv/simba-os/releases/download/repo-testing\n' "$WORK/pacman.conf"
+  info "montando com o canal de teste [simba-os-testing]"
+fi
 # SIMBA_ISO_REPO_LOCAL=<pasta com .pkg.tar.zst>: testa pacotes ainda não publicados (vêm antes
 # do [simba-os]; sem assinatura — só para teste, nunca para a ISO publicada)
 if [ -n "${SIMBA_ISO_REPO_LOCAL:-}" ]; then

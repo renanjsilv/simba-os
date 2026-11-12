@@ -867,9 +867,15 @@ static void suprimirMaximizarDoHyprland(PHLWINDOW w) {
 }
 
 static void ouvirJanela(PHLWINDOW w) {
-    const auto KEY = (uintptr_t)w.get();
-    if (g->ouvintesEstado.contains(KEY))
+    const auto KEY  = (uintptr_t)w.get();
+    // O endereço de uma janela fechada pode voltar numa nova (a Steam fecha e reabre janelas o
+    // tempo todo): conferir só o endereço deixava a janela nova com o ouvinte da superfície velha
+    // e os botões minimizar/maximizar dela não faziam nada. Confere a superfície também.
+    const auto ALVO = hc::toplevel(w) ? (uintptr_t)hc::toplevel(w).get() : (hc::x11(w) ? (uintptr_t)hc::x11(w).get() : 0);
+    if (g->ouvintesEstado.contains(KEY) && g->ouvintesAlvo[KEY] == ALVO)
         return;
+    g->ouvintesEstado.erase(KEY);
+    g->ouvintesAlvo[KEY] = ALVO;
     PHLWINDOWREF ref = w;
     registrar(std::format("ouvindo pedidos de {} ({})", enderecoDe(w), hc::classe(w)));
     if (hc::toplevel(w))
@@ -1266,7 +1272,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         if (auto b = barraDe(w))
             b->damageEntire();
     });
-    static auto L5 = Event::bus()->m_events.window.active.listen([](PHLWINDOW, Desktop::eFocusReason) {
+    static auto L5 = Event::bus()->m_events.window.active.listen([](PHLWINDOW w, Desktop::eFocusReason) {
+        // garantia: janela que ganhou foco sem ouvinte (ou com o de uma superfície velha) passa a ter
+        if (w && hc::mapeada(w))
+            ouvirJanela(w);
         for (auto& b : g->barras)
             if (b)
                 b->damageEntire();
@@ -1274,6 +1283,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     static auto L6 = Event::bus()->m_events.window.destroy.listen([](PHLWINDOWREF w) {
         const auto K = (uintptr_t)w.get();
         g->ouvintesEstado.erase(K);
+        g->ouvintesAlvo.erase(K);
         g->ouvintesCommit.erase(K);
         g_deslocadas.erase(K);
         g->sempreMax.erase(K);
@@ -1365,4 +1375,5 @@ APICALL EXPORT void PLUGIN_EXIT() {
     // os hooks são removidos pelo próprio Hyprland ao descarregar.
     if (g)
         g->ouvintesEstado.clear();
+        g->ouvintesAlvo.clear();
 }

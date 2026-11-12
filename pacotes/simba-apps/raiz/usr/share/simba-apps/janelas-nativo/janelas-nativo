@@ -15,11 +15,14 @@ avisar() { notify-send -a "Janelas" -i preferences-system-windows "Janelas" "$1"
 
 commit_rodando() { hyprctl version -j 2>/dev/null | sed -n 's/.*"commit": *"\([0-9a-f]*\)".*/\1/p' | head -1; }
 commit_cabecalhos() { sed -n 's/.*GIT_COMMIT_HASH *"\([0-9a-f]*\)".*/\1/p' /usr/include/hyprland/src/version.h 2>/dev/null | head -1; }
+# o plugin é refeito quando o Hyprland OU o código dele muda (antes só o Hyprland: uma correção
+# do plugin entregue por atualização do simba-apps nunca chegava a quem já tinha ele compilado)
+fonte() { cat "$DIR"/src/* "$DIR"/Makefile 2>/dev/null | sha256sum | cut -c1-16; }
 
 compilar() {
   mkdir -p "$BUILD"
   if make -C "$DIR" -B OUT="$SO" >"$LOG" 2>&1; then
-    commit_cabecalhos > "$BUILD/.commit"
+    echo "$(commit_cabecalhos) $(fonte)" > "$BUILD/.commit"
     return 0
   fi
   avisar "Não consegui compilar o plugin de janelas (veja $LOG)."
@@ -32,7 +35,7 @@ case "${1:-carregar}" in
   compilar) compilar ;;
   carregar)
     RUN=$(commit_rodando); HDR=$(commit_cabecalhos); FEITO=$(cat "$BUILD/.commit" 2>/dev/null)
-    if [ ! -f "$SO" ] || [ "$FEITO" != "$RUN" ]; then
+    if [ ! -f "$SO" ] || [ "$FEITO" != "$RUN $(fonte)" ]; then
       if [ "$HDR" = "$RUN" ]; then
         compilar || exit 1
       else

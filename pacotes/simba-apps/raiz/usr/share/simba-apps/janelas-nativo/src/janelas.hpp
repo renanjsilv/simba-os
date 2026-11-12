@@ -146,6 +146,7 @@ struct SEstadoGlobal {
     std::vector<WP<CBarra>>                    barras;
     std::unordered_map<uintptr_t, eEstadoJanela> estados; // CWindow* → estado do janelas.lua
     std::unordered_map<uintptr_t, CHyprSignalListener> ouvintesEstado;
+    std::unordered_map<uintptr_t, uintptr_t>           ouvintesAlvo;   // superfície (xdg/X11) de cada ouvinte
     std::unordered_map<uintptr_t, bool>         x11SemBordas; // _MOTIF_WM_HINTS lido no mapeamento
     std::unordered_map<uintptr_t, bool>         forcadas;     // hyprctl janelas forcar <addr> sim|nao (só esta janela)
     // Estado xdg "maximized" verdadeiro (só ligado quando o janelas.lua diz "max"): o botão

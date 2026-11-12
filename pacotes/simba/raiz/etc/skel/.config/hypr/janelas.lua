@@ -215,6 +215,24 @@ local function cobre_area(w)
   return g.w >= a.w * 0.95 and g.h + hb >= a.h * 0.95
 end
 
+-- Nada fica por baixo da barra de tarefas: janela solta que abre passando da área útil
+-- (notificação de app como a da Steam, diálogo, janela que lembrava outra posição) é trazida
+-- para dentro dela. Tela cheia (jogo, vídeo) continua cobrindo tudo.
+local function manter_na_area(w)
+  if not w or not w.floating or w.fullscreen > 0 or w.pinned or not w.monitor then return end
+  if w.workspace and w.workspace.special then return end
+  local a, g, hb = area_de(w.monitor), geometria(w), barra(w)
+  if not (g.x and g.y and g.w and g.h) then return end
+  local nx, ny = g.x, g.y
+  if g.x + g.w > a.x + a.w then nx = a.x + a.w - g.w end
+  if g.y + g.h > a.y + a.h then ny = a.y + a.h - g.h end
+  if nx < a.x then nx = a.x end
+  if ny - hb < a.y then ny = a.y + hb end           -- barra de título dentro da área também
+  if nx ~= g.x or ny ~= g.y then
+    hl.dispatch(hl.dsp.window.move({ x = nx, y = ny, window = sel(w) }))
+  end
+end
+
 -- Guarda a posição de solta antes de maximizar/encaixar (para restaurar depois).
 local function lembrar_solta(w)
   if not estado[w.address] and w.floating and w.fullscreen == 0 then solta[w.address] = geometria(w) end
@@ -557,6 +575,16 @@ hl.on("window.open", function(w)
       estado[w.address] = { modo = "max" }
       posicionar(w)
       gravar()
+    else
+      manter_na_area(w)
+      -- alguns apps (X11) ainda reposicionam a janela logo depois de mapear
+      local addr = w.address
+      hl.timer(function()
+        protegido(function()
+          local v = hl.get_window("address:" .. addr)
+          if v and not estado[addr] then manter_na_area(v) end
+        end)
+      end, { timeout = 300, type = "oneshot" })
     end
   end)
 end)

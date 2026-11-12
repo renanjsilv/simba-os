@@ -815,6 +815,8 @@ static void adiarAcao(PHLWINDOW w, const std::string& acao) {
 }
 
 // Pedidos do próprio app (botões nativos GTK/Chromium/Electron, X11 WM_CHANGE_STATE...).
+static void tratarPedido(PHLWINDOW W, std::optional<bool> mx, std::optional<bool> mn);
+
 static void aoPedidoDeEstado(PHLWINDOWREF ref) {
     const auto W = ref.lock();
     if (!W || !hc::mapeada(W))
@@ -825,12 +827,16 @@ static void aoPedidoDeEstado(PHLWINDOWREF ref) {
         mx = hc::toplevel(W)->m_state.requestsMaximize;
         mn = hc::toplevel(W)->m_state.requestsMinimize;
     } else if (hc::x11(W)) {
-        // no X11 o pedido fica guardado: consome aqui (o Hyprland já leu antes)
+        // (Hyprland < 0.57: o pedido X11 fica guardado; consome aqui)
         mx = hc::x11(W)->m_state.requestsMaximize;
         mn = hc::x11(W)->m_state.requestsMinimize;
         hc::x11(W)->m_state.requestsMaximize.reset();
         hc::x11(W)->m_state.requestsMinimize.reset();
     }
+    tratarPedido(W, mx, mn);
+}
+
+static void tratarPedido(PHLWINDOW W, std::optional<bool> mx, std::optional<bool> mn) {
 
     if (!mx.has_value() && !mn.has_value())
         return;
@@ -871,7 +877,11 @@ static void ouvirJanela(PHLWINDOW w) {
     // O endereço de uma janela fechada pode voltar numa nova (a Steam fecha e reabre janelas o
     // tempo todo): conferir só o endereço deixava a janela nova com o ouvinte da superfície velha
     // e os botões minimizar/maximizar dela não faziam nada. Confere a superfície também.
+#if JANELAS_HL057
+    const auto ALVO = hc::toplevel(w) ? (uintptr_t)hc::toplevel(w).get() : (uintptr_t)&w->backend();
+#else
     const auto ALVO = hc::toplevel(w) ? (uintptr_t)hc::toplevel(w).get() : (hc::x11(w) ? (uintptr_t)hc::x11(w).get() : 0);
+#endif
     if (g->ouvintesEstado.contains(KEY) && g->ouvintesAlvo[KEY] == ALVO)
         return;
     g->ouvintesEstado.erase(KEY);
@@ -880,8 +890,21 @@ static void ouvirJanela(PHLWINDOW w) {
     registrar(std::format("ouvindo pedidos de {} ({})", enderecoDe(w), hc::classe(w)));
     if (hc::toplevel(w))
         g->ouvintesEstado[KEY] = hc::toplevel(w)->m_events.stateChanged.listen([ref] { aoPedidoDeEstado(ref); });
-    else if (hc::x11(w))
+    else if (hc::x11(w)) {
+#if JANELAS_HL057
+        // No Hyprland 0.57 o próprio X11Backend lê o pedido (WM_CHANGE_STATE, _NET_WM_STATE) e
+        // APAGA antes de o stateChanged chegar aqui: o plugin via pedido vazio e os botões
+        // minimizar/maximizar de apps X11 (Steam…) não faziam nada. O pedido segue no
+        // stateRequest do backend da janela, que é o que ouvimos.
+        g->ouvintesEstado[KEY] = w->backend().m_events.stateRequest.listen([ref](Desktop::View::SBackendStateRequest r) {
+            const auto W = ref.lock();
+            if (W && hc::mapeada(W))
+                tratarPedido(W, r.maximized, r.minimized);
+        });
+#else
         g->ouvintesEstado[KEY] = hc::x11(w)->m_events.stateChanged.listen([ref] { aoPedidoDeEstado(ref); });
+#endif
+    }
 }
 
 // O Hyprland anuncia só "fullscreen" e "maximize" em xdg_toplevel.wm_capabilities; sem

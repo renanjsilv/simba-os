@@ -107,7 +107,11 @@ EXCLUIR = [
     ".local/state/simba/notifications", ".local/state/simba/notifications.json",
     # credenciais salvas de apps e modelos que se baixam de novo
     ".config/spotify", ".local/share/draco/models/whisper",
+    # tema de ícones do Simba: vem no sistema (/usr/share/icons); a cópia de antes ia sem os
+    # links internos e, restaurada, ficava por cima do tema bom e sumia com os ícones
+    ".local/share/icons/Yaru-grey", ".local/share/icons/Yaru-gray",
 ]
+LINKS = {}   # links simbólicos vistos no backup: rel → destino (vão em extra/links.json)
 MAX_ARQUIVO = 200 * 1024 * 1024  # arquivos maiores que isso ficam de fora
 
 BRAVE = HOME / ".config/BraveSoftware/Brave-Browser/Default"
@@ -252,6 +256,13 @@ def listar_arquivos(c=None):
                 candidatos = []
                 for d, dirs, arqs in os.walk(raiz, followlinks=False):
                     reld = os.path.relpath(d, HOME)
+                    for x in dirs + arqs:                       # links: só registrados
+                        q = Path(d) / x
+                        if q.is_symlink() and not _excluido(f"{reld}/{x}", excl_extra):
+                            try:
+                                LINKS[os.path.relpath(q, HOME)] = os.readlink(q)
+                            except OSError:
+                                pass
                     dirs[:] = [x for x in dirs
                                if not (_excluido(f"{reld}/{x}", excl_extra) and not _liberado(f"{reld}/{x}", liberar))]
                     candidatos.extend(Path(d) / a for a in arqs)
@@ -337,6 +348,17 @@ def preparar_extras(c, lista=()):
         "tema_boot": plymouth,
         "cripto": bool(c.get("cripto")),
     }
+    # papel de parede atual (é um link: o rclone não segue): a imagem vai junto, para a
+    # restauração aplicar o fundo antes de tudo
+    try:
+        fundo = (HOME / ".local/state/simba/current/background").resolve(strict=True)
+        if fundo.is_file() and fundo.stat().st_size < 60 * 1024 * 1024:
+            (EXTRA / "fundo").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(fundo, EXTRA / "fundo" / fundo.name)
+            meta["fundo"] = str(fundo)
+    except OSError:
+        pass
+    gravar_json(EXTRA / "links.json", LINKS)
     gravar_json(EXTRA / "meta.json", meta)
     return meta
 
@@ -736,19 +758,40 @@ def cmd_restaurar(a):
         dados = remoto_dados(c)
         carimbo = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         guarda = HOME / ".local/share/conta/antes-da-restauracao" / carimbo
-        salvar_estado(progresso=_t("Baixando arquivos…"), erro="")
+        salvar_estado(progresso=_t("Trazendo o papel de parede…"), erro="")
         try:
+            _restaurar_fundo(dados)
+            salvar_estado(progresso=_t("Baixando arquivos…"), erro="")
+            # shell.json (barra) fica de fora daqui e entra por último, de uma vez: no meio da
+            # cópia a barra não achava a configuração, caía no padrão e podia gravar ele por cima
             p = subprocess.Popen([rclone_bin(), "copy", f"{dados}/home", str(HOME), "--backup-dir", str(guarda),
                                   "--exclude", "/.local/share/conta/antes-da-restauracao/**",
+                                  "--exclude", "/.config/simba/shell.json",
+                                  "--exclude", "/.local/share/icons/Yaru-grey/**", "--exclude", "/.local/share/icons/Yaru-gray/**",
                                   "--stats", "2s", "--stats-one-line", "-v", "--transfers", "8"],
                                  stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
             if _progresso(p, _t("Baixando arquivos")) != 0:
                 raise RuntimeError(_t("falha ao baixar os arquivos"))
+            _restaurar_shell_json(dados, guarda)
+            fo = CACHE / "fundo-original"
+            if fo.exists():
+                if Path(fo.read_text().strip()).is_file():
+                    _aplicar_fundo(fo.read_text().strip())
+                fo.unlink(missing_ok=True)
             ext = CACHE / "restaurar-extra"
             if ext.exists():
                 shutil.rmtree(ext)
             rc("copy", f"{dados}/extra", str(ext))
             meta = ler_json(ext / "meta.json", {})
+            # links que o backup registrou (o rclone não leva links): recria os que faltam
+            for rel, alvo_link in ler_json(ext / "links.json", {}).items():
+                dest = HOME / rel
+                if not os.path.lexists(dest):
+                    try:
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        os.symlink(alvo_link, dest)
+                    except OSError:
+                        pass
             aplicar_modos(ler_json(ext / "modos.json", {}))
             pendente = ""
             # Histórico e favoritos do Brave
@@ -790,6 +833,54 @@ def cmd_restaurar(a):
             salvar_estado(resultado="erro", erro=str(e)[-300:], progresso="")
             avisar(_t("Falha na restauração"), str(e)[-200:], True)
             return 1
+
+
+def _aplicar_fundo(img):
+    if os.environ.get("CONTA_HOME") or not shutil.which("simba-theme-bg-set"):
+        return
+    subprocess.run(["simba-theme-bg-set", str(img)], capture_output=True, timeout=30)
+
+
+def _restaurar_fundo(dados):
+    """Primeiro passo da restauração: o papel de parede, para a máquina já ficar com a cara
+    da pessoa enquanto o resto baixa."""
+    destino = HOME / ".local/share/conta/fundo"
+    try:
+        if destino.exists():
+            shutil.rmtree(destino)
+        destino.mkdir(parents=True)
+        rc("copy", f"{dados}/extra/fundo", str(destino), check=False)
+        meta = json.loads(rc("cat", f"{dados}/extra/meta.json", check=False).stdout or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return
+    original = Path(meta.get("fundo") or "")
+    if original.name and original.is_file():          # imagem do sistema que existe aqui também
+        _aplicar_fundo(original)
+        return
+    copia = next((f for f in destino.iterdir() if f.is_file()), None)
+    if copia:
+        _aplicar_fundo(copia)
+        # depois que os arquivos voltarem, aponta para o lugar original (ex.: ~/Imagens/x.jpg)
+        if original.name:
+            CACHE.mkdir(parents=True, exist_ok=True)
+            (CACHE / "fundo-original").write_text(str(original))
+
+
+def _restaurar_shell_json(dados, guarda):
+    """A configuração da barra entra por último e de uma vez (troca atômica)."""
+    alvo = HOME / ".config/simba/shell.json"
+    tmp = alvo.with_name("shell.json.restaurando")
+    try:
+        r = rc("copyto", f"{dados}/home/.config/simba/shell.json", str(tmp), check=False)
+        if r.returncode != 0 or not tmp.exists():
+            return
+        json.loads(tmp.read_text())                      # só entra se for JSON válido
+        if alvo.exists():
+            (guarda / ".config/simba").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(alvo, guarda / ".config/simba/shell.json")
+        os.replace(tmp, alvo)
+    except (OSError, ValueError):
+        tmp.unlink(missing_ok=True)
 
 
 def aplicar_modos(modos):

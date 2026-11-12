@@ -313,7 +313,7 @@ Pagina {
     Linha {
       chave: "sobreApp"; glifo: Icones.cog
       titulo: I18n.t("Configurações")
-      descricao: I18n.t("Feito em Quickshell, com as cores e a fonte do tema atual. Código em ~/.config/quickshell/configuracoes · preferências em ~/.config/configuracoes · Super+P, clique direito na área de trabalho e esta janela rodam no mesmo processo.")
+      descricao: I18n.t("Feito em Quickshell, com as cores e a fonte do tema atual. Código em /etc/xdg/quickshell/configuracoes · preferências em ~/.config/configuracoes · Super+P, clique direito na área de trabalho e esta janela rodam no mesmo processo.")
       Botao { texto: I18n.t("Pasta"); onClicado: Sistema.solto(["xdg-open", Quickshell.shellDir]) }
     }
   }

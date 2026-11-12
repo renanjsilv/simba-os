@@ -701,7 +701,6 @@
  "Fechar todas as janelas": "Close all windows",
  "Feche o %1 antes": "Close %1 first",
  "Feche o Brave e rode `conta brave` para trazer o histórico e os favoritos.": "Close Brave and run `conta brave` to bring back the history and bookmarks.",
- "Feito em Quickshell, com as cores e a fonte do tema atual. Código em ~/.config/quickshell/configuracoes · preferências em ~/.config/configuracoes · Super+P, clique direito na área de trabalho e esta janela rodam no mesmo processo.": "Made with Quickshell, using the current theme's colors and font. Code in ~/.config/quickshell/configuracoes · preferences in ~/.config/configuracoes · Super+P, desktop right-click and this window run in the same process.",
  "Fica de fora": "Left out",
  "Ficha completa (fastfetch)": "Full system info (fastfetch)",
  "Fila": "Queue",
@@ -2368,5 +2367,7 @@
  "Chamada em andamento": "Call in progress",
  "No navegador": "In the browser",
  " · microfone ligado": " · microphone on",
- " · mudo": " · muted"
+ " · mudo": " · muted",
+ "Feito em Quickshell, com as cores e a fonte do tema atual. Código em /etc/xdg/quickshell/configuracoes · preferências em ~/.config/configuracoes · Super+P, clique direito na área de trabalho e esta janela rodam no mesmo processo.": "Made with Quickshell, using the current theme's colors and font. Code in /etc/xdg/quickshell/configuracoes · preferences in ~/.config/configuracoes · Super+P, desktop right-click and this window run in the same process.",
+ "Trazendo o papel de parede…": "Bringing back the wallpaper…"
 }

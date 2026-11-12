@@ -92,9 +92,10 @@ Item {
       visible: img.status === Image.Ready
       shadowEnabled: true
       shadowColor: "#000000"
-      shadowOpacity: 0.45
-      shadowBlur: 0.5
-      shadowVerticalOffset: 2
+      // tema claro: sombra leve (a de 45% virava um contorno preto em volta dos ícones)
+      shadowOpacity: Tema.escuro ? 0.45 : 0.16
+      shadowBlur: Tema.escuro ? 0.5 : 0.35
+      shadowVerticalOffset: Tema.escuro ? 2 : 1
       autoPaddingEnabled: true
     }
     // image thumbnails get a thin photo frame

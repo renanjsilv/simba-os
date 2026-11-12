@@ -62,11 +62,15 @@ Item {
     // se nenhum atalho tiver aquele nome. Antes valia o primeiro lido, e os atalhos de jogo
     // da Steam (Exec=steam steam://rungameid/…) às vezes ganhavam a chave "steam": a
     // janela da Steam aparecia com o ícone de um jogo, trocando quando a lista era relida.
-    var forte = {}, fraco = {}
+    var forte = {}, fraco = {}, classeDona = {}
     var apps = DesktopEntries.applications.values
     for (var i = 0; i < apps.length; i++) {
       var d = apps[i]
       if (!d || d.noDisplay) continue
+      // StartupWMClass primeiro: um atalho que reivindica a classe (a Loja do Simba reivindica a
+      // janela do Bazaar) ganha do atalho que só tem o mesmo id
+      if (d.startupClass && classeDona[String(d.startupClass).toLowerCase()] === undefined)
+        classeDona[String(d.startupClass).toLowerCase()] = d.id
       var chaves = [d.id, d.startupClass]
       var ex = String(d.execString || "")
       var m = ex.match(/simba-launch-webapp\s+["']?https?:\/\/(?:www\.)?([^\/\s"']+)/)
@@ -85,6 +89,7 @@ Item {
       }
     }
     for (var b in fraco) if (forte[b] === undefined) forte[b] = fraco[b]
+    for (var cd in classeDona) forte[cd] = classeDona[cd]
     indice = forte
   }
   Connections { target: DesktopEntries; function onApplicationsChanged() { reindexarAdiado.restart(); if (!varrerIcones.running) varrerIcones.running = true } }
@@ -208,7 +213,7 @@ Item {
     running: true
     // Pastas do tema de ícones ativo e dos que ele herda (index.theme), na ordem de
     // busca — a mesma do menu Iniciar (configuracoes/bin/icones cadeia).
-    command: ["bash", "-c", 'for b in $("$HOME/.config/quickshell/configuracoes/bin/icones" cadeia) "$HOME/.local/share/icons"; do [[ -d $b ]] || continue; for ext in svg png; do find -L "$b" \\( -path "*/apps/*" -o -path "*/mimetypes/*" \\) -not -path "*symbolic*" -name "*.$ext" 2>/dev/null | sort -r -V; done; done; find /usr/share/pixmaps -maxdepth 1 \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null']
+    command: ["bash", "-c", 'for b in $(/etc/xdg/quickshell/configuracoes/bin/icones cadeia || printf "/usr/share/icons/hicolor\\n") "$HOME/.local/share/icons"; do [[ -d $b ]] || continue; for ext in svg png; do find -L "$b" \\( -path "*/apps/*" -o -path "*/mimetypes/*" \\) -not -path "*symbolic*" -name "*.$ext" 2>/dev/null | sort -r -V; done; done; find /usr/share/pixmaps -maxdepth 1 \\( -name "*.svg" -o -name "*.png" \\) 2>/dev/null']
     stdout: SplitParser {
       onRead: function(l) {
         var nome = l.slice(l.lastIndexOf("/") + 1).replace(/\.(svg|png)$/, "")

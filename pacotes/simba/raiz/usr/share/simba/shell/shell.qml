@@ -35,23 +35,87 @@ ShellRoot {
   // Bundled fallback so the shell can start even when the default shell.json is
   // missing or unreadable. The bar config here mirrors the on-disk defaults
   // closely enough to render a usable bar; not authoritative.
+  // Último recurso (sem shell.json do usuário nem o padrão do sistema): a barra do Simba
+  // (embaixo, Menu Iniciar e barra de tarefas). Antes era a barra do Omarchy, em cima.
   readonly property var builtinShellConfig: ({
-    version: 1,
-    idle: {
-      screensaver: 150,
-      lock: 300
+    "bar": {
+      "layout": {
+        "center": [],
+        "left": [
+          {
+            "id": "botaoiniciar",
+            "type": "qml"
+          },
+          {
+            "abertos": true,
+            "cliqueMinimiza": true,
+            "estiloIcones": "coloridos",
+            "fixados": [
+              "brave-browser",
+              "com.simba.Explorador",
+              "simba-loja"
+            ],
+            "id": "tarefas",
+            "rotulos": false,
+            "soEstaTela": false,
+            "tamanho": 18,
+            "type": "qml"
+          }
+        ],
+        "right": [
+          {
+            "apps": [],
+            "id": "bandeja",
+            "ocultos": [
+              {
+                "id": "simba.agents"
+              },
+              {
+                "id": "simba.bluetooth"
+              },
+              {
+                "id": "simba.monitor"
+              }
+            ],
+            "type": "qml"
+          },
+          {
+            "id": "atualizacoes",
+            "type": "qml"
+          },
+          {
+            "id": "central",
+            "type": "qml"
+          },
+          {
+            "format": "HH:mm",
+            "formatAlt": "dddd, d 'de' MMMM 'de' yyyy",
+            "id": "simba.clock",
+            "partes": {
+              "data": "dd/MM",
+              "h12": false,
+              "segundos": false
+            },
+            "verticalFormat": "HH\n—\nmm"
+          }
+        ]
+      },
+      "position": "bottom",
+      "transparency": 90,
+      "transparent": true
     },
-    bar: {
-      position: "top",
-      transparent: false,
-      centerAnchor: "simba.clock",
-      layout: {
-        left: [{ id: "simba.menu" }, { id: "simba.workspaces" }],
-        center: [{ id: "simba.clock", format: "dddd HH:mm" }],
-        right: [{ id: "simba.audio" }]
+    "cloneSourceRestores": [
+      "simbaos.bloqueio"
+    ],
+    "disabledPlugins": [
+      "simba.lock"
+    ],
+    "plugins": [
+      {
+        "id": "simbaos.bloqueio"
       }
-    },
-    plugins: []
+    ],
+    "version": 1
   })
 
   property var defaultsConfig: builtinShellConfig

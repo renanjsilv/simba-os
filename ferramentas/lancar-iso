@@ -24,6 +24,9 @@ echo "── Simba OS $VERSAO — log em $LOG"
 avisar() { notify-send -a "Simba OS" -i "$1" "$2" "$3" 2>/dev/null || true; }
 trap 'avisar dialog-error-symbolic "ISO $VERSAO: erro" "Parou na linha $LINENO. Log: $LOG"' ERR
 
+# sem terminal (rodado pelo chat/atalho): a senha de administrador vem pela janela do Simba
+if [ ! -t 0 ] && [ -n "${SUDO_ASKPASS:-}" ]; then sudo() { command sudo -A "$@"; }; fi
+
 echo "── senhas (só agora no começo)"
 sudo -v                                        # administrador (fica valendo durante o build)
 ( while sleep 50; do sudo -n true 2>/dev/null || exit; done ) &   # mantém o sudo vivo

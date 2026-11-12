@@ -187,9 +187,11 @@ Item {
           color: root.alfa(root.texto, root.escuro ? 0.06 : 0.05)
           border.width: 1; border.color: root.alfa(root.texto, 0.08)
           Row {
-            anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+            // vai até os botões da direita (antes a largura era fixa e o texto passava por baixo deles)
+            anchors { left: parent.left; leftMargin: 12; right: botoesChamada.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
             spacing: 10
             Rectangle {
+              id: iconeChamada
               width: 36; height: 36; radius: 18; anchors.verticalCenter: parent.verticalCenter
               color: "#c42b1c"
               Text { anchors.centerIn: parent; text: "\u{F0567}"; color: "white"; font.family: root.fonte; font.pixelSize: 18 }
@@ -198,16 +200,16 @@ Item {
             }
             Column {
               anchors.verticalCenter: parent.verticalCenter
-              width: 190
+              width: parent.width - iconeChamada.width - parent.spacing
               Text { width: parent.width; text: I18n.t("Chamada em andamento"); color: root.texto; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
               Text {
                 width: parent.width; elide: Text.ElideRight; color: root.texto; opacity: 0.72; font.pixelSize: 10
-                text: (root.chamada.plataforma || I18n.t("No navegador")) + (!root.chamada.controle ? I18n.t(" · microfone desligado na chamada")
-                      : (root.chamada.mudo ? I18n.t(" · microfone mudo") : I18n.t(" · microfone ligado")))
+                text: (root.chamada.plataforma || I18n.t("No navegador")) + (root.chamada.mudo ? I18n.t(" · mudo") : I18n.t(" · microfone ligado"))
               }
             }
           }
           Row {
+            id: botoesChamada
             anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
             spacing: 6
             Rectangle {

@@ -58,7 +58,11 @@ Item {
   // Exec e, para web apps do Simba (Brave --app), o host da URL.
   property var indice: ({})
   function reindexar() {
-    var idx = {}
+    // Duas camadas: o id do atalho e o StartupWMClass mandam; o binário do Exec só vale
+    // se nenhum atalho tiver aquele nome. Antes valia o primeiro lido, e os atalhos de jogo
+    // da Steam (Exec=steam steam://rungameid/…) às vezes ganhavam a chave "steam": a
+    // janela da Steam aparecia com o ícone de um jogo, trocando quando a lista era relida.
+    var forte = {}, fraco = {}
     var apps = DesktopEntries.applications.values
     for (var i = 0; i < apps.length; i++) {
       var d = apps[i]
@@ -67,17 +71,21 @@ Item {
       var ex = String(d.execString || "")
       var m = ex.match(/simba-launch-webapp\s+["']?https?:\/\/(?:www\.)?([^\/\s"']+)/)
       if (m) chaves.push("web:" + m[1].toLowerCase())
-      else {
-        var bin = ex.replace(/^(env\s+(\S+=\S+\s+)*)/, "").split(/\s+/)[0] || ""
-        bin = bin.split("/").pop()
-        if (bin && ["env", "xdg-terminal-exec", "uwsm-app", "gtk-launch", "flatpak"].indexOf(bin) < 0) chaves.push(bin)
-      }
       for (var k = 0; k < chaves.length; k++) {
         var c = String(chaves[k] || "").toLowerCase()
-        if (c && idx[c] === undefined) idx[c] = d.id
+        if (c && forte[c] === undefined) forte[c] = d.id
+      }
+      if (!m) {
+        var partes = ex.replace(/^(env\s+(\S+=\S+\s+)*)/, "").split(/\s+/)
+        var bin = (partes[0] || "").split("/").pop().toLowerCase()
+        // atalho que só abre um link do app (steam://, heroic://…) não é o app
+        var link = /^[a-z][a-z0-9+.-]*:\/\//i.test(partes[1] || "")
+        if (bin && !link && ["env", "xdg-terminal-exec", "uwsm-app", "gtk-launch", "flatpak"].indexOf(bin) < 0 && fraco[bin] === undefined)
+          fraco[bin] = d.id
       }
     }
-    indice = idx
+    for (var b in fraco) if (forte[b] === undefined) forte[b] = fraco[b]
+    indice = forte
   }
   Connections { target: DesktopEntries; function onApplicationsChanged() { reindexarAdiado.restart(); if (!varrerIcones.running) varrerIcones.running = true } }
   Timer { id: reindexarAdiado; interval: 400; onTriggered: root.reindexar() }

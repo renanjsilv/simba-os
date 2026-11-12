@@ -50,6 +50,15 @@ if [[ ${1:-} == "-y" ]] || simba-update-confirm; then
   simba-update-mise
   simba-update-orphan-pkgs
 
+  # Escritório (WordCraft, GridCraft…) vem das releases do GitHub, fora do pacman: sem isto,
+  # atualizar o sistema deixava o aviso de atualizações da barra preso nelas
+  if [[ -x /usr/bin/simba-craft-atualizar ]] && simba-craft-atualizar --verificar 2>/dev/null | grep -q '→'; then
+    echo -e "\e[32m\nAtualizando o Escritório\e[0m"
+    sudo /usr/bin/simba-craft-atualizar || true
+  fi
+  # o contador da barra é recalculado já (antes só no próximo ciclo de verificação)
+  setsid simba-atualizar verificar >/dev/null 2>&1 < /dev/null &
+
   simba-update-analyze-logs
   simba-update-status
 

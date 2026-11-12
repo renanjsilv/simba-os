@@ -3,7 +3,7 @@
 # Derivado do Omarchy (MIT, ver /usr/share/licenses/simba/omarchy-MIT.txt).
 pkgname=simba
 pkgver=1.1.9
-pkgrel=15
+pkgrel=16
 pkgdesc="Simba OS: área de trabalho, ferramentas e configurações do sistema"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"

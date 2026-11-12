@@ -99,7 +99,13 @@ Item {
   readonly property int normalPopupDuration: 8000
   readonly property int maxPopupDuration: 30000
 
+  // Simba: todo aviso some sozinho em 5 s (inclusive os críticos, que antes ficavam até
+  // um clique) e vai para o histórico. popupDuration > 0 manda; 0 volta ao comportamento
+  // original abaixo.
+  readonly property int popupDuration: 5000
+
   function durationFor(urgency, expireTimeout) {
+    if (popupDuration > 0) return popupDuration
     switch (urgency) {
     case NotificationUrgency.Critical:
       return 0

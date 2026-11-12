@@ -127,7 +127,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=idle
-ExecStartPre=-/usr/bin/plymouth quit
+# --retain-splash: o gato do Simba fica na tela até o instalador desenhar (antes ficava tudo preto)
+ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStart=/usr/local/bin/instalar-clone
 StandardInput=tty
 StandardOutput=tty
@@ -147,3 +148,14 @@ ln -sf /etc/systemd/system/instalador.service "$A/etc/systemd/system/multi-user.
 # sem o leitor de tela/áudio do live do Arch
 rm -f "$A/etc/systemd/system/multi-user.target.wants/livecd-talk.service" \
   "$A/etc/systemd/system/sound.target.wants/livecd-alsa-unmuter.service"
+# Boot do pendrive mais rápido: o instalador não usa nada disto (cloud-init procura configuração
+# de nuvem e espera a rede; pacman-init gera chaves que o instalador não usa — ele usa o pacman
+# do sistema instalado; espelhos, SSH e modem idem). A rede (networkd/iwd) continua: o driver
+# NVIDIA, quando precisa, vem pela internet.
+rm -rf "$A/etc/systemd/system/cloud-init.target.wants"
+for u in pacman-init choose-mirror sshd ModemManager; do
+  rm -f "$A/etc/systemd/system/multi-user.target.wants/$u.service"
+done
+for u in cloud-init-local cloud-init-main cloud-init-network cloud-config cloud-final pacman-init; do
+  ln -sf /dev/null "$A/etc/systemd/system/$u.service"
+done

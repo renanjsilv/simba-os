@@ -30,7 +30,7 @@ CLONE=${GERAR_ISO_CLONE:-}
 case $MODO in sistema|pessoal|distribuivel) ;; *) echo "modo inválido: $MODO" >&2; exit 2 ;; esac
 [ "$MODO" = pessoal ] || LOGINS=0
 etapa() { [ -n "$GUI" ] && printf '@@ETAPA %s %s\n' "$1" "$2"; return 0; }
-msg()  { printf '\n\e[1;34m==>\e[0m \e[1m%s\e[0m\n' "$*"; }
+msg()  { printf '\n\e[1;34m==>\e[0m \e[1m[%s] %s\e[0m\n' "$(date +%H:%M:%S)" "$*"; }
 info() { printf '    %s\n' "$*"; }
 warn() { printf '\e[1;33m  ! %s\e[0m\n' "$*"; }
 die()  { printf '\n\e[1;31mERRO: %s\e[0m\n' "$*" >&2; exit 1; }
@@ -332,9 +332,28 @@ cp -r /usr/share/archiso/configs/releng "$PROFILE"
 
 "$SRC/perfil-live" "$PROFILE" "$NOME" "$WORK/marca" "$OWNER"
 
-mkarchiso -v -w "$WORK/archiso-work" -o "$WORK/out" "$PROFILE"
-BASE_ISO=$(ls "$WORK"/out/*.iso)
-rm -rf "$WORK/archiso-work"
+# O sistema do pendrive só muda quando muda o perfil (archiso, perfil-live, marca): reaproveita o
+# da última montagem com o mesmo perfil (até 7 dias, por causa das atualizações do Arch). O
+# instalador vai sempre o novo: a ISO usa /clone/instalar-clone, mapeado logo abaixo.
+CACHE_LIVE="$OUTBASE/.cache-live"
+# (PNG guarda a data em que foi gerado: das imagens conta só a assinatura dos pixels)
+CHAVE_LIVE=$( { pacman -Q archiso 2>/dev/null; echo "$NOME|$OWNER"
+  cd "$PROFILE" && find . -type f ! -path './airootfs/usr/local/bin/instalar-clone*' | sort | while read -r f; do
+    case $f in *.png) printf '%s %s\n' "$(magick identify -format '%#' "$f" 2>/dev/null)" "$f" ;;
+               *) sha256sum "$f" ;; esac
+  done; } | sha256sum | cut -c1-16)
+find "$CACHE_LIVE" -name '*.iso' -mtime +7 -delete 2>/dev/null || true
+if [ -z "${GERAR_ISO_SEM_CACHE:-}" ] && [ -f "$CACHE_LIVE/$CHAVE_LIVE.iso" ]; then
+  info "sistema do pendrive igual ao da última vez: reaproveitado ($CHAVE_LIVE)"
+  BASE_ISO="$CACHE_LIVE/$CHAVE_LIVE.iso"
+else
+  mkarchiso -v -w "$WORK/archiso-work" -o "$WORK/out" "$PROFILE"
+  BASE_ISO=$(ls "$WORK"/out/*.iso)
+  rm -rf "$WORK/archiso-work"
+  mkdir -p "$CACHE_LIVE"
+  ls -t "$CACHE_LIVE"/*.iso 2>/dev/null | tail -n +3 | xargs -r rm -f    # guarda só as 2 últimas
+  cp "$BASE_ISO" "$CACHE_LIVE/$CHAVE_LIVE.iso"
+fi
 
 # ---------------------------------------------------------------- clone na ISO
 etapa embutir "Embutindo o clone na ISO"

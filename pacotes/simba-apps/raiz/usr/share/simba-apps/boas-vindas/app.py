@@ -154,6 +154,46 @@ def svg_escritorio(fg, bg, ac):
     return _t("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 240 200\">\n  %1%2%3%4\n</svg>", doc(6, -12, "#2b6be3", "W"), doc(58, -4, "#1f9d57", "X"), doc(108, 4, "#e2672b", "P"), doc(158, 12, "#d6333f", "PDF"))
 
 
+def svg_wifi(fg, bg, ac):
+    return ("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 240 200\">"
+            f"<circle cx=\"120\" cy=\"104\" r=\"84\" fill=\"{fg}\" fill-opacity=\".06\"/>"
+            f"<path d=\"M50 92a100 100 0 0 1 140 0\" fill=\"none\" stroke=\"{fg}\" stroke-opacity=\".35\" stroke-width=\"14\" stroke-linecap=\"round\"/>"
+            f"<path d=\"M74 118a66 66 0 0 1 92 0\" fill=\"none\" stroke=\"{fg}\" stroke-opacity=\".6\" stroke-width=\"14\" stroke-linecap=\"round\"/>"
+            f"<path d=\"M98 144a32 32 0 0 1 44 0\" fill=\"none\" stroke=\"{fg}\" stroke-width=\"14\" stroke-linecap=\"round\"/>"
+            f"<circle cx=\"120\" cy=\"166\" r=\"9\" fill=\"{fg}\"/></svg>")
+
+
+def nmcli(*args, timeout=20):
+    return subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=timeout)
+
+
+def internet_ok():
+    try:
+        return nmcli("-t", "networking", "connectivity", "check", timeout=10).stdout.strip() == "full"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def redes_wifi():
+    """[(ssid, sinal, protegida, em_uso)] — uma por nome, a de sinal mais forte."""
+    try:
+        out = nmcli("-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "auto").stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    vistas = {}
+    for linha in out.splitlines():
+        partes = linha.replace("\\:", "\0").split(":")
+        if len(partes) < 4:
+            continue
+        uso, ssid, sinal, seg = [x.replace("\0", ":") for x in partes[:4]]
+        if not ssid:
+            continue
+        sinal = int(sinal or 0)
+        if ssid not in vistas or sinal > vistas[ssid][1]:
+            vistas[ssid] = (ssid, sinal, bool(seg and seg != "--"), uso == "*")
+    return sorted(vistas.values(), key=lambda r: (not r[3], -r[1]))
+
+
 def svg_pronto(fg, bg, ac):
     return _t("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 240 200\">\n  <circle cx=\"120\" cy=\"100\" r=\"84\" fill=\"%1\" fill-opacity=\".06\"/>\n  <circle cx=\"120\" cy=\"100\" r=\"64\" fill=\"%2\"/>\n  <path d=\"M90 101l20 20 42-44\" fill=\"none\" stroke=\"%3\" stroke-width=\"12\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/>\n  <g fill=\"%4\" fill-opacity=\".5\"><circle cx=\"34\" cy=\"52\" r=\"5\"/><circle cx=\"206\" cy=\"40\" r=\"4\"/>\n  <circle cx=\"214\" cy=\"150\" r=\"6\"/><circle cx=\"26\" cy=\"150\" r=\"3.5\"/><circle cx=\"64\" cy=\"22\" r=\"3\"/></g>\n</svg>", fg, fg, bg, fg)
 
@@ -200,7 +240,7 @@ class Janela(Adw.ApplicationWindow):
 
         self.carrossel = Adw.Carousel(allow_scroll_wheel=False, spacing=0, hexpand=True, vexpand=True)
         self.carrossel.connect("page-changed", self.pagina_mudou)
-        for montar in (self.p_inicio, self.p_conta, self.p_draco, self.p_aparencia,
+        for montar in (self.p_inicio, self.p_wifi, self.p_conta, self.p_draco, self.p_aparencia,
                        self.p_loja, self.p_escritorio, self.p_atalhos, self.p_pronto):
             self.carrossel.append(montar())
         vista.set_content(self.carrossel)
@@ -300,6 +340,95 @@ class Janela(Adw.ApplicationWindow):
                            _t("Rápido, bonito e feito para o seu dia a dia. Em menos de um minuto "
                            "mostramos o que dá para fazer por aqui."),
                            self.mascote, tamanho=190)
+
+    def p_wifi(self):
+        caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=440)
+        self.wifi_estado = Gtk.Label(label=_t("Procurando redes…"))
+        self.wifi_estado.add_css_class("estado")
+        self.wifi_lista = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.wifi_lista.add_css_class("boxed-list")
+        self.wifi_lista.connect("row-activated", lambda _l, linha: self.wifi_escolher(linha.ssid, linha.protegida))
+        rolagem = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER, min_content_height=150,
+                                     max_content_height=170, propagate_natural_height=True)
+        rolagem.set_child(self.wifi_lista)
+        self.wifi_rolagem = rolagem
+        atualizar = Gtk.Button(label=_t("Procurar de novo"), halign=Gtk.Align.CENTER)
+        atualizar.add_css_class("flat")
+        atualizar.connect("clicked", lambda *_: self.wifi_atualizar())
+        caixa.append(self.wifi_estado)
+        caixa.append(rolagem)
+        caixa.append(atualizar)
+        GLib.timeout_add(400, lambda: (self.wifi_atualizar(), False)[1])
+        return self.pagina(_t("Conecte-se à internet"),
+                           _t("Escolha a sua rede Wi-Fi. Com internet, o próximo passo já traz a sua conta Google."),
+                           svg_wifi, caixa, tamanho=130)
+
+    def wifi_atualizar(self):
+        self.wifi_estado.set_label(_t("Procurando redes…"))
+
+        def ler():
+            return internet_ok(), redes_wifi()
+
+        def pronto(r):
+            if not r:
+                return
+            ok, redes = r
+            while (linha := self.wifi_lista.get_row_at_index(0)) is not None:
+                self.wifi_lista.remove(linha)
+            for ssid, sinal, protegida, uso in redes[:12]:
+                linha = Adw.ActionRow(title=GLib.markup_escape_text(ssid), activatable=not uso)
+                linha.ssid, linha.protegida = ssid, protegida
+                barras = "network-wireless-signal-" + ("excellent" if sinal > 75 else "good" if sinal > 50 else "ok" if sinal > 25 else "weak") + "-symbolic"
+                linha.add_prefix(Gtk.Image(icon_name=barras))
+                if uso:
+                    linha.set_subtitle(_t("Conectado"))
+                    linha.add_suffix(Gtk.Image(icon_name="object-select-symbolic"))
+                elif protegida:
+                    linha.add_suffix(Gtk.Image(icon_name="system-lock-screen-symbolic"))
+                self.wifi_lista.append(linha)
+            self.wifi_rolagem.set_visible(bool(redes))
+            if ok:
+                self.wifi_estado.set_label(_t("✓  Você está conectado à internet. Pode seguir."))
+            elif not redes:
+                self.wifi_estado.set_label(_t("Nenhuma rede Wi-Fi encontrada. Use um cabo de rede ou procure de novo."))
+            else:
+                self.wifi_estado.set_label(_t("Escolha a sua rede:"))
+        em_segundo_plano(ler, pronto)
+
+    def wifi_escolher(self, ssid, protegida):
+        if not protegida:
+            self.wifi_conectar(ssid, "")
+            return
+        d = Adw.AlertDialog(heading=_t("Senha do Wi-Fi"), body=ssid)
+        campo = Gtk.PasswordEntry(show_peek_icon=True, activates_default=True)
+        d.set_extra_child(campo)
+        d.add_response("cancelar", _t("Cancelar"))
+        d.add_response("conectar", _t("Conectar"))
+        d.set_response_appearance("conectar", Adw.ResponseAppearance.SUGGESTED)
+        d.set_default_response("conectar")
+        d.set_close_response("cancelar")
+        d.connect("response", lambda _d, r: r == "conectar" and self.wifi_conectar(ssid, campo.get_text()))
+        d.present(self)
+        GLib.idle_add(campo.grab_focus)
+
+    def wifi_conectar(self, ssid, senha):
+        self.wifi_estado.set_label(_t("Conectando a %1…", ssid))
+
+        def ligar():
+            args = ["device", "wifi", "connect", ssid] + (["password", senha] if senha else [])
+            return nmcli(*args, timeout=45)
+
+        def pronto(r):
+            if r is not None and r.returncode == 0:
+                self.toast(_t("Conectado a %1", ssid))
+            else:
+                erro = (r.stderr if r is not None else "") or ""
+                self.wifi_estado.set_label(_t("Senha incorreta ou rede fora de alcance. Tente de novo.")
+                                           if "Secrets" in erro or "802-11" in erro or "senha" in erro.lower()
+                                           else _t("Não deu para conectar a %1. Tente de novo.", ssid))
+            GLib.timeout_add(1500, lambda: (self.wifi_atualizar(), False)[1])
+        em_segundo_plano(ligar, pronto)
+        return True
 
     def p_conta(self):
         caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
@@ -445,9 +574,12 @@ class Janela(Adw.ApplicationWindow):
         self.voltar.set_opacity(1 if indice > 0 else 0)
         self.proximo.set_label(_t("Começar a usar") if ultima else (_t("Vamos lá") if indice == 0 else _t("Próximo")))
         self.pular.set_visible(not ultima)
+        # 0 início · 1 Wi-Fi · 2 conta · 3 Draco · 4 aparência · 5 Loja · 6 Escritório · 7 atalhos · 8 pronto
         if indice == 1:
+            self.wifi_atualizar()
+        if indice == 2:
             self.atualizar_conta()
-        if indice == 5:
+        if indice == 6:
             self.atualizar_office()
         self.proximo.grab_focus()
 

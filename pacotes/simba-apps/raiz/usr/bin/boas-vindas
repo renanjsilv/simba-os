@@ -3,6 +3,13 @@
 # --primeira-vez: só abre se ~/.local/state/simba/boas-vindas-vista não existir (autostart).
 if [[ $1 == --primeira-vez ]]; then
   [[ -e $HOME/.local/state/simba/boas-vindas-vista ]] && exit 0
-  sleep "${BOAS_VINDAS_ATRASO:-3}"   # deixa a barra e o papel de parede subirem primeiro
+  # primeiro a pessoa vê o papel de parede e a barra; depois as boas-vindas (no primeiro boot o
+  # shell demora mais que os 3 s fixos de antes). Espera as duas camadas aparecerem (até 60 s).
+  for _ in $(seq 120); do
+    camadas=$(hyprctl layers -j 2>/dev/null | jq -r '.[].levels[][]?.namespace' 2>/dev/null)
+    grep -qx simba-background <<<"$camadas" && grep -qx simba-bar <<<"$camadas" && break
+    sleep 0.5
+  done
+  sleep "${BOAS_VINDAS_ATRASO:-1.5}"   # o papel de parede termina de aparecer (fade)
 fi
 exec python3 "/usr/share/simba-apps/boas-vindas/app.py" "$@"

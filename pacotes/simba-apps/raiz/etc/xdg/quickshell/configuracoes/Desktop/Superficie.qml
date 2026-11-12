@@ -85,7 +85,21 @@ PanelWindow {
     var r = Math.max(0, Math.min(linhas - 1, Math.round((py - y0) / cel.h)))
     return { c: c, r: r }
   }
-  // Drop an icon: snap to the nearest free cell (or keep the free position).
+  // Solta o ícone arrastado e, se ele fazia parte da seleção, todos os selecionados juntos
+  // (mesmo deslocamento; cada um na célula livre mais perto, sem dois na mesma).
+  function celulaDe(l) { return { c: Math.round((l.x - x0) / cel.w), r: Math.round((l.y - y0) / cel.h) } }
+  function livreMaisPerto(alvo, ocupadas) {
+    var melhor = null
+    for (var raio = 0; raio < Math.max(colunas, linhas) && !melhor; raio++) {
+      for (var dc = -raio; dc <= raio; dc++) for (var dr = -raio; dr <= raio; dr++) {
+        var c = alvo.c + dc, r = alvo.r + dr
+        if (c < 0 || r < 0 || c >= colunas || r >= linhas || ocupadas[c + "," + r]) continue
+        var d = Math.hypot(dc, dr)
+        if (!melhor || d < melhor.d) melhor = { c: c, r: r, d: d }
+      }
+    }
+    return melhor
+  }
   function soltarIcone(it, px, py) {
     // largado em cima da Lixeira: vai para a lixeira (a seleção inteira, como no Windows)
     var lx = lugares["trash:///"]
@@ -94,24 +108,34 @@ PanelWindow {
       return
     }
     if (area.automatico) return
-    if (!area.grade) { area.guardarPosicao(it.nome, { x: Math.round(px), y: Math.round(py) }); return }
-    var alvo = celulaEm(px, py)
-    var livres = {}
-    for (var k in lugares) {
-      if (k === it.caminho) continue
-      var l = lugares[k]
-      livres[Math.round((l.x - x0) / cel.w) + "," + Math.round((l.y - y0) / cel.h)] = true
-    }
-    var melhor = null
-    for (var raio = 0; raio < Math.max(colunas, linhas) && !melhor; raio++) {
-      for (var dc = -raio; dc <= raio; dc++) for (var dr = -raio; dr <= raio; dr++) {
-        var c = alvo.c + dc, r = alvo.r + dr
-        if (c < 0 || r < 0 || c >= colunas || r >= linhas || livres[c + "," + r]) continue
-        var d = Math.hypot(dc, dr)
-        if (!melhor || d < melhor.d) melhor = { c: c, r: r, d: d }
+    var sel = area.selecao.indexOf(it.caminho) >= 0 ? area.selecao : [it.caminho]
+    var l0 = lugares[it.caminho] || { x: px, y: py }
+    var dx = px - l0.x, dy = py - l0.y
+    var grupo = area.itens.filter(function(i) { return sel.indexOf(i.caminho) >= 0 })
+    grupo.sort(function(a, b) { return (a.caminho === it.caminho ? 0 : 1) - (b.caminho === it.caminho ? 0 : 1) })
+    var novas = {}
+    if (!area.grade) {
+      grupo.forEach(function(i) {
+        var l = lugares[i.caminho]
+        if (l) novas[i.nome] = { x: Math.round(l.x + dx), y: Math.round(l.y + dy) }
+      })
+    } else {
+      var ocupadas = {}
+      for (var k in lugares) {
+        if (sel.indexOf(k) >= 0) continue
+        var ck = celulaDe(lugares[k])
+        ocupadas[ck.c + "," + ck.r] = true
       }
+      grupo.forEach(function(i) {
+        var l = lugares[i.caminho]
+        if (!l) return
+        var m = livreMaisPerto(celulaEm(l.x + dx, l.y + dy), ocupadas)
+        if (!m) return
+        ocupadas[m.c + "," + m.r] = true
+        novas[i.nome] = { c: m.c, r: m.r }
+      })
     }
-    if (melhor) area.guardarPosicao(it.nome, { c: melhor.c, r: melhor.r })
+    area.guardarPosicoes(novas)
   }
 
   Item {

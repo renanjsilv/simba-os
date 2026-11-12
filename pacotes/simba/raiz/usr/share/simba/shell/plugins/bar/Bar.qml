@@ -2033,7 +2033,8 @@ Item {
 
     function injectProps() {
       var target = activeItem
-      if (!target) return
+      // callLater pode rodar com a barra ainda montando (ou já desmontada): root ainda não existe
+      if (!target || typeof root === "undefined" || !root) return
       if ("bar" in target) target.bar = firstParty
         ? root : root.pluginBarApiFor(pluginApiId, moduleName, registered)
       if ("moduleName" in target) target.moduleName = moduleName

@@ -124,6 +124,16 @@ Scope {
 
   // ── positions ────────────────────────────────────────────────────────────
   function posicoes() { return Preferencias.obter("area.posicoes", {}) || {} }
+  // arrasto em grupo (como no Windows 11): o ícone sob o mouse é o líder; os outros
+  // selecionados acompanham com o mesmo deslocamento
+  property string arrastoLider: ""
+  property real arrastoDx: 0
+  property real arrastoDy: 0
+  function guardarPosicoes(mapa) {
+    var p = JSON.parse(JSON.stringify(posicoes()))
+    for (var n in mapa) p[n] = mapa[n]
+    Preferencias.definir("area.posicoes", p)
+  }
   function guardarPosicao(nome, pos) {
     var p = JSON.parse(JSON.stringify(posicoes()))
     p[nome] = pos

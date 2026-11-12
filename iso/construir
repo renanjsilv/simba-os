@@ -12,10 +12,10 @@
 #
 # Uso: sudo iso/construir            (precisa de ~15 GB livres e internet)
 #      SIMBA_ISO_SAIDA=/pasta        (padrão: /mnt/dados/simba-iso ou /var/tmp/simba-iso)
-#      SIMBA_ISO_RAPIDA=1            (zstd em vez de xz: gera mais rápido, ISO maior)
+#      SIMBA_ISO_XZ=1                (xz em vez de zstd: ISO ~10–15% menor, bem mais lento)
 set -euo pipefail
 
-msg()  { printf '\n\e[1;34m==>\e[0m \e[1m%s\e[0m\n' "$*"; }
+msg()  { printf '\n\e[1;34m==>\e[0m \e[1m[%s] %s\e[0m\n' "$(date +%H:%M:%S)" "$*"; }
 info() { printf '    %s\n' "$*"; }
 die()  { printf '\n\e[1;31mERRO: %s\e[0m\n' "$*" >&2; exit 1; }
 
@@ -159,11 +159,19 @@ rm -rf "$RAIZ"/var/cache/pacman/pkg/* "$RAIZ"/var/cache/simba-craft/* "$RAIZ"/va
 rm -rf "$RAIZ/root/.cache" "$RAIZ/home/$USUARIO/.cache"
 rm -f "$RAIZ/etc/ssh"/ssh_host_* 2>/dev/null || true
 
+# liga direto no sistema, sem o menu do Limine ("Simba OS > Linux"); Shift no boot abre o menu
+if [ -f "$RAIZ/boot/limine.conf" ]; then
+  sed -i -e '/^#\{0,1\}timeout:/d' -e '/^#\{0,1\}quiet:/d' "$RAIZ/boot/limine.conf"
+  sed -i '1i timeout: 0\nquiet: yes' "$RAIZ/boot/limine.conf"
+fi
+
 # ---------------------------------------------------------------- 5. pacote do sistema
 msg "Compactando o sistema"
 desmontar
-if [ -n "${SIMBA_ISO_RAPIDA:-}" ]; then SQ=(-comp zstd -Xcompression-level 15)
-else SQ=(-comp xz -Xbcj x86 -b 1M); fi
+# zstd por padrão: várias vezes mais rápido que o xz (a ISO fica ~10–15% maior).
+# SIMBA_ISO_XZ=1: xz (menor, bem mais lento).
+if [ -n "${SIMBA_ISO_XZ:-}" ]; then SQ=(-comp xz -Xbcj x86 -b 1M)
+else SQ=(-comp zstd -Xcompression-level 15); fi
 mksquashfs "$RAIZ" "$CLONE/system.sqfs" "${SQ[@]}" -noappend -wildcards -e 'home/*' 'boot/*' 'proc/*' 'sys/*' 'dev/*' 'run/*'
 mksquashfs "$RAIZ/home" "$CLONE/home.sqfs" "${SQ[@]}" -noappend
 tar -C "$RAIZ/boot" -cf "$CLONE/boot.tar" .

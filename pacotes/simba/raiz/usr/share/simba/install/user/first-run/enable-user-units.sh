@@ -19,3 +19,8 @@ systemctl --user enable --now \
   simba-migrate-notify.service \
   simba-fcitx5.service \
   simba-crash-watch.service
+# do simba-apps: canto "mostrar a área de trabalho", encaixe de janelas (Super+Z) e o aviso de
+# atualizações — sem eles, instalação nova ficava sem o canto e sem avisos
+for u in botoes-janela.service simba-atualizar-avisar.timer; do
+  systemctl --user cat "$u" >/dev/null 2>&1 && systemctl --user enable --now "$u" || true
+done

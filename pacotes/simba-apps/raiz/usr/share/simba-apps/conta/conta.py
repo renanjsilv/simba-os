@@ -203,8 +203,18 @@ def conectado():
         return True
     if not rclone_bin():
         return False
-    r = rc("listremotes", check=False)
-    return f"{NOME_REMOTO}:" in r.stdout.split()
+    # O rclone grava o remoto assim que o login COMEÇA (antes de o Google autorizar): só vale
+    # como conectado com o token gravado. Antes as boas-vindas diziam "Conectado" sem login.
+    r = rc("config", "dump", check=False)
+    try:
+        remoto = json.loads(r.stdout or "{}").get(NOME_REMOTO) or {}
+    except ValueError:
+        return False
+    try:
+        token = json.loads(remoto.get("token") or "{}")
+    except ValueError:
+        token = {}
+    return bool(token.get("access_token") or token.get("refresh_token"))
 
 
 class Trava:

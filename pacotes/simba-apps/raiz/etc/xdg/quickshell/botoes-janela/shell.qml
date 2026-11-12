@@ -601,8 +601,10 @@ ShellRoot {
       WlrLayershell.namespace: "botoes-janela-area"
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
       anchors { bottom: true; right: true }
-      implicitWidth: 7
-      implicitHeight: 26
+      // canto do tamanho da barra inteira (antes 7×26: mais baixo que a barra de 35–48 px, o clique
+      // no canto alto da barra caía nela e nada acontecia)
+      implicitWidth: 12
+      implicitHeight: 40
 
       // linha fina que aparece ao passar o mouse, como o separador do Windows 11
       Rectangle {

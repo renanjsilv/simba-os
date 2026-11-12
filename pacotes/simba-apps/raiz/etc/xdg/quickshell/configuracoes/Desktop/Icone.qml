@@ -19,20 +19,22 @@ Item {
 
   width: cel.w - 4
   height: cel.h - 4
-  x: arrasto.drag.active ? x : lugar.x
-  y: arrasto.drag.active ? y : lugar.y
+  // outro ícone selecionado está sendo arrastado: este acompanha
+  readonly property bool seguindo: selecionado && area.arrastoLider !== "" && area.arrastoLider !== item.caminho
+  x: arrasto.drag.active ? x : lugar.x + (seguindo ? area.arrastoDx : 0)
+  y: arrasto.drag.active ? y : lugar.y + (seguindo ? area.arrastoDy : 0)
   z: arrasto.drag.active ? 100 : (selecionado ? 2 : 1)
-  Behavior on x { enabled: !arrasto.drag.active; NumberAnimation { duration: Tema.lento; easing.type: Easing.OutCubic } }
-  Behavior on y { enabled: !arrasto.drag.active; NumberAnimation { duration: Tema.lento; easing.type: Easing.OutCubic } }
+  Behavior on x { enabled: !arrasto.drag.active && !ic.seguindo; NumberAnimation { duration: Tema.lento; easing.type: Easing.OutCubic } }
+  Behavior on y { enabled: !arrasto.drag.active && !ic.seguindo; NumberAnimation { duration: Tema.lento; easing.type: Easing.OutCubic } }
 
-  onXChanged: registrar.restart()
-  onYChanged: registrar.restart()
+  onXChanged: { registrar.restart(); if (arrasto.drag.active) area.arrastoDx = x - lugar.x }
+  onYChanged: { registrar.restart(); if (arrasto.drag.active) area.arrastoDy = y - lugar.y }
   Timer { id: registrar; interval: 400; onTriggered: ic.area.registrar(ic.item.caminho, ic.superficie.nome, ic.lugar.x, ic.lugar.y, ic.width, ic.height) }
   Component.onCompleted: { registrar.restart(); entrada.restart() }
 
   // Entrance: icons pop in one after another (and again on "Atualizar").
   property real revelado: 0
-  opacity: revelado * (arrasto.drag.active ? 0.85 : 1)
+  opacity: revelado * (arrasto.drag.active || seguindo ? 0.85 : 1)
   scale: 0.85 + 0.15 * revelado
   SequentialAnimation {
     id: entrada
@@ -186,13 +188,16 @@ Item {
           ic.area.selecao = s
         } else if (!ic.selecionado) ic.area.selecao = [ic.item.caminho]
       }
+      drag.onActiveChanged: if (drag.active) { ic.area.arrastoDx = 0; ic.area.arrastoDy = 0; ic.area.arrastoLider = ic.item.caminho }
       onReleased: {
+        var lider = ic.area.arrastoLider === ic.item.caminho
         if (drag.active || Math.abs(ic.x - ic.lugar.x) > 3 || Math.abs(ic.y - ic.lugar.y) > 3) {
           ic.superficie.soltarIcone(ic.item, ic.x, ic.y)
           // snap back visually until the new position arrives
-          ic.x = Qt.binding(function() { return arrasto.drag.active ? ic.x : ic.lugar.x })
-          ic.y = Qt.binding(function() { return arrasto.drag.active ? ic.y : ic.lugar.y })
+          ic.x = Qt.binding(function() { return arrasto.drag.active ? ic.x : ic.lugar.x + (ic.seguindo ? ic.area.arrastoDx : 0) })
+          ic.y = Qt.binding(function() { return arrasto.drag.active ? ic.y : ic.lugar.y + (ic.seguindo ? ic.area.arrastoDy : 0) })
         }
+        if (lider) { ic.area.arrastoLider = ""; ic.area.arrastoDx = 0; ic.area.arrastoDy = 0 }
       }
       onDoubleClicked: ic.area.abrirItem(ic.item.caminho)
     }

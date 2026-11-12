@@ -2364,5 +2364,10 @@
  "Lixeira esvaziada": "Trash emptied",
  "Ocultar a Lixeira da área de trabalho": "Hide Trash from the desktop",
  "Lixeira oculta. Para mostrar de novo: botão direito na área de trabalho › Exibir › Mostrar a Lixeira": "Trash hidden. To show it again: right-click the desktop › View › Show Trash",
- "Ícone da Lixeira no canto da área de trabalho": "Trash icon in the corner of the desktop"
+ "Ícone da Lixeira no canto da área de trabalho": "Trash icon in the corner of the desktop",
+ "Chamada em andamento": "Call in progress",
+ "No navegador": "In the browser",
+ " · microfone mudo": " · microphone muted",
+ " · microfone ligado": " · microphone on",
+ " · microfone desligado na chamada": " · microphone off in the call"
 }

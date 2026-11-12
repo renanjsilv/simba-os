@@ -3,6 +3,7 @@ import QtQuick 6.11
 import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
+import Quickshell.Services.Mpris
 import qs.Commons
 
 // Central de controle do Simba OS (como a do Windows 11 / macOS).
@@ -10,6 +11,8 @@ import qs.Commons
 //   clique   abre a central (Wi-Fi, Bluetooth, Não perturbe, Modo escuro,
 //            Luz noturna, Economia de energia, volume, brilho, bateria)
 //   rolar    muda o volume
+// Em cima, como no Windows 11: o que está tocando (MPRIS: capa, nome, anterior/tocar/próxima)
+// e, numa chamada pelo navegador (Meet, Teams…), o aviso com o mudo do microfone dela.
 // Estado e ações: /usr/bin/simba-central.
 Item {
   id: root
@@ -67,6 +70,30 @@ Item {
     reler.restart()
   }
   Timer { id: reler; interval: 450; onTriggered: root.atualizar() }
+
+  // ── chamada no navegador (simba-central chamada) ─────────────────────────
+  property var chamada: ({ ativa: false })
+  Process {
+    id: lerChamada
+    command: [root.ajudante, "chamada"]
+    stdout: StdioCollector { onStreamFinished: { try { root.chamada = JSON.parse(text) } catch (e) {} } }
+  }
+  Timer {
+    interval: 1500; running: painel.visible; repeat: true; triggeredOnStart: true
+    onTriggered: if (!lerChamada.running) lerChamada.running = true
+  }
+  function alternarMudoChamada() {
+    root.chamada = Object.assign({}, root.chamada, { mudo: !root.chamada.mudo })
+    Quickshell.execDetached([root.ajudante, "chamada-mudo"])
+  }
+
+  // ── mídia (MPRIS) ────────────────────────────────────────────────────────
+  // o que está tocando; senão o último com música carregada
+  readonly property var player: {
+    var ps = Mpris.players.values.filter(function(p) { return p && p.trackTitle })
+    var tocando = ps.filter(function(p) { return p.isPlaying })
+    return tocando.length ? tocando[0] : (ps.length ? ps[ps.length - 1] : null)
+  }
 
   // ── botão na barra ───────────────────────────────────────────────────────
   Rectangle {
@@ -127,7 +154,7 @@ Item {
     visible: false
     color: "transparent"
     implicitWidth: 372
-    implicitHeight: caixa.implicitHeight + 24
+    implicitHeight: caixa.implicitHeight + 8 * 2 + 14 * 2   // margem da moldura (8) + do conteúdo (14), em cima e embaixo
     anchor.item: root
     anchor.rect.x: root.vertical ? (root.bar && root.bar.position === "right" ? -implicitWidth - 6 : root.width + 6) : root.width - implicitWidth + 4
     anchor.rect.y: root.vertical ? root.height - implicitHeight : (root.bar && root.bar.position === "bottom" ? -implicitHeight - 6 : root.height + 6)
@@ -151,6 +178,116 @@ Item {
         id: caixa
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
         spacing: 14
+
+        // chamada de vídeo no navegador
+        Rectangle {
+          visible: root.chamada.ativa === true
+          width: parent.width; height: visible ? 60 : 0
+          radius: 12
+          color: root.alfa(root.texto, root.escuro ? 0.06 : 0.05)
+          border.width: 1; border.color: root.alfa(root.texto, 0.08)
+          Row {
+            anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+            spacing: 10
+            Rectangle {
+              width: 36; height: 36; radius: 18; anchors.verticalCenter: parent.verticalCenter
+              color: "#c42b1c"
+              Text { anchors.centerIn: parent; text: "\u{F0567}"; color: "white"; font.family: root.fonte; font.pixelSize: 18 }
+              SequentialAnimation on opacity { running: painel.visible && root.chamada.ativa === true; loops: Animation.Infinite
+                NumberAnimation { to: 0.55; duration: 900 } NumberAnimation { to: 1; duration: 900 } }
+            }
+            Column {
+              anchors.verticalCenter: parent.verticalCenter
+              width: 190
+              Text { width: parent.width; text: I18n.t("Chamada em andamento"); color: root.texto; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
+              Text {
+                width: parent.width; elide: Text.ElideRight; color: root.texto; opacity: 0.72; font.pixelSize: 10
+                text: (root.chamada.plataforma || I18n.t("No navegador")) + (!root.chamada.controle ? I18n.t(" · microfone desligado na chamada")
+                      : (root.chamada.mudo ? I18n.t(" · microfone mudo") : I18n.t(" · microfone ligado")))
+              }
+            }
+          }
+          Row {
+            anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+            spacing: 6
+            Rectangle {
+              width: 36; height: 36; radius: 18
+              color: root.chamada.mudo ? "#c42b1c" : (mMic.containsMouse ? root.alfa(root.texto, 0.14) : root.alfa(root.texto, 0.08))
+              Text { anchors.centerIn: parent; text: root.chamada.mudo ? "\u{F036D}" : "\u{F036C}"; color: root.chamada.mudo ? "white" : root.texto; font.family: root.fonte; font.pixelSize: 17 }
+              // sem fluxo do microfone (desligado na própria chamada) não há o que ligar daqui: abre a chamada
+              MouseArea { id: mMic; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                onClicked: { if (root.chamada.controle) root.alternarMudoChamada(); else { painel.visible = false; Quickshell.execDetached([root.ajudante, "chamada-abrir"]) } } }
+            }
+            Rectangle {
+              visible: !!root.chamada.janela
+              width: 36; height: 36; radius: 18
+              color: mIr.containsMouse ? root.alfa(root.texto, 0.14) : root.alfa(root.texto, 0.08)
+              Text { anchors.centerIn: parent; text: "\u{F03CC}"; color: root.texto; font.family: root.fonte; font.pixelSize: 16 }
+              MouseArea { id: mIr; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                onClicked: { painel.visible = false; Quickshell.execDetached([root.ajudante, "chamada-abrir"]) } }
+            }
+          }
+        }
+
+        // tocando agora (MPRIS)
+        Rectangle {
+          id: midia
+          readonly property var p: root.player
+          visible: p !== null
+          width: parent.width; height: visible ? 76 : 0
+          radius: 12
+          color: root.alfa(root.texto, root.escuro ? 0.06 : 0.05)
+          border.width: 1; border.color: root.alfa(root.texto, 0.08)
+          clip: true
+          Rectangle {
+            id: capa
+            anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+            width: 56; height: 56; radius: 8
+            color: root.alfa(root.texto, 0.10)
+            clip: true
+            Text { anchors.centerIn: parent; visible: arte.status !== Image.Ready; text: "\u{F075A}"; color: root.texto; opacity: 0.6; font.family: root.fonte; font.pixelSize: 24 }
+            Image {
+              id: arte
+              anchors.fill: parent
+              source: midia.p && midia.p.trackArtUrl ? midia.p.trackArtUrl : ""
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true; smooth: true
+              sourceSize: Qt.size(112, 112)
+            }
+          }
+          Column {
+            anchors { left: capa.right; leftMargin: 10; right: controles.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+            spacing: 2
+            Text { width: parent.width; text: midia.p ? midia.p.trackTitle : ""; color: root.texto; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
+            Text {
+              width: parent.width; elide: Text.ElideRight; color: root.texto; opacity: 0.72; font.pixelSize: 10
+              text: midia.p ? (midia.p.trackArtist || midia.p.trackAlbum || "") : ""
+              visible: text !== ""
+            }
+            Text { width: parent.width; text: midia.p ? midia.p.identity : ""; color: root.texto; opacity: 0.5; font.pixelSize: 9; elide: Text.ElideRight }
+          }
+          Row {
+            id: controles
+            anchors { right: parent.right; rightMargin: 8; verticalCenter: parent.verticalCenter }
+            spacing: 2
+            Repeater {
+              model: [
+                { g: "\u{F04AE}", pode: midia.p && midia.p.canGoPrevious, fazer: function() { midia.p.previous() } },
+                { g: midia.p && midia.p.isPlaying ? "\u{F03E4}" : "\u{F040A}", pode: midia.p && midia.p.canTogglePlaying, fazer: function() { midia.p.togglePlaying() }, grande: true },
+                { g: "\u{F04AD}", pode: midia.p && midia.p.canGoNext, fazer: function() { midia.p.next() } }
+              ]
+              delegate: Rectangle {
+                required property var modelData
+                width: modelData.grande ? 36 : 30; height: width; radius: width / 2
+                anchors.verticalCenter: parent.verticalCenter
+                opacity: modelData.pode ? 1 : 0.35
+                color: modelData.grande ? root.realce : (mc.containsMouse && modelData.pode ? root.alfa(root.texto, 0.12) : "transparent")
+                Text { anchors.centerIn: parent; text: parent.modelData.g; color: parent.modelData.grande ? root.sobreRealce : root.texto; font.family: root.fonte; font.pixelSize: parent.modelData.grande ? 18 : 16 }
+                MouseArea { id: mc; anchors.fill: parent; hoverEnabled: true; enabled: !!parent.modelData.pode; cursorShape: Qt.PointingHandCursor; onClicked: parent.modelData.fazer() }
+              }
+            }
+          }
+        }
 
         // botões rápidos (3 × 2)
         Grid {

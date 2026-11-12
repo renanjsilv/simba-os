@@ -3,6 +3,9 @@
 #   simba-central estado               JSON com o estado de todos os botões e controles
 #   simba-central wifi|bluetooth|naoperturbe|escuro|luznoturna|economia   liga/desliga
 #   simba-central volume <0-100> | brilho <1-100> | mudo
+#   simba-central chamada              JSON da chamada no navegador (navegador gravando o microfone)
+#   simba-central chamada-mudo         liga/desliga o mudo do microfone só dessa chamada
+#   simba-central chamada-abrir        traz a janela da chamada para a frente
 set -uo pipefail
 
 wifi_on()  { [[ $(nmcli -t -f WIFI g 2>/dev/null) == enabled ]]; }
@@ -34,8 +37,74 @@ print('true' if .2126*r+.7152*g+.0722*b>.5 else 'false')" 2>/dev/null || echo fa
       bateria:$bat, carregando:$carregando}'
 }
 
+# Chamada de vídeo pelo navegador (Meet, Teams, Zoom, Discord…): um navegador com um fluxo de
+# captura de áudio no PipeWire. O nome da plataforma vem do título da janela do navegador.
+chamada() {
+  local janelas
+  janelas=$(hyprctl clients -j 2>/dev/null || echo '[]')
+  pw-dump 2>/dev/null | JANELAS="$janelas" python3 -c '
+import json, os, re, sys
+NAVEGADORES = re.compile(r"^(brave|brave-browser|chrome|chromium|google-chrome.*|firefox.*|librewolf|zen|msedge|microsoft-edge.*|vivaldi.*|opera.*)$", re.I)
+PLATAFORMAS = [(r"\bMeet\b|meet\.google", "Google Meet"), (r"Teams", "Microsoft Teams"), (r"Zoom", "Zoom"),
+               (r"Discord", "Discord"), (r"Jitsi", "Jitsi Meet"), (r"WhatsApp", "WhatsApp"), (r"Slack", "Slack"),
+               (r"Webex", "Webex"), (r"Whereby", "Whereby"), (r"Skype", "Skype"), (r"Telegram", "Telegram")]
+try:
+    objs = json.load(sys.stdin)
+except Exception:
+    objs = []
+clientes = {o["id"]: ((o.get("info") or {}).get("props") or {}) for o in objs if o.get("type") == "PipeWire:Interface:Client"}
+fluxos = []
+for o in objs:
+    p = (o.get("info") or {}).get("props") or {}
+    if o.get("type") != "PipeWire:Interface:Node" or p.get("media.class") != "Stream/Input/Audio":
+        continue
+    cli = clientes.get(p.get("client.id"), {})   # clientes do pipewire-pulse: o binário fica no cliente
+    binario = os.path.basename(str(p.get("application.process.binary") or cli.get("application.process.binary") or ""))
+    if not NAVEGADORES.match(binario):
+        continue
+    props = ((o.get("info") or {}).get("params") or {}).get("Props") or [{}]
+    fluxos.append({"id": o["id"], "binario": binario, "mudo": bool(props[0].get("mute", False))})
+# microfone desligado na própria chamada (Meet etc.): o navegador para de gravar, mas o cliente
+# de entrada dele ("Brave input") continua conectado. Vale como chamada se houver janela de chamada.
+entrada = any(NAVEGADORES.match(os.path.basename(str(c.get("application.process.binary") or "")))
+              and re.search(r"input", str(c.get("application.name") or ""), re.I) for c in clientes.values())
+saida = {"ativa": False}
+if fluxos or entrada:
+    saida.update(ids=[f["id"] for f in fluxos], controle=bool(fluxos),
+                 mudo=all(f["mudo"] for f in fluxos) if fluxos else True, plataforma="", titulo="", janela="")
+    try:
+        janelas = json.loads(os.environ.get("JANELAS") or "[]")
+    except Exception:
+        janelas = []
+    nav = [j for j in janelas if re.search(r"brave|chrom|firefox|librewolf|zen|edge|vivaldi|opera", (j.get("class") or ""), re.I)]
+    escolha = None
+    for j in nav:
+        for padrao, nome in PLATAFORMAS:
+            # sites de chat ficam abertos o dia todo: só contam gravando o microfone de fato
+            if nome in ("Discord", "WhatsApp", "Slack", "Telegram") and not fluxos:
+                continue
+            if re.search(padrao, j.get("title") or ""):
+                escolha = (j, nome); break
+        if escolha: break
+    if escolha:
+        saida.update(ativa=True, plataforma=escolha[1], titulo=escolha[0].get("title", ""), janela=escolha[0].get("address", ""))
+    elif fluxos:   # gravando o microfone, mas o título não diz de onde
+        saida.update(ativa=True, titulo=nav[0].get("title", "") if nav else "", janela=nav[0].get("address", "") if nav else "")
+    if not saida["ativa"]:
+        saida = {"ativa": False}
+print(json.dumps(saida, ensure_ascii=False))
+'
+}
+
 case "${1:-}" in
   estado) estado ;;
+  chamada) chamada ;;
+  chamada-mudo)
+    c=$(chamada); [[ $(jq -r .ativa <<<"$c") == true ]] || exit 0
+    alvo=$([[ $(jq -r .mudo <<<"$c") == true ]] && echo 0 || echo 1)
+    for id in $(jq -r '.ids[]' <<<"$c"); do wpctl set-mute "$id" "$alvo"; done ;;
+  chamada-abrir)
+    j=$(chamada | jq -r '.janela // empty'); [[ -n $j ]] && hyprctl dispatch "hl.dsp.focus({ window = \"address:$j\" })" >/dev/null ;;
   wifi) if wifi_on; then nmcli radio wifi off; else nmcli radio wifi on; fi ;;
   bluetooth) if bt_on; then bluetoothctl power off >/dev/null; else rfkill unblock bluetooth 2>/dev/null; bluetoothctl power on >/dev/null; fi ;;
   naoperturbe) simba-shell notifications toggleDnd >/dev/null ;;

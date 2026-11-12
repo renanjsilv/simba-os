@@ -42,7 +42,8 @@ Scope {
       { id: "auto", rotulo: I18n.t("Organizar ícones automaticamente"), marcado: area && area.automatico },
       { id: "grade", rotulo: I18n.t("Alinhar ícones à grade"), marcado: area && area.grade },
       { separador: true },
-      { id: "mostrar", rotulo: I18n.t("Mostrar ícones da área de trabalho"), marcado: area && area.mostrar }
+      { id: "mostrar", rotulo: I18n.t("Mostrar ícones da área de trabalho"), marcado: area && area.mostrar },
+      { id: "mostrarLixeira", rotulo: I18n.t("Mostrar a Lixeira"), marcado: area && area.lixeira }
     ] },
     { id: "classificar", rotulo: I18n.t("Classificar por"), glifo: Icones.sortVariant, sub: [
       { id: "nome", rotulo: I18n.t("Nome"), radio: area && area.ordenar === "nome" },
@@ -78,8 +79,15 @@ Scope {
     { id: "renomear", rotulo: I18n.t("Renomear"), glifo: Icones.renameBox, habilitado: sel.length === 1 },
     { id: "excluir", rotulo: I18n.t("Excluir"), glifo: Icones.lixeira }
   ]
+  readonly property var itensLixeira: [
+    { id: "abrir", rotulo: I18n.t("Abrir"), glifo: Icones.openInNew, tecla: I18n.t("Enter"), negrito: true },
+    { id: "esvaziarLixeira", rotulo: I18n.t("Esvaziar Lixeira"), glifo: Icones.lixeira, habilitado: !!(itemSel && itemSel.cheia) },
+    { separador: true },
+    { id: "ocultarLixeira", rotulo: I18n.t("Ocultar a Lixeira da área de trabalho"), glifo: Icones.eyeOff }
+  ]
   readonly property var itensIcone: {
     var it = itemSel
+    if (it && it.especial === "lixeira") return itensLixeira
     var l = [{ id: "abrir", rotulo: sel.length > 1 ? I18n.t("Abrir ") + sel.length + " itens" : I18n.t("Abrir"), glifo: Icones.openInNew, tecla: I18n.t("Enter"), negrito: true }]
     if (it && it.pasta) l.push({ id: "terminalItem", rotulo: I18n.t("Abrir no Terminal"), glifo: Icones.terminal })
     if (it && it.imagem) l.push({ id: "definirFundo", rotulo: I18n.t("Definir como papel de parede"), glifo: Icones.wallpaper })
@@ -100,6 +108,10 @@ Scope {
     case "auto": Preferencias.definir("area.automatico", !a.automatico); if (!a.automatico) Preferencias.definir("area.posicoes", {}); break
     case "grade": Preferencias.definir("area.grade", !a.grade); break
     case "mostrar": Preferencias.definir("area.mostrarIcones", !a.mostrar); break
+    case "mostrarLixeira": Preferencias.definir("area.lixeira", !a.lixeira); break
+    case "ocultarLixeira": Preferencias.definir("area.lixeira", false); a.selecao = []
+      Sistema.notificar(I18n.t("Lixeira oculta. Para mostrar de novo: botão direito na área de trabalho › Exibir › Mostrar a Lixeira"), "󰩹"); break
+    case "esvaziarLixeira": a.esvaziarLixeira(); break
     case "nome": case "tamanho": case "tipo": case "data": Preferencias.definir("area.ordenar", id); Preferencias.definir("area.posicoes", {}); break
     case "atualizar": a.atualizar(); break
     case "novaPasta": a.novaPasta(); break

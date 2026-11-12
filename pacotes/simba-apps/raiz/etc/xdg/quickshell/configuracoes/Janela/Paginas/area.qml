@@ -87,6 +87,12 @@ Pagina {
       Interruptor { ligado: Preferencias.obter("area.mostrarIcones", true); onAlternado: function(v) { Preferencias.definir("area.mostrarIcones", v) } }
     }
     Linha {
+      chave: "areaLixeira"; glifo: Icones.lixeira
+      titulo: I18n.t("Mostrar a Lixeira")
+      descricao: I18n.t("Ícone da Lixeira no canto da área de trabalho")
+      Interruptor { ligado: Preferencias.obter("area.lixeira", true); onAlternado: function(v) { Preferencias.definir("area.lixeira", v) } }
+    }
+    Linha {
       chave: "areaTamanho"; glifo: Icones.formatSize
       titulo: I18n.t("Tamanho dos ícones")
       Segmentado {

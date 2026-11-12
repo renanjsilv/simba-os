@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Desktop folder operations for the Configurações desktop layer.
 
-    area listar <pasta> [--ocultos]      JSON list of the folder's items
+    area listar <pasta> [--ocultos] [--lixeira]   JSON list of the folder's items (+ the Trash icon)
+    area esvaziar-lixeira                empty the trash (gio trash --empty)
     area info <caminho>                  JSON properties of one item
     area abrir <caminho>                 open (.desktop files are launched)
     area colar <pasta>                   paste the clipboard (files, image or text)
@@ -217,10 +218,31 @@ def resolver_icones(itens):
                 break
 
 
-def listar(pasta, ocultos):
+LIXEIRA = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "Trash", "files")
+
+
+def lixeira_cheia():
+    try:
+        return any(True for _ in os.scandir(LIXEIRA))
+    except OSError:
+        return False
+
+
+def item_lixeira():
+    """A Lixeira da área de trabalho: um item virtual (trash:///), não um arquivo da pasta."""
+    cheia = lixeira_cheia()
+    return {
+        "nome": "trash:///", "caminho": "trash:///", "uri": "trash:///", "pasta": True, "link": False,
+        "tamanho": 0, "mtime": 0, "mime": "inode/directory", "rotulo": _t("Lixeira"), "imagem": "",
+        "atalho": False, "especial": "lixeira", "cheia": cheia,
+        "icones": (["user-trash-full"] if cheia else []) + ["user-trash"],
+    }
+
+
+def listar(pasta, ocultos, lixeira=False):
     if not os.path.isdir(pasta):
         erro(_t("pasta não encontrada: ") + pasta)
-    itens = []
+    itens = [item_lixeira()] if lixeira else []
     for nome in os.listdir(pasta):
         if not ocultos and nome.startswith("."):
             continue
@@ -277,6 +299,11 @@ def info(p):
 
 
 def abrir(p):
+    if p.startswith("trash:"):
+        subprocess.Popen(["uwsm-app", "--", "explorador", "trash:///"], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        saida({"ok": True})
+        return
     if p.endswith(".desktop") and os.path.isfile(p):
         subprocess.Popen(["gio", "launch", p], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
@@ -403,7 +430,12 @@ def main():
     cmd, resto = a[0], a[1:]
     try:
         if cmd == "listar":
-            listar(resto[0], "--ocultos" in resto)
+            listar(resto[0], "--ocultos" in resto, "--lixeira" in resto)
+        elif cmd == "esvaziar-lixeira":
+            r = subprocess.run(["gio", "trash", "--empty"], capture_output=True, text=True)
+            if r.returncode != 0:
+                erro(r.stderr.strip())
+            saida({"ok": True})
         elif cmd == "info":
             info(resto[0])
         elif cmd == "abrir":
@@ -427,6 +459,7 @@ def main():
         elif cmd == "lixeira":
             falhas = []
             casa = os.path.realpath(os.path.expanduser("~"))
+            resto = [c for c in resto if not c.startswith("trash:")]
             for c in resto:
                 # Um atalho para a pasta pessoal vai para a lixeira; a pasta em si, nunca.
                 if not os.path.islink(c) and os.path.realpath(c) in (casa, "/"):

@@ -25,6 +25,9 @@ Scope {
   readonly property bool automatico: Preferencias.obter("area.automatico", false)
   readonly property bool grade: Preferencias.obter("area.grade", true)
   readonly property bool ocultos: Preferencias.obter("area.ocultos", false)
+  // Lixeira na área de trabalho (item virtual trash:///, primeiro da lista); dá para ocultar
+  readonly property bool lixeira: Preferencias.obter("area.lixeira", true)
+  function ehLixeira(c) { return String(c).indexOf("trash:") === 0 }
   property int versao: 0          // bumps on refresh (icons replay their entrance)
   property bool elevada: false
   function espiar(ms) { elevada = true; baixar.interval = Math.max(300, ms || 1500); baixar.restart() }
@@ -68,7 +71,7 @@ Scope {
   property string renomearPendente: ""
   function listar() {
     if (!pasta) return
-    Sistema.json([Sistema.bin + "/area", "listar", pasta].concat(ocultos ? ["--ocultos"] : []), function(v) {
+    Sistema.json([Sistema.bin + "/area", "listar", pasta].concat(ocultos ? ["--ocultos"] : []).concat(lixeira ? ["--lixeira"] : []), function(v) {
       if (!Array.isArray(v)) return
       a.itens = a.ordenados(v)
       var vivos = a.itens.map(function(x) { return x.caminho })
@@ -83,11 +86,13 @@ Scope {
   }
   onPastaChanged: { selecao = []; listar() }
   onOcultosChanged: listar()
+  onLixeiraChanged: listar()
   onOrdenarChanged: itens = ordenados(itens)
 
   function ordenados(v) {
     var o = ordenar
     return v.slice().sort(function(x, y) {
+      if (!!x.especial !== !!y.especial) return x.especial ? -1 : 1   // Lixeira primeiro
       if (x.pasta !== y.pasta) return x.pasta ? -1 : 1
       var r = 0
       if (o === "tamanho") r = x.tamanho - y.tamanho
@@ -107,6 +112,13 @@ Scope {
     onFileChanged: relistar.restart()
   }
   Timer { id: relistar; interval: 250; onTriggered: a.listar() }
+  // a Lixeira troca de ícone (vazia/cheia) quando algo entra ou sai dela
+  FileView {
+    path: a.lixeira ? Quickshell.env("HOME") + "/.local/share/Trash/files" : ""
+    watchChanges: a.lixeira
+    printErrors: false
+    onFileChanged: relistar.restart()
+  }
   // Backstop for changes the watcher can miss (e.g. a renamed mount).
   Timer { interval: 15000; running: true; repeat: true; onTriggered: a.listar() }
 
@@ -130,12 +142,18 @@ Scope {
     })
   }
   function abrirItem(caminho) { run(["abrir", caminho]) }
-  function copiar(cortar) { if (selecao.length) run([cortar ? "recortar" : "copiar"].concat(selecao)) }
+  // a Lixeira não é arquivo: fica de fora de copiar, recortar e excluir
+  function arquivosSel() { return selecao.filter(function(c) { return !a.ehLixeira(c) }) }
+  function copiar(cortar) { var s = arquivosSel(); if (s.length) run([cortar ? "recortar" : "copiar"].concat(s)) }
+  function esvaziarLixeira() { run(["esvaziar-lixeira"], I18n.t("Lixeira esvaziada")) }
+  // arrastar ícones para cima da Lixeira = mandar para a lixeira
+  function largarNaLixeira() { if (arquivosSel().length) excluir() }
   function colar(atalho) { run([atalho ? "colar-atalho" : "colar", pasta]) }
   function excluir() {
-    if (!selecao.length) return
-    var n = selecao.length
-    run(["lixeira"].concat(selecao), n === 1 ? I18n.t("Movido para a lixeira") : n + I18n.t(" itens movidos para a lixeira"))
+    var s = arquivosSel()
+    if (!s.length) return
+    var n = s.length
+    run(["lixeira"].concat(s), n === 1 ? I18n.t("Movido para a lixeira") : n + I18n.t(" itens movidos para a lixeira"))
     selecao = []
   }
   function novaPasta() { run(["nova-pasta", pasta], "", function(r) { if (r && r.caminho) a.renomearPendente = r.caminho }) }
@@ -173,10 +191,11 @@ Scope {
   function acao(id) { menu.executar(id) }
   function selecionarNome(nome) { selecao = itens.filter(function(i) { return i.nome === nome }).map(function(i) { return i.caminho }) }
   function renomear(caminho) {
+    if (ehLixeira(caminho)) return
     var it = itens.filter(function(i) { return i.caminho === caminho })[0]
     if (it) renomeador.abrir(it)
   }
-  function propriedades(caminho) { propriedadesJanela.abrir(caminho) }
+  function propriedades(caminho) { if (!ehLixeira(caminho)) propriedadesJanela.abrir(caminho) }
   function cancelarRenomear() { renomeador.concluir(false, "") }
   function concluirRenomear(t) { renomeador.concluir(true, t) }
   function fecharPropriedades() { propriedadesJanela.aberto = false }

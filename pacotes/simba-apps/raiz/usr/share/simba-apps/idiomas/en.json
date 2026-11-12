@@ -2359,5 +2359,10 @@
  "dom": "Sun",
  "Entre com sua conta Google": "Sign in with your Google account",
  "Opções": "Options",
- "Escolha antes de entrar.": "Choose before signing in."
+ "Escolha antes de entrar.": "Choose before signing in.",
+ "Mostrar a Lixeira": "Show Trash",
+ "Lixeira esvaziada": "Trash emptied",
+ "Ocultar a Lixeira da área de trabalho": "Hide Trash from the desktop",
+ "Lixeira oculta. Para mostrar de novo: botão direito na área de trabalho › Exibir › Mostrar a Lixeira": "Trash hidden. To show it again: right-click the desktop › View › Show Trash",
+ "Ícone da Lixeira no canto da área de trabalho": "Trash icon in the corner of the desktop"
 }

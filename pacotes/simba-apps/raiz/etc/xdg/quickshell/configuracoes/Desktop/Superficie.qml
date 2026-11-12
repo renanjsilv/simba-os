@@ -87,6 +87,12 @@ PanelWindow {
   }
   // Drop an icon: snap to the nearest free cell (or keep the free position).
   function soltarIcone(it, px, py) {
+    // largado em cima da Lixeira: vai para a lixeira (a seleção inteira, como no Windows)
+    var lx = lugares["trash:///"]
+    if (lx && !area.ehLixeira(it.caminho) && Math.abs(px - lx.x) < cel.w / 2 && Math.abs(py - lx.y) < cel.h / 2) {
+      area.largarNaLixeira()
+      return
+    }
     if (area.automatico) return
     if (!area.grade) { area.guardarPosicao(it.nome, { x: Math.round(px), y: Math.round(py) }); return }
     var alvo = celulaEm(px, py)

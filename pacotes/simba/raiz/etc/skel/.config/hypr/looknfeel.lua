@@ -75,7 +75,9 @@ o.window("com.simba.GerenciadorTarefas", { opacity = "1 1" })
 -- Boas-vindas ao Simba OS (~/.local/share/boas-vindas): flutuante, centralizada, opaca
 o.window("com.simba.BoasVindas", { float = true })
 o.window("com.simba.BoasVindas", { center = true })
-o.window("com.simba.BoasVindas", { size = { 900, 620 } })
+-- sem tamanho forçado: o GTK mede o conteúdo. Com 900×620 fixo, numa tela/fonte em que o
+-- conteúdo pedia mais altura, a janela era desenhada maior que a área que recebe clique e a
+-- metade de baixo dos botões Próximo/Voltar não respondia.
 o.window("com.simba.BoasVindas", { tag = "-default-opacity" })
 o.window("com.simba.BoasVindas", { opacity = "1 1" })
 

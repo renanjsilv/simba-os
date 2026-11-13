@@ -129,7 +129,10 @@ tecla KEY_LEFTALT KEY_TAB                           # foca a próxima janela (te
 sleep 1
 tecla KEY_LEFTMETA KEY_LEFT                         # reforça foco na janela à esquerda (terminal)
 sleep 1
-texto "curl -s \$(ip r|awk '/def/{print \$3;exit}'):$PORTA/c|bash"
+texto "curl -s 192.168.122.1:$PORTA/c -o /tmp/c.sh"
+tecla KEY_ENTER
+sleep 2
+texto "bash /tmp/c.sh"
 tecla KEY_ENTER
 for _ in $(seq 90); do [ -s "$OUT/resultado.json" ] && break; sleep 2; done
 captura "checagem"

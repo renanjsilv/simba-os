@@ -3,6 +3,7 @@
 # resultado em JSON de volta para o hospedeiro (mesmo endereço de onde veio).
 SENHA=simba123
 GW=$(ip r | awk '/default/{print $3; exit}')
+GW=${GW:-192.168.122.1}
 j() { jq -Rs . <<<"$1"; }   # texto → string JSON
 
 camadas=$(hyprctl layers -j 2>/dev/null | jq -c '[.[].levels[][]?.namespace] | unique')

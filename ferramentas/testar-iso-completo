@@ -124,7 +124,11 @@ captura "area-de-trabalho"
 # ── 3. checagem dentro da sessão ─────────────────────────────────────────────────────
 passo "checagem dentro da sessão"
 tecla KEY_LEFTMETA KEY_ENTER                        # terminal
-sleep 4
+sleep 5
+tecla KEY_LEFTALT KEY_TAB                           # foca a próxima janela (terminal)
+sleep 1
+tecla KEY_LEFTMETA KEY_LEFT                         # reforça foco na janela à esquerda (terminal)
+sleep 1
 texto "curl -s \$(ip r|awk '/def/{print \$3;exit}'):$PORTA/c|bash"
 tecla KEY_ENTER
 for _ in $(seq 90); do [ -s "$OUT/resultado.json" ] && break; sleep 2; done

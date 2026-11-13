@@ -96,6 +96,22 @@ def get_hybrid_gpu_env() -> dict:
     return env_additions
 
 
+def get_display_scale() -> float:
+    """Detecta a escala do monitor ativo no Hyprland para renderização correta em HiDPI."""
+    try:
+        raw = subprocess.check_output(["hyprctl", "monitors", "-j"], text=True, stderr=subprocess.DEVNULL)
+        import json
+        monitors = json.loads(raw)
+        for m in monitors:
+            if m.get("focused") or m.get("scale", 1) > 1:
+                return float(m.get("scale", 1.0))
+        if monitors:
+            return float(monitors[0].get("scale", 1.0))
+    except Exception:
+        pass
+    return 1.0
+
+
 def ensure_interpreters(has_wine: bool, has_umu: bool) -> tuple[bool, bool]:
     """Oferece instalação sob demanda caso nenhum interpretador esteja instalado."""
     if has_wine or has_umu:
@@ -253,6 +269,10 @@ def main():
         if gpu_env:
             env.update(gpu_env)
 
+        # Habilita AMD FidelityFX Super Resolution (FSR) para upscaling inteligente
+        env["WINE_FULLSCREEN_FSR"] = env.get("WINE_FULLSCREEN_FSR", "1")
+        env["WINE_FULLSCREEN_FSR_STRENGTH"] = env.get("WINE_FULLSCREEN_FSR_STRENGTH", "2")
+
         # Opcional: GameMode se disponível
         gamemoderun = shutil.which("gamemoderun")
 
@@ -284,6 +304,22 @@ def main():
 
         env["WINEPREFIX"] = str(app_prefix)
         env["WINEDEBUG"] = env.get("WINEDEBUG", "-all")  # suprime logs excessivos para velocidade
+
+        # Ajuste inteligente de HiDPI para aplicações clássicas do Windows em telas 2K/4K
+        scale = get_display_scale()
+        if scale > 1.05:
+            target_dpi = int(round(96 * scale))
+            dpi_marker = app_prefix / f".dpi_{target_dpi}"
+            if not dpi_marker.exists():
+                try:
+                    subprocess.run(
+                        ["wine", "reg", "add", "HKEY_CURRENT_USER\\Control Panel\\Desktop",
+                         "/v", "LogPixels", "/t", "REG_DWORD", "/d", str(target_dpi), "/f"],
+                        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=5
+                    )
+                    dpi_marker.touch()
+                except Exception:
+                    pass
 
         notify(
             "Simba OS — Modo Aplicativo",

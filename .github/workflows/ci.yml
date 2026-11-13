@@ -1,0 +1,65 @@
+name: CI do Simba OS
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  sintaxe-e-lint:
+    name: Validação de Sintaxe e Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validar scripts Bash
+        run: |
+          echo "Verificando scripts Bash com bash -n..."
+          find ferramentas pacotes -type f -name "*.sh" -exec bash -n {} +
+          find pacotes/*/raiz/usr/bin -type f -exec bash -c 'head -n1 "$1" | grep -q "bash" && bash -n "$1"' _ {} \;
+          echo "✓ Scripts Bash válidos."
+
+      - name: Validar scripts Python
+        run: |
+          echo "Verificando scripts Python..."
+          find ferramentas pacotes -type f -name "*.py" -exec python3 -m py_compile {} +
+          find pacotes/*/raiz/usr/bin -type f -exec bash -c 'head -n1 "$1" | grep -q "python" && python3 -m py_compile "$1"' _ {} \;
+          echo "✓ Scripts Python válidos."
+
+      - name: Validar lista de pacotes da ISO
+        run: |
+          echo "Verificando iso/pacotes.txt..."
+          test -s iso/pacotes.txt
+          # Garante que pacotes vitais estão listados
+          grep -q "hyprland" iso/pacotes.txt
+          grep -q "quickshell" iso/pacotes.txt
+          grep -q "wine-staging" iso/pacotes.txt
+          grep -q "umu-launcher" iso/pacotes.txt
+          echo "✓ Lista de pacotes da ISO verificada."
+
+  pacotes:
+    name: Verificação de PKGBUILDs
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Atualizar banco do Arch Linux
+        run: |
+          pacman -Syu --noconfirm --noprogressbar pacman-contrib git base-devel
+
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Validar PKGBUILDs com namcap
+        run: |
+          pacman -S --noconfirm --noprogressbar namcap
+          for p in pacotes/*/PKGBUILD; do
+            echo "Avaliando $p..."
+            namcap -i "$p" || true
+          done

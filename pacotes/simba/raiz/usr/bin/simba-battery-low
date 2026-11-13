@@ -1,17 +1,30 @@
 #!/bin/bash
-
-# simba:summary=Send the low battery warning notification and run battery-low hooks.
+# simba:summary=Envia notificações graduais de bateria e proteção de suspensão de emergência.
 # simba:args=<percentage>
 # simba:hidden=true
 
 set -euo pipefail
 
-if (($# != 1)); then
-  echo "Usage: simba-battery-low <percentage>" >&2
-  exit 1
+level=${1:-10}
+
+if (( level <= 2 )); then
+  simba-notification-send -g 󱐋 -u critical "Bateria Esgotada (${level}%)" "Suspendendo o computador em 10 segundos para proteger seus dados..." -i battery-empty -t 15000 2>/dev/null || \
+    notify-send -a "Simba OS" -u critical -i battery-empty "Bateria Esgotada (${level}%)" "Suspendendo o computador em 10 segundos para proteger seus dados..."
+  sleep 10
+  # Se ainda estiver na bateria sem carregar, suspende
+  status=$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1 || echo "Discharging")
+  if [[ "$status" != "Charging" && "$status" != "Full" ]]; then
+    systemctl suspend || true
+  fi
+elif (( level <= 5 )); then
+  simba-notification-send -g 󱐋 -u critical "Bateria Crítica (${level}%)!" "Conecte o carregador imediatamente para evitar o desligamento." -i battery-caution -t 30000 2>/dev/null || \
+    notify-send -a "Simba OS" -u critical -i battery-caution "Bateria Crítica (${level}%)!" "Conecte o carregador imediatamente."
+  command -v canberra-gtk-play >/dev/null && canberra-gtk-play -i dialog-warning 2>/dev/null || true
+elif (( level <= 15 )); then
+  simba-notification-send -g 󱐋 -u normal "Bateria Baixa (${level}%)" "Restam poucos minutos de carga. Conecte o computador à tomada." -i battery-low -t 15000 2>/dev/null || \
+    notify-send -a "Simba OS" -u normal -i battery-low "Bateria Baixa (${level}%)" "Restam poucos minutos de carga."
+else
+  simba-notification-send -g 󱐋 -u normal "Hora de carregar!" "A bateria está em ${level}%" -i battery-caution -t 15000 2>/dev/null || true
 fi
 
-level=$1
-
-simba-notification-send -g 󱐋 -u critical "Hora de carregar!" "A bateria está em ${level}%" -i battery-caution -t 30000
-simba-hook battery-low "$level"
+simba-hook battery-low "$level" 2>/dev/null || true

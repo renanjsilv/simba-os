@@ -17,6 +17,7 @@ Item {
     id: persisted
     reloadableId: "simba-battery"
     property bool notifiedLowBattery: false
+    property int lastNotifiedTier: 0
   }
 
   function batteryPercentage() {
@@ -28,7 +29,8 @@ Item {
   }
 
   function checkBattery() {
-    var state = BatteryModel.shouldWarnLowBattery(UPower.displayDevice, UPower.onBattery, UPowerDeviceState.Discharging, batteryThreshold, persisted.notifiedLowBattery)
+    var state = BatteryModel.shouldWarnLowBattery(UPower.displayDevice, UPower.onBattery, UPowerDeviceState.Discharging, batteryThreshold, persisted.lastNotifiedTier)
+    persisted.lastNotifiedTier = state.newTier
     persisted.notifiedLowBattery = state.notifiedLowBattery
     if (state.notify) sendLowBatteryWarning(state.level)
   }

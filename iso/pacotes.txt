@@ -12,6 +12,8 @@ sudo man-db less inetutils whois unzip
 networkmanager wireless-regdb nss-mdns avahi
 bluez bluez-utils
 pipewire pipewire-alsa pipewire-jack pipewire-pulse wireplumber gst-plugin-pipewire libpulse alsa-utils pamixer
+# codecs de áudio de alta definição Bluetooth (aptX, LDAC, AAC, LC3, SBC-XQ)
+libfreeaptx libldac liblc3 libfdk-aac sbc
 power-profiles-daemon brightnessctl ddcutil fwupd ufw
 cups cups-filters cups-pk-helper system-config-printer
 

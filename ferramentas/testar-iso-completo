@@ -123,12 +123,10 @@ captura "area-de-trabalho"
 
 # ── 3. checagem dentro da sessão ─────────────────────────────────────────────────────
 passo "checagem dentro da sessão"
-tecla KEY_LEFTMETA KEY_ENTER                        # terminal
-sleep 5
-tecla KEY_LEFTALT KEY_TAB                           # foca a próxima janela (terminal)
-sleep 1
-tecla KEY_LEFTMETA KEY_LEFT                         # reforça foco na janela à esquerda (terminal)
-sleep 1
+tecla KEY_LEFTMETA KEY_2                            # vai para a área de trabalho 2 (livre da janela modal)
+sleep 2
+tecla KEY_LEFTMETA KEY_ENTER                        # abre o terminal na área 2
+sleep 4
 texto "curl -s 192.168.122.1:$PORTA/c -o /tmp/c.sh"
 tecla KEY_ENTER
 sleep 2

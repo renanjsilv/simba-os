@@ -1490,7 +1490,7 @@ class Janela(Adw.ApplicationWindow):
             if len(arquivos) == 1 and (u.tipo(arquivos[0]) or "").startswith("image/"):
                 s2.append(_t("Definir como papel de parede"), "win.papel-parede")
             if shutil.which("localsend"):
-                s2.append(_t("Enviar para o celular (LocalSend)"), "win.enviar-celular")
+                s2.append(_t("Enviar com LocalSend (celular e PC)"), "win.enviar-celular")
             s2.append(_t("Copiar como caminho"), "win.copiar-caminho")
             m.append_section(None, s2)
             s3 = Gio.Menu()

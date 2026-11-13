@@ -187,6 +187,7 @@ Item {
     property var dados: ({})
     readonly property bool conectado: dados && (dados.ultima || dados.remoto_meta || dados.conectado)
     readonly property bool sincronizando: dados && (dados.sincronizando || dados.rodando || (dados.progresso && dados.progresso !== ""))
+    readonly property bool pausado: !!(dados && dados.pausado_ate && dados.pausado_ate !== "")
     readonly property string erro: dados && dados.resultado === "erro" ? String(dados.erro || "") : ""
     onFileChanged: reload()
     onLoaded: { try { dados = JSON.parse(text()) } catch (e) { dados = {} } }
@@ -216,11 +217,11 @@ Item {
       Text {
         id: iconeNuvem
         anchors.centerIn: parent
-        text: nuvemFile.sincronizando ? "\u{F06B0}" : (nuvemFile.erro !== "" ? "\u{F0028}" : "\u{F01BE}")
-        color: nuvemFile.erro !== "" ? Color.urgent : (nuvemFile.sincronizando ? Color.accent : root.fg)
+        text: nuvemFile.sincronizando ? "\u{F06B0}" : (nuvemFile.erro !== "" ? "\u{F0028}" : (nuvemFile.pausado ? "\u{F03E4}" : "\u{F01BE}"))
+        color: nuvemFile.erro !== "" ? Color.urgent : (nuvemFile.sincronizando ? Color.accent : (nuvemFile.pausado ? Color.warning : root.fg))
         font.family: root.fonte
         font.pixelSize: root.tamIcone
-        opacity: nuvemFile.sincronizando ? pulsoAnim.opacidade : 0.85
+        opacity: nuvemFile.sincronizando ? pulsoAnim.opacidade : (nuvemFile.pausado ? 0.65 : 0.85)
 
         RotationAnimation on rotation {
           running: nuvemFile.sincronizando
@@ -247,7 +248,8 @@ Item {
         cursorShape: Qt.PointingHandCursor
         onClicked: function(m) {
           if (m.button === Qt.RightButton) {
-            Quickshell.execDetached(["/usr/bin/conta", "puxar", "--forcar"])
+            if (nuvemFile.pausado) Quickshell.execDetached(["/usr/bin/conta", "retomar"])
+            else Quickshell.execDetached(["/usr/bin/conta", "puxar", "--forcar"])
           } else {
             Quickshell.execDetached(["/usr/bin/configuracoes", "contas"])
           }
@@ -255,10 +257,11 @@ Item {
         onEntered: {
           if (root.bar) {
             var msg = I18n.t("Simba Conta")
-            if (nuvemFile.sincronizando) msg += ": " + I18n.t("Sincronizando...")
+            if (nuvemFile.pausado) msg += ": " + I18n.t("Pausado (Modo Viagem)")
+            else if (nuvemFile.sincronizando) msg += ": " + I18n.t("Sincronizando...")
             else if (nuvemFile.erro !== "") msg += ": " + I18n.t("Erro na sincronização")
             else msg += ": " + I18n.t("Sincronizado")
-            msg += "\n" + I18n.t("Clique: Configurações · Botão direito: Sincronizar agora")
+            msg += "\n" + (nuvemFile.pausado ? I18n.t("Botão direito: Retomar sincronização") : I18n.t("Clique: Configurações · Botão direito: Sincronizar agora"))
             root.bar.showTooltip(nuvemItem, msg)
           }
         }

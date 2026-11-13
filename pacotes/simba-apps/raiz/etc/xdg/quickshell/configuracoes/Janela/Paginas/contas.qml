@@ -225,6 +225,28 @@ Pagina {
       Botao { texto: I18n.t("Substituir"); tipo: "perigo"; habilitado: !pg.ocupado; onClicado: pg.sincronizar(true) }
     ]
   }
+  // Conflito de versão concorrente entre computadores
+  Aviso {
+    Layout.fillWidth: true
+    visible: !!(pg.s && pg.s.conectado && pg.s.conflito)
+    tipo: "aviso"
+    glifo: Icones.alert
+    texto: I18n.t("Conflito de alterações:") + " " + (pg.s && pg.s.conflito && pg.s.conflito.maquina_remota ? pg.s.conflito.maquina_remota : I18n.t("Outro computador")) + " " + I18n.t("enviou configurações concorrentes. Escolha qual manter:")
+    acoes: [
+      Botao {
+        texto: I18n.t("Manter deste computador")
+        tipo: "primario"
+        habilitado: !pg.ocupado
+        onClicado: Sistema.rodar(["conta", "resolver", "local"], function() { pg.atualizar(); Navegacao.confirmar(I18n.t("Versão deste computador mantida"), Icones.checkCircle) })
+      },
+      Botao {
+        texto: I18n.t("Usar da nuvem")
+        tipo: "fantasma"
+        habilitado: !pg.ocupado
+        onClicado: Sistema.rodar(["conta", "resolver", "remoto"], function() { pg.atualizar(); Navegacao.confirmar(I18n.t("Alterações da nuvem aplicadas"), Icones.checkCircle) })
+      }
+    ]
+  }
   Aviso {
     Layout.fillWidth: true
     visible: !!(pg.s && pg.s.erro) && !(pg.s.precisa_decidir && !pg.precisaSenha)
@@ -346,7 +368,69 @@ Pagina {
     }
   }
 
+  // Pastas adicionais na categoria Documentos
+  Cartao {
+    visible: pg.conectado && !!(pg.s && pg.s.categorias && pg.s.categorias.documentos)
+    Linha {
+      glifo: Icones.folderPlus
+      titulo: I18n.t("Pastas personalizadas em Documentos")
+      descricao: I18n.t("Além de Documentos/ e Desktop/, você pode incluir outras pastas da sua pasta pessoal.")
+      Campo {
+        id: campoNovaPasta
+        width: 180
+        dica: I18n.t("Ex: Projetos")
+        onAccepted: if (text.trim() !== "") {
+          Sistema.rodar(["conta", "pasta", "adicionar", text.trim()], function() {
+            campoNovaPasta.text = ""
+            pg.atualizar()
+            pg.medir()
+          })
+        }
+      }
+      Botao {
+        texto: I18n.t("Adicionar")
+        tipo: "fantasma"
+        glifo: Icones.plus
+        habilitado: campoNovaPasta.text.trim() !== "" && !pg.ocupado
+        onClicado: {
+          Sistema.rodar(["conta", "pasta", "adicionar", campoNovaPasta.text.trim()], function() {
+            campoNovaPasta.text = ""
+            pg.atualizar()
+            pg.medir()
+          })
+        }
+      }
+    }
+    Repeater {
+      model: pg.s && pg.s.pastas_personalizadas ? pg.s.pastas_personalizadas : []
+      delegate: Linha {
+        glifo: Icones.folder
+        titulo: modelData
+        descricao: I18n.t("Pasta incluída na sincronização do Google Drive")
+        Botao {
+          texto: I18n.t("Remover")
+          tipo: "fantasma"
+          glifo: Icones.close
+          habilitado: !pg.ocupado
+          onClicado: Sistema.rodar(["conta", "pasta", "remover", modelData], function() { pg.atualizar(); pg.medir() })
+        }
+      }
+    }
+  }
+
   // ── avisos de conexão e navegador ─────────────────────────────────────────
+  Aviso {
+    visible: pg.conectado && !!(pg.s && pg.s.pausado)
+    tipo: "aviso"
+    glifo: Icones.pause
+    texto: I18n.t("Modo Viagem ativado: A sincronização com o Google Drive está pausada até ") + pg.quando(pg.s ? pg.s.pausado_ate : "") + "."
+    acoes: Botao {
+      texto: I18n.t("Retomar agora")
+      tipo: "primario"
+      habilitado: !pg.ocupado
+      onClicado: Sistema.rodar(["conta", "retomar"], function() { pg.atualizar(); Navegacao.confirmar(I18n.t("Sincronização retomada"), Icones.checkCircle) })
+    }
+  }
   Aviso {
     visible: pg.conectado && !!(pg.s && pg.s.rede_limitada)
     tipo: "aviso"
@@ -382,6 +466,30 @@ Pagina {
       Interruptor {
         ligado: !!(pg.s && pg.s.auto)
         onAlternado: function(x) { Sistema.rodar(["conta", "auto", x ? "liga" : "desliga"], function() { pg.atualizar() }) }
+      }
+    }
+    Linha {
+      chave: "contaModoViagem"
+      glifo: Icones.pause
+      titulo: I18n.t("Modo Viagem (Pausar sincronização)")
+      descricao: pg.s && pg.s.pausado && pg.s.pausado_ate
+                 ? I18n.t("Sincronização temporariamente pausada até ") + pg.quando(pg.s.pausado_ate) + I18n.t(". Ideal em conexões móveis ou roteamento de celular.")
+                 : I18n.t("Pausa temporariamente envios e downloads automáticos no Google Drive por 24 horas.")
+      Botao {
+        visible: !(pg.s && pg.s.pausado)
+        texto: I18n.t("Pausar por 24h")
+        tipo: "fantasma"
+        glifo: Icones.pause
+        habilitado: !pg.ocupado
+        onClicado: Sistema.rodar(["conta", "pausar", "24"], function() { pg.atualizar(); Navegacao.confirmar(I18n.t("Sincronização pausada por 24h"), Icones.pause) })
+      }
+      Botao {
+        visible: !!(pg.s && pg.s.pausado)
+        texto: I18n.t("Retomar")
+        tipo: "primario"
+        glifo: Icones.sync
+        habilitado: !pg.ocupado
+        onClicado: Sistema.rodar(["conta", "retomar"], function() { pg.atualizar(); Navegacao.confirmar(I18n.t("Sincronização retomada"), Icones.checkCircle) })
       }
     }
     Linha {

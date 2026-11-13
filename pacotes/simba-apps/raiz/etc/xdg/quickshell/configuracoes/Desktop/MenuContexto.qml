@@ -94,6 +94,7 @@ Scope {
     l.push({ separador: true })
     l.push({ id: "copiarCaminho", rotulo: sel.length > 1 ? I18n.t("Copiar caminhos") : I18n.t("Copiar como caminho"), glifo: Icones.linkVariant })
     l.push({ id: "revelar", rotulo: I18n.t("Mostrar no Arquivos"), glifo: Icones.folderOpen })
+    l.push({ id: "enviarLocalSend", rotulo: I18n.t("Enviar com LocalSend (celular e PC)"), glifo: Icones.cellphoneLink })
     l.push({ separador: true })
     l.push({ id: "propriedades", rotulo: I18n.t("Propriedades"), glifo: Icones.informationOutline, tecla: I18n.t("Alt+Enter"), habilitado: sel.length === 1 })
     return l
@@ -132,6 +133,7 @@ Scope {
     case "definirFundo": if (m.itemSel) a.definirFundo(m.itemSel.caminho); break
     case "copiarCaminho": Sistema.rodar(["wl-copy", a.selecao.join("\n")]); break
     case "revelar": Sistema.solto(["uwsm-app", "--", "nautilus", "--new-window", "--select", a.selecao[0]]); break
+    case "enviarLocalSend": if (a.selecao && a.selecao.length > 0) Sistema.solto(["localsend"].concat(a.selecao)); break
     case "propriedades": if (m.itemSel) a.propriedades(m.itemSel.caminho); break
     case "recortar": a.copiar(true); break
     case "copiar": a.copiar(false); break

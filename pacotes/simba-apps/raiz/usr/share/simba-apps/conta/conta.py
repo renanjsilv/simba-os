@@ -19,6 +19,7 @@ criou) e restaura tudo numa instalação nova.
 Variáveis para teste: CONTA_RCLONE (binário), CONTA_REMOTO (remoto já configurado,
 ex. "teste:" para um remoto local), CONTA_HOME (pasta pessoal alternativa).
 """
+import argparse
 import datetime
 import fcntl
 import fnmatch
@@ -140,6 +141,8 @@ def config():
     c.setdefault("auto", True)
     c.setdefault("cripto", False)
     c.setdefault("categorias", {k: k != "segredos" for k in CATEGORIAS})
+    c.setdefault("pastas_personalizadas", [])
+    c.setdefault("pastas_excluidas", [])
     return c
 
 
@@ -255,11 +258,16 @@ def listar_arquivos(c=None):
     cats = [k for k, v in c["categorias"].items() if v and k in INCLUIR]
     if "segredos" in cats and not c.get("cripto"):
         cats.remove("segredos")
-    excl_extra = []
+    excl_extra = list(c.get("pastas_excluidas", []))
     vistos, lista, total = set(), [], 0
     for cat in cats:
         liberar = INCLUIR["segredos"] if cat == "segredos" else []
-        for base in INCLUIR[cat]:
+        bases = list(INCLUIR[cat])
+        if cat == "documentos":
+            for p_extra in c.get("pastas_personalizadas", []):
+                if p_extra and p_extra not in bases:
+                    bases.append(p_extra)
+        for base in bases:
             raiz = HOME / base
             if not raiz.exists() or raiz.is_symlink() and not raiz.is_file():
                 continue
@@ -473,6 +481,106 @@ def registrar_dispositivo_local(meta):
     return meta
 
 
+def esta_pausado():
+    """Verifica se a sincronização está pausada temporariamente (Modo Viagem)."""
+    e = estado()
+    pausado_ate_str = e.get("pausado_ate")
+    if not pausado_ate_str:
+        return False, ""
+    try:
+        dt = datetime.datetime.fromisoformat(pausado_ate_str)
+        agora = datetime.datetime.now(datetime.timezone.utc)
+        if agora < dt.astimezone(datetime.timezone.utc):
+            return True, pausado_ate_str
+        else:
+            salvar_estado(pausado_ate="")
+            return False, ""
+    except Exception:
+        salvar_estado(pausado_ate="")
+        return False, ""
+
+
+def cmd_pausar(a):
+    horas = getattr(a, "horas", 24) or 24
+    ate = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=horas)).isoformat(timespec="seconds")
+    salvar_estado(pausado_ate=ate)
+    avisar(_t("Modo Viagem Ativado"), _t("Sincronização com o Google Drive pausada por %1 horas.", horas))
+    print(_t("Sincronização pausada por %1 horas (até %2).", horas, ate))
+    return 0
+
+
+def cmd_retomar(_a):
+    salvar_estado(pausado_ate="")
+    avisar(_t("Modo Viagem Desativado"), _t("Sincronização automática com a nuvem retomada."))
+    print(_t("Sincronização retomada."))
+    return 0
+
+
+def cmd_resolver(a):
+    e = estado()
+    c = e.get("conflito")
+    if not c:
+        print(_t("Nenhum conflito pendente."))
+        return 0
+
+    escolha = a.escolha.lower()
+    if escolha in ("local", "este", "manter-local"):
+        salvar_estado(conflito=None)
+        avisar(_t("Conflito Resolvido"), _t("A versão deste computador foi mantida e enviada à nuvem."))
+        print(_t("Versão local mantida. Atualizando nuvem…"))
+        return cmd_sincronizar(argparse.Namespace(silencioso=False, substituir=True, forcar=True))
+    elif escolha in ("remoto", "nuvem", "usar-remoto"):
+        salvar_estado(conflito=None)
+        avisar(_t("Conflito Resolvido"), _t("As alterações da nuvem foram aplicadas com sucesso."))
+        print(_t("Aplicando alterações da nuvem…"))
+        puxar_alteracoes_remotas(silencioso=False, forcar=True)
+        return 0
+    else:
+        print(_t("Escolha 'local' ou 'remoto'."), file=sys.stderr)
+        return 1
+
+
+def cmd_pasta(a):
+    c = config()
+    acao = a.acao.lower()
+    if acao in ("adicionar", "incluir"):
+        if not a.caminho:
+            print(_t("caminho obrigatório"), file=sys.stderr)
+            return 1
+        p = a.caminho.strip()
+        if p.startswith(str(HOME)):
+            p = os.path.relpath(p, HOME)
+        p = p.strip("/")
+        if p and p not in c["pastas_personalizadas"]:
+            c["pastas_personalizadas"].append(p)
+            if p in c.get("pastas_excluidas", []):
+                c["pastas_excluidas"].remove(p)
+            salvar_config(c)
+            print(_t("Pasta adicionada: %1", p))
+    elif acao in ("remover", "excluir"):
+        if not a.caminho:
+            print(_t("caminho obrigatório"), file=sys.stderr)
+            return 1
+        p = a.caminho.strip()
+        if p.startswith(str(HOME)):
+            p = os.path.relpath(p, HOME)
+        p = p.strip("/")
+        if p in c["pastas_personalizadas"]:
+            c["pastas_personalizadas"].remove(p)
+            salvar_config(c)
+            print(_t("Pasta removida: %1", p))
+        elif p and p not in c.get("pastas_excluidas", []):
+            c["pastas_excluidas"].append(p)
+            salvar_config(c)
+            print(_t("Pasta adicionada às exclusões: %1", p))
+    elif acao == "listar":
+        print(json.dumps({
+            "personalizadas": c.get("pastas_personalizadas", []),
+            "excluidas": c.get("pastas_excluidas", [])
+        }, ensure_ascii=False))
+    return 0
+
+
 # ── comandos ─────────────────────────────────────────────────────────────────
 def cmd_status(_a):
     c = config()
@@ -500,6 +608,8 @@ def cmd_status(_a):
                 disp["este_dispositivo"] = False
                 lista_dispositivos.append(disp)
 
+    pausado, ate = esta_pausado()
+
     print(json.dumps({
         "rclone": bool(rclone_bin()),
         "conectado": lig,
@@ -518,6 +628,11 @@ def cmd_status(_a):
         "rodando": rodando,
         "sincronizando": rodando or bool(e.get("sincronizando")),
         "rede_limitada": rede_limitada(),
+        "pausado": pausado,
+        "pausado_ate": ate,
+        "conflito": e.get("conflito"),
+        "pastas_personalizadas": c.get("pastas_personalizadas", []),
+        "pastas_excluidas": c.get("pastas_excluidas", []),
         "brave_pendente": (HOME / ".local/share/conta/brave-pendente").is_dir(),
         "dispositivos": lista_dispositivos,
         "entrando": e.get("entrando", False),
@@ -790,6 +905,13 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
     (ex.: papel de parede alterado no notebook) e aplica dinamicamente."""
     if not conectado():
         return False
+
+    pausado, ate = esta_pausado()
+    if pausado and not forcar:
+        if not silencioso:
+            print(_t("Sincronização pausada pelo Modo Viagem até %1.", ate))
+        return False
+
     salvar_estado(sincronizando=True)
     try:
         # Se havia favoritos do navegador aguardando o fechamento do Brave, tenta aplicar
@@ -833,6 +955,41 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
         except OSError:
             pass
 
+        # 2. Sincronização dinâmica de Tema
+        tema_remoto = meta_remoto.get("tema")
+        tema_local_atual = None
+        tema_arq = HOME / ".local/state/simba/current/theme.name"
+        if tema_arq.exists():
+            tema_local_atual = tema_arq.read_text().strip()
+
+        # Detecção de conflito concorrente de personalização
+        if not forcar and ultima_local:
+            try:
+                dt_remota = datetime.datetime.fromisoformat(data_remota).astimezone(datetime.timezone.utc)
+                dt_local = datetime.datetime.fromisoformat(ultima_local).astimezone(datetime.timezone.utc)
+                diff_min = abs((dt_remota - dt_local).total_seconds()) / 60.0
+                if diff_min < 45 and (
+                    (tema_remoto and tema_local_atual and tema_remoto != tema_local_atual) or
+                    (fundo_remoto and fundo_local_atual and Path(fundo_remoto).is_file() and str(Path(fundo_remoto).resolve()) != fundo_local_atual)
+                ):
+                    conflito_info = {
+                        "maquina_remota": maquina_remota,
+                        "data_remota": data_remota,
+                        "data_local": ultima_local,
+                        "tema_remoto": tema_remoto,
+                        "tema_local": tema_local_atual,
+                        "fundo_remoto": fundo_remoto,
+                        "fundo_local": fundo_local_atual
+                    }
+                    salvar_estado(conflito=conflito_info)
+                    avisar(_t("Simba Conta — Conflito"),
+                           _t("Alterações em %1 concorrem com as locais. Abra as Configurações para escolher.", maquina_remota))
+                    if not silencioso:
+                        print(_t("Conflito detectado entre %1 e a máquina local.", maquina_remota))
+                    return False
+            except Exception:
+                pass
+
         wallpaper_aplicado = False
         if fundo_remoto:
             # Se o caminho é um arquivo de sistema (/usr/share/backgrounds/...) ou já existe localmente
@@ -856,13 +1013,6 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
 
         if wallpaper_aplicado:
             mudancas.append(_t("papel de parede"))
-
-        # 2. Sincronização dinâmica de Tema
-        tema_remoto = meta_remoto.get("tema")
-        tema_local_atual = None
-        tema_arq = HOME / ".local/state/simba/current/theme.name"
-        if tema_arq.exists():
-            tema_local_atual = tema_arq.read_text().strip()
 
         if tema_remoto and tema_remoto != tema_local_atual and shutil.which("simba-theme-set") and not os.environ.get("CONTA_HOME"):
             try:
@@ -901,8 +1051,8 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
             except (subprocess.TimeoutExpired, Exception):
                 pass
 
-        # 4. Salva carimbo da sincronização remota
-        salvar_estado(ultima_remota_aplicada=data_remota, remoto_meta=meta_remoto)
+        # 4. Salva carimbo da sincronização remota e limpa conflito se resolvido
+        salvar_estado(ultima_remota_aplicada=data_remota, remoto_meta=meta_remoto, conflito=None)
 
         if mudancas:
             resumo = ", ".join(mudancas)
@@ -928,6 +1078,13 @@ def cmd_sincronizar(a):
     if not conectado():
         print(_t("não conectado"), file=sys.stderr)
         return 0 if a.silencioso else 1  # timer de um clone ainda sem login: não é falha
+
+    # Modo Viagem (pausa temporária)
+    pausado, ate = esta_pausado()
+    if pausado and not getattr(a, "forcar", False) and not getattr(a, "substituir", False):
+        if not a.silencioso:
+            print(_t("Sincronização pausada pelo Modo Viagem até %1.", ate))
+        return 0
 
     # Conexão limitada (dados móveis / hotspot do celular):
     # Se o timer rodar em conexão limitada, espaça para 2 horas para poupar a franquia
@@ -1374,6 +1531,17 @@ def main():
     p.set_defaults(f=cmd_categoria)
     sub.add_parser("tamanho").set_defaults(f=cmd_tamanho)
     sub.add_parser("foto", help="baixa a foto de perfil da conta Google").set_defaults(f=cmd_foto)
+    p = sub.add_parser("pausar", help="pausa a sincronização por X horas (Modo Viagem)")
+    p.add_argument("horas", nargs="?", type=int, default=24)
+    p.set_defaults(f=cmd_pausar)
+    sub.add_parser("retomar", help="retoma a sincronização (desativa Modo Viagem)").set_defaults(f=cmd_retomar)
+    p = sub.add_parser("resolver", help="resolve conflitos de versão entre máquinas")
+    p.add_argument("escolha", choices=["local", "remoto", "este", "nuvem"])
+    p.set_defaults(f=cmd_resolver)
+    p = sub.add_parser("pasta", help="gerencia pastas adicionais na categoria documentos")
+    p.add_argument("acao", choices=["adicionar", "incluir", "remover", "excluir", "listar"])
+    p.add_argument("caminho", nargs="?", default="")
+    p.set_defaults(f=cmd_pasta)
     p = sub.add_parser("boas-vindas", help="tela da primeira inicialização (mostrar: código 0 se deve aparecer)")
     p.add_argument("acao", choices=["mostrar", "marcar", "fechar", "liga", "desliga"],
                    help="liga/desliga: oferecer o login no 1º boot das instalações pela ISO")

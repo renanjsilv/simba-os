@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+"""diferencas-desta-maquina — o que esta máquina tem que uma instalação nova do Simba OS não teria.
+
+A maior parte dos bugs achados em instalações novas vinha disto: coisas ajustadas à mão aqui
+(tema de ícones na pasta pessoal, serviço ligado manualmente, timeout do Limine…) que o Simba
+usa mas que não vêm nos pacotes nem no /etc/skel. Cada item vira uma decisão: entra no pacote
+(ou numa migração) ou é pessoal.
+
+  diferencas-desta-maquina            relatório (⚠ = o Simba usa e não vem na instalação nova)
+  diferencas-desta-maquina --tudo     inclui também o que é pessoal / de outros apps
+  diferencas-desta-maquina --json     saída em JSON
+
+Lê o repositório em ../pacotes (skel e scripts) para saber o que o Simba usa.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+R = Path(__file__).resolve().parent.parent
+HOME = Path.home()
+SKEL = R / "pacotes/simba/raiz/etc/skel"
+PACOTES = R / "pacotes"
+TUDO = "--tudo" in sys.argv
+
+# Pastas de dados de apps que nunca são do Simba (não vale a pena olhar dentro)
+APPS_FORA = {"BraveSoftware", "chromium", "google-chrome", "Code", "Electron", "discord", "Slack", "spotify",
+             "pulse", "rclone", "gh", "hydralauncher", "Microsoft", "WhatsApp", "obsidian", "libreoffice",
+             "dconf", "systemd", "ibus", "fcitx5", "gtk-2.0", "kdeglobals", "Trolltech.conf", "QtProject.conf"}
+IGNORAR_ARQ = re.compile(r"(\.bak[-.\w]*|\.orig|~|\.swp|\.lock|\.pid|\.log)$")
+
+
+def sh(*cmd, entrada=None):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, input=entrada).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def texto_repo():
+    """Todo o texto dos pacotes e da receita da ISO (para saber o que o Simba menciona)."""
+    partes = []
+    for base in (PACOTES, R / "iso"):
+        for p in base.rglob("*"):
+            if "/pkg/" in str(p) or "/.git/" in str(p) or not p.is_file() or p.is_symlink():
+                continue
+            if p.stat().st_size > 2_000_000:
+                continue
+            try:
+                partes.append(p.read_text(errors="ignore"))
+            except OSError:
+                pass
+    return "\n".join(partes)
+
+
+REPO = texto_repo()
+
+
+def simba_usa(rel):
+    """O repositório menciona este caminho da pasta pessoal (ex.: .config/botoes-janela)?"""
+    rel = rel.strip("/")
+    return any(x in REPO for x in (f"~/{rel}", f"$HOME/{rel}", f"HOME/{rel}", f"/{rel}\"", f"'{rel}", f"\"{rel}"))
+
+
+achados = []   # (nivel, secao, item, detalhe)
+
+
+def achar(nivel, secao, item, detalhe=""):
+    achados.append({"nivel": nivel, "secao": secao, "item": item, "detalhe": detalhe})
+
+
+# ── 1. pasta pessoal: o que só existe aqui ──────────────────────────────────────────
+for pai in (".config", ".local/share", ".local/state"):
+    base = HOME / pai
+    if not base.is_dir():
+        continue
+    for e in sorted(base.iterdir()):
+        rel = f"{pai}/{e.name}"
+        if (SKEL / rel).exists() or os.path.lexists(SKEL / rel):
+            continue
+        if e.name in APPS_FORA:
+            if TUDO:
+                achar("info", "pasta pessoal (só aqui)", rel, "dados de outro app")
+            continue
+        if TUDO and simba_usa(rel):
+            # quase sempre criada pelo próprio app no primeiro uso (conta, draco…): só informação
+            achar("info", "pasta pessoal (só aqui)", rel, "o Simba usa; confira se o app cria sozinho")
+        elif TUDO:
+            achar("info", "pasta pessoal (só aqui)", rel, "pessoal / de outro app")
+
+# temas de ícones, fontes e atalhos na pasta pessoal (o caso do Yaru-grey)
+for pai, tipo in ((".local/share/icons", "tema de ícones"), (".local/share/fonts", "fonte"),
+                  (".local/share/applications", "atalho de app")):
+    base = HOME / pai
+    if not base.is_dir():
+        continue
+    for e in sorted(base.iterdir()):
+        nome = e.name.rsplit(".", 1)[0] if e.is_file() else e.name
+        sistema = Path("/usr/share/icons" if tipo == "tema de ícones" else "/usr/share/fonts") / e.name
+        if tipo == "tema de ícones" and (sistema.exists() or nome in ("default", "hicolor")):
+            continue
+        if tipo != "atalho de app" and nome and re.search(re.escape(nome), REPO):
+            achar("alerta", "instalado só na pasta pessoal", f"{pai}/{e.name}",
+                  f"{tipo} citado pelo Simba e que não vem nos pacotes")
+        elif TUDO:
+            achar("info", "instalado só na pasta pessoal", f"{pai}/{e.name}", tipo)
+
+# ── 2. pasta pessoal: o que vem no modelo mas aqui está diferente ───────────────────
+for p in sorted(SKEL.rglob("*")):
+    if p.is_dir() or p.is_symlink():
+        continue
+    rel = p.relative_to(SKEL)
+    if str(rel).startswith((".local/share/nvim", ".local/state/simba/migrations")) or IGNORAR_ARQ.search(p.name):
+        continue
+    aqui = HOME / rel
+    if not aqui.exists():
+        achar("info", "modelo que não está aqui", str(rel), "vem no /etc/skel mas não existe nesta pasta pessoal")
+        continue
+    try:
+        if aqui.is_file() and aqui.read_bytes() != p.read_bytes():
+            # config do Simba diferente do modelo: ou é ajuste pessoal, ou o modelo está desatualizado
+            achar("alerta" if str(rel).startswith((".config/hypr", ".config/simba", ".config/botoes", ".config/uwsm"))
+                  else "info", "diferente do modelo", str(rel),
+                  "diferente do /etc/skel: se é correção, levar ao modelo (e migração); se é pessoal, ignorar")
+    except OSError:
+        pass
+
+# ── 3. sistema: arquivos de configuração alterados à mão e coisas fora dos pacotes ──
+ISO_SISTEMA = R / "iso/sistema"            # o que a receita da ISO põe em /
+# Referência melhor: o sistema que a última ISO montou (iso/construir deixa em work/raiz) é
+# exatamente o que uma instalação nova recebe (antes do instalador trocar discos/usuário).
+RAIZ = Path(os.environ.get("SIMBA_RAIZ_REF", "/mnt/dados/simba-iso/work/raiz"))
+if not (RAIZ / "etc").is_dir():
+    RAIZ = None
+# mudam em toda máquina (usuários, discos, rede, idioma): não são diferença de distro
+POR_MAQUINA = {"/etc/passwd", "/etc/group", "/etc/shadow", "/etc/gshadow", "/etc/subuid", "/etc/subgid",
+               "/etc/fstab", "/etc/crypttab", "/etc/hostname", "/etc/hosts", "/etc/issue", "/etc/machine-id",
+               "/etc/resolv.conf", "/etc/shells", "/etc/locale.gen", "/etc/locale.conf", "/etc/vconsole.conf",
+               "/etc/pacman.d/mirrorlist", "/etc/nsswitch.conf", "/etc/skel/.bashrc", "/etc/adjtime",
+               "/etc/sddm.conf.d/autologin.conf"}   # autologin: escolha feita no instalador
+
+
+def comparar_com_iso(a, secao, sem_iso):
+    """Arquivo que a ISO também traz: só é diferença se o conteúdo for outro."""
+    if RAIZ is not None:
+        ref = RAIZ / a.lstrip("/")
+        try:
+            if ref.is_file():
+                if Path(a).read_bytes() != ref.read_bytes():
+                    achar("alerta", secao, a, "diferente do que uma instalação nova recebe (última ISO): "
+                          "levar ao pacote/receita ou é só desta máquina?")
+                return
+            if not ref.exists():
+                achar("alerta", secao, a, "não existe numa instalação nova (última ISO)")
+                return
+        except OSError:
+            pass   # sem permissão de leitura na referência: cai na comparação com iso/sistema
+    iso = ISO_SISTEMA / a.lstrip("/")
+    if iso.is_file():
+        try:
+            if Path(a).read_bytes() != iso.read_bytes():
+                achar("alerta", secao, a, "diferente do que a ISO instala (iso/sistema): levar à receita ou é desta máquina?")
+        except OSError:
+            pass
+        return
+    sem_iso()
+
+
+for linha in sh("env", "LANG=C", "pacman", "-Qii").splitlines():
+    m = re.search(r"(/etc/\S+) \[modified\]", linha)
+    if not m or m.group(1) in POR_MAQUINA:
+        continue
+    a = m.group(1)
+    comparar_com_iso(a, "sistema alterado à mão",
+                     lambda a=a: achar("alerta" if (a in REPO or Path(a).name in REPO) else "info",
+                                       "sistema alterado à mão", a,
+                                       "arquivo de pacote modificado aqui; o Simba cita este arquivo"
+                                       if (a in REPO or Path(a).name in REPO) else "arquivo de pacote modificado aqui"))
+
+for d in ("/etc/systemd/system", "/etc/default", "/etc/sddm.conf.d", "/etc/pacman.d/hooks",
+          "/etc/limine-entry-tool.d", "/etc/modprobe.d", "/etc/sysctl.d", "/etc/udev/rules.d", "/etc/xdg"):
+    base = Path(d)
+    if not base.is_dir():
+        continue
+    arqs = [str(p) for p in base.rglob("*") if p.is_file() and not p.is_symlink()]
+    if not arqs:
+        continue
+    donos = sh("pacman", "-Qo", *arqs)
+    for a in [a for a in arqs if a not in donos and a not in POR_MAQUINA]:
+        no_repo = a in REPO or Path(a).name in REPO
+        comparar_com_iso(a, "sistema fora dos pacotes",
+                         lambda a=a, no_repo=no_repo: achar(
+                             "info", "sistema fora dos pacotes", a,
+                             "criado por script do Simba (instalador/hardware): confira se a instalação nova também cria"
+                             if no_repo else "criado à mão ou por um app"))
+
+for p in sorted(Path("/usr/local").rglob("*")):
+    if p.is_file():
+        achar("alerta" if p.name in REPO else "info", "sistema fora dos pacotes", str(p),
+              "em /usr/local (nunca vem em pacote)")
+
+# ── 4. serviços ligados aqui e que a instalação nova não liga ──────────────────────
+# unidades citadas em qualquer arquivo do repositório que faz "enable" (primeiro login,
+# receita da ISO, instalador, scripts dos apps) contam como ligadas numa instalação nova
+LIGADAS_NOVO = set()
+for base in (PACOTES, R / "iso"):
+    for p in base.rglob("*"):
+        if "/pkg/" in str(p) or not p.is_file() or p.is_symlink() or p.stat().st_size > 2_000_000:
+            continue
+        try:
+            t = p.read_text(errors="ignore")
+        except OSError:
+            continue
+        if "enable" in t:
+            LIGADAS_NOVO.update(re.findall(r"[\w@.-]+\.(?:service|timer|socket|path)", t))
+# unidades com WantedBy num .wants do /etc/skel (ligadas sem precisar de enable)
+for w in SKEL.rglob("*.wants"):
+    LIGADAS_NOVO.update(x.name for x in w.iterdir())
+
+
+if RAIZ is not None:
+    for w in (RAIZ / "etc/systemd/system").glob("*.wants"):
+        try:
+            LIGADAS_NOVO.update(x.name for x in w.iterdir())
+        except OSError:
+            pass
+
+
+def ligado_no_novo(u):
+    return u in LIGADAS_NOVO
+
+for linha in sh("systemctl", "--user", "list-unit-files", "--state=enabled", "--no-legend").splitlines():
+    u = linha.split()[0] if linha.split() else ""
+    if not u or ligado_no_novo(u):
+        continue
+    dono = sh("bash", "-c", f"pacman -Qoq /usr/lib/systemd/user/{u} 2>/dev/null").strip()
+    if dono.startswith("simba"):
+        achar("alerta", "serviço ligado só aqui", f"usuário: {u}", f"do pacote {dono}, mas nada liga numa instalação nova")
+    elif TUDO:
+        achar("info", "serviço ligado só aqui", f"usuário: {u}", dono or "sem pacote")
+
+for linha in sh("systemctl", "list-unit-files", "--state=enabled", "--no-legend").splitlines():
+    u = linha.split()[0] if linha.split() else ""
+    if not u or ligado_no_novo(u):
+        continue
+    dono = sh("bash", "-c", f"pacman -Qoq /usr/lib/systemd/system/{u} 2>/dev/null").strip()
+    if TUDO or dono.startswith("simba"):
+        achar("alerta" if dono.startswith("simba") else "info", "serviço ligado só aqui", f"sistema: {u}", dono or "sem pacote")
+
+# ── 5. aparência: temas escolhidos que precisam existir numa instalação nova ───────
+for chave in ("icon-theme", "gtk-theme", "cursor-theme"):
+    v = sh("gsettings", "get", "org.gnome.desktop.interface", chave).strip().strip("'")
+    if not v:
+        continue
+    pastas = ("/usr/share/icons",) if chave != "gtk-theme" else ("/usr/share/themes",)
+    if not any(Path(p, v).exists() for p in pastas):
+        achar("alerta", "aparência", f"{chave} = {v}",
+              "só existe na pasta pessoal (ou em lugar nenhum): numa instalação nova os ícones/tema somem")
+
+# ── relatório ───────────────────────────────────────────────────────────────────────
+if "--json" in sys.argv:
+    print(json.dumps(achados, ensure_ascii=False, indent=1))
+    sys.exit(0)
+alertas = [a for a in achados if a["nivel"] == "alerta"]
+print(f"Diferenças desta máquina para uma instalação nova do Simba OS — {len(alertas)} alerta(s)")
+print(f"referência: {RAIZ} (sistema montado pela última ISO)" if RAIZ else
+      "referência: pacotes e iso/sistema (monte uma ISO para comparar com o sistema real)")
+print("⚠ = o Simba usa e não viria numa instalação nova (provável bug lá)\n")
+secoes = []
+for a in achados:
+    if a["secao"] not in secoes:
+        secoes.append(a["secao"])
+for s in secoes:
+    itens = [a for a in achados if a["secao"] == s and (TUDO or a["nivel"] == "alerta")]
+    if not itens:
+        continue
+    print(f"── {s}")
+    for a in itens:
+        print(f"  {'⚠' if a['nivel'] == 'alerta' else '·'} {a['item']}")
+        if a["detalhe"]:
+            print(f"      {a['detalhe']}")
+    print()
+if not TUDO:
+    print("(--tudo mostra também o que é pessoal ou de outros apps)")

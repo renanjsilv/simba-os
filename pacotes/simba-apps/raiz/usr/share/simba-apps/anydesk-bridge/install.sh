@@ -1,4 +1,6 @@
 #!/bin/bash
+# (OBSOLETO desde simba-apps 1.1.12-44: o pacote já compila o calço em /usr/lib/simba-apps e
+#  traz o drop-in; este script fica só para referência)
 # Instala a ponte AnyDesk ↔ Hyprland.
 #   Uso:      sudo /usr/share/simba-apps/anydesk-bridge/install.sh
 #   Remover:  sudo /usr/share/simba-apps/anydesk-bridge/install.sh --uninstall

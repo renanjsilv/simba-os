@@ -401,7 +401,8 @@ wake_process() {
 
 escuta() {
   case $1 in
-    liga) rm -f "$DATA/wake.disabled"; systemctl --user start draco-wake.service; echo "Escuta do \"Draco\" ligada." ;;
+    # enable: continua ligada depois de reiniciar (antes era só start)
+    liga) rm -f "$DATA/wake.disabled"; systemctl --user enable --now draco-wake.service draco-aquecer.service >/dev/null 2>&1; echo "Escuta do \"Draco\" ligada." ;;
     desliga) touch "$DATA/wake.disabled"; echo "Escuta do \"Draco\" desligada (microfone fechado)." ;;
     *)
       if [[ -f $DATA/wake.disabled ]]; then echo "Escuta: desligada"

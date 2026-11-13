@@ -31,4 +31,9 @@ for v in "${vozes[@]}"; do
       mv "$DATA/voices/$n.$ext.part" "$DATA/voices/$n.$ext"
   done
 done
+# Escuta do "Draco" e o aquecimento ligados de verdade (enable): antes eram só iniciados e,
+# numa instalação nova, paravam a cada reinício.
+if [[ ! -f $DATA/wake.disabled ]]; then
+  systemctl --user enable --now draco-wake.service draco-aquecer.service >/dev/null 2>&1 || true
+fi
 msg "✓ $(simba-t "Draco pronto")"

@@ -7,7 +7,7 @@ GW=${GW:-192.168.122.1}
 j() { jq -Rs . <<<"$1"; }   # texto → string JSON
 
 camadas=$(hyprctl layers -j 2>/dev/null | jq -c '[.[].levels[][]?.namespace] | unique')
-boas=true   # já validado visualmente na tela pelo testar-iso-completo ("primeiro-login")
+boas=$(hyprctl clients -j 2>/dev/null | jq '[.[] | select(.class == "com.simba.BoasVindas")] | length > 0')
 
 parados=()
 for u in botoes-janela.service simba-atualizar-avisar.timer simba-migrate-notify.service bt-agent.service; do

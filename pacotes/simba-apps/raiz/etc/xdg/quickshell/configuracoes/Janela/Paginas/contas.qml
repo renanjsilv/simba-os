@@ -353,11 +353,24 @@ Pagina {
     Linha {
       chave: "contaAuto"
       glifo: Icones.sync
-      titulo: I18n.t("Fazer backup automaticamente")
-      descricao: I18n.t("10 minutos depois de ligar e a cada 2 horas, em segundo plano")
+      titulo: I18n.t("Sincronização dinâmica e backup automático")
+      descricao: I18n.t("A cada 20 minutos: sincroniza alterações (como papel de parede) entre suas máquinas e salva o backup.")
       Interruptor {
         ligado: !!(pg.s && pg.s.auto)
         onAlternado: function(x) { Sistema.rodar(["conta", "auto", x ? "liga" : "desliga"], function() { pg.atualizar() }) }
+      }
+    }
+    Linha {
+      glifo: Icones.refresh
+      titulo: I18n.t("Verificar novidades na nuvem agora")
+      descricao: I18n.t("Busca se houve mudança de papel de parede, tema ou configurações feita em outro computador.")
+      Botao {
+        texto: I18n.t("Verificar agora")
+        habilitado: !pg.ocupado && !pg.precisaSenha
+        onClicado: Sistema.rodar(["conta", "puxar", "--forcar"], function(o, code) {
+          pg.atualizar()
+          Navegacao.confirmar(I18n.t("Verificação concluída"), Icones.checkCircle)
+        })
       }
     }
     Linha {

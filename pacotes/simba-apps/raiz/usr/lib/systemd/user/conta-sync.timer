@@ -1,13 +1,12 @@
 [Unit]
-Description=Backup automático da conta no Google Drive
+Description=Sincronização e backup automático da conta no Google Drive
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=2h
-# relógio de parede: depois de suspender/hibernar o backup atrasado roda ao acordar
-OnCalendar=*-*-* 00/2:00:00
+OnBootSec=3min
+OnUnitActiveSec=20min
+OnCalendar=*:0/20
 Persistent=true
-RandomizedDelaySec=5min
+RandomizedDelaySec=2min
 
 [Install]
 WantedBy=timers.target

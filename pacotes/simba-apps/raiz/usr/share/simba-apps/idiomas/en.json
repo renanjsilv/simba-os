@@ -2391,5 +2391,14 @@
  "Telemetria de Jogos (MangoHud)": "Gaming Telemetry (MangoHud)",
  "Monitor de FPS, temperaturas e consumo de GPU/CPU. Pressione Shift Direito + F12 em qualquer jogo.": "FPS, temperature and GPU/CPU monitor. Press Right Shift + F12 in any game.",
  "Editar Perfil": "Edit Profile",
- "Windows (.exe)": "Windows (.exe)"
+ "Windows (.exe)": "Windows (.exe)",
+ "Sincronização dinâmica e backup automático": "Dynamic sync and automatic backup",
+ "A cada 20 minutos: sincroniza alterações (como papel de parede) entre suas máquinas e salva o backup.": "Every 20 minutes: syncs changes (like wallpaper) across your machines and saves the backup.",
+ "Verificar novidades na nuvem agora": "Check cloud updates now",
+ "Busca se houve mudança de papel de parede, tema ou configurações feita em outro computador.": "Checks for wallpaper, theme or settings changes made on another computer.",
+ "Verificação concluída": "Check completed",
+ "Simba Conta — Nuvem": "Simba Account — Cloud",
+ "Alterações sincronizadas a partir de %1: %2.": "Changes synchronized from %1: %2.",
+ "Alterações sincronizadas com sucesso (%1).": "Changes synchronized successfully (%1).",
+ "Nenhuma alteração pendente de outra máquina.": "No pending changes from another machine."
 }

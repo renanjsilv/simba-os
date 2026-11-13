@@ -662,35 +662,118 @@ def pode_enviar():
     """Uma máquina que nunca enviou nem restaurou não pode espelhar a pasta
     pessoal (talvez vazia) por cima do backup existente de outra máquina."""
     e = estado()
-    if e.get("ultima") or e.get("restaurado"):
+    if e.get("ultima") or e.get("restaurado") or e.get("ultima_remota_aplicada"):
         return True
     return not remoto_meta()
 
 
-def limpar_lixeira(dados):
-    """Apaga do Drive as pastas lixeira/<AAAAMMDD-HHMMSS> com mais de 30 dias.
-    Antes era `rclone delete --min-age 30d`, que percorria a lixeira inteira e
-    passava de 10 min (derrubando o backup). Agora só lista as pastas do topo.
-    Nunca faz o backup falhar."""
+def puxar_alteracoes_remotas(silencioso=False, forcar=False):
+    """Verifica se há alterações novas no Google Drive enviadas por outra máquina
+    (ex.: papel de parede alterado no notebook) e aplica dinamicamente."""
+    if not conectado():
+        return False
     try:
-        r = rc("lsf", "--dirs-only", f"{dados}/lixeira", check=False, timeout=120)
-        limite = datetime.datetime.now() - datetime.timedelta(days=30)
-        for nome in r.stdout.split():
-            nome = nome.rstrip("/")
+        meta_remoto = remoto_meta()
+        if not meta_remoto or not meta_remoto.get("data"):
+            return False
+
+        data_remota = meta_remoto.get("data")
+        maquina_remota = meta_remoto.get("maquina", "")
+        maquina_local = socket.gethostname()
+
+        e = estado()
+        ultima_aplicada = e.get("ultima_remota_aplicada", "")
+        ultima_local = e.get("ultima", "")
+
+        # Se for a mesma máquina e não foi forçado, não é alteração de outra máquina
+        if not forcar and maquina_remota == maquina_local:
+            return False
+
+        # Se já aplicamos esta versão remota anteriormente
+        if not forcar and data_remota == ultima_aplicada:
+            return False
+
+        # Se nosso último envio local é mais recente que o remoto, mantém o local
+        if not forcar and ultima_local and data_remota <= ultima_local:
+            return False
+
+        c = config()
+        dados = remoto_dados(c)
+        mudancas = []
+
+        # 1. Sincronização dinâmica de Papel de Parede
+        fundo_remoto = meta_remoto.get("fundo")
+        fundo_local_atual = None
+        try:
+            link = HOME / ".local/state/simba/current/background"
+            if link.exists():
+                fundo_local_atual = str(link.resolve())
+        except OSError:
+            pass
+
+        wallpaper_aplicado = False
+        if fundo_remoto:
+            # Se o caminho é um arquivo de sistema (/usr/share/backgrounds/...) ou já existe localmente
+            if Path(fundo_remoto).is_file() and str(Path(fundo_remoto).resolve()) != fundo_local_atual:
+                _aplicar_fundo(fundo_remoto)
+                wallpaper_aplicado = True
+            else:
+                # Baixa a imagem da pasta extra/fundo do Google Drive
+                destino = HOME / ".local/share/conta/fundo"
+                destino.mkdir(parents=True, exist_ok=True)
+                r = rc("copy", f"{dados}/extra/fundo", str(destino), check=False, timeout=60)
+                if r.returncode == 0:
+                    imgs = [p for p in destino.iterdir() if p.is_file()]
+                    if imgs and str(imgs[0].resolve()) != fundo_local_atual:
+                        _aplicar_fundo(imgs[0])
+                        wallpaper_aplicado = True
+
+        if wallpaper_aplicado:
+            mudancas.append(_t("papel de parede"))
+
+        # 2. Sincronização dinâmica de Tema
+        tema_remoto = meta_remoto.get("tema")
+        tema_local_atual = None
+        tema_arq = HOME / ".local/state/simba/current/theme.name"
+        if tema_arq.exists():
+            tema_local_atual = tema_arq.read_text().strip()
+
+        if tema_remoto and tema_remoto != tema_local_atual and shutil.which("simba-theme-set") and not os.environ.get("CONTA_HOME"):
             try:
-                data = datetime.datetime.strptime(nome, "%Y%m%d-%H%M%S")
-            except ValueError:
-                continue
-            if data < limite:
-                rc("purge", f"{dados}/lixeira/{nome}", check=False, timeout=300)
-    except Exception as e:  # noqa: BLE001
-        print(_t("limpeza da lixeira ignorada: %1", e), file=sys.stderr)
+                subprocess.run(["simba-theme-set", tema_remoto], capture_output=True, timeout=60)
+                mudancas.append(_t("tema (%1)", tema_remoto))
+            except Exception:
+                pass
+
+        # 3. Salva carimbo da sincronização remota
+        salvar_estado(ultima_remota_aplicada=data_remota, remoto_meta=meta_remoto)
+
+        if mudancas:
+            resumo = ", ".join(mudancas)
+            avisar(_t("Simba Conta — Nuvem"),
+                   _t("Alterações sincronizadas a partir de %1: %2.", maquina_remota or _t("outra máquina"), resumo))
+            if not silencioso:
+                print(_t("Alterações sincronizadas com sucesso (%1).", resumo))
+            return True
+        else:
+            if not silencioso:
+                print(_t("Nenhuma alteração pendente de outra máquina."))
+            return False
+
+    except Exception as exc:
+        if not silencioso:
+            print(_t("verificação remota falhou: %1", exc), file=sys.stderr)
+        return False
 
 
 def cmd_sincronizar(a):
     if not conectado():
         print(_t("não conectado"), file=sys.stderr)
         return 0 if a.silencioso else 1  # timer de um clone ainda sem login: não é falha
+
+    # Antes de enviar, confere se outra máquina publicou novidades (ex.: trocou wallpaper ou tema)
+    puxar_alteracoes_remotas(silencioso=a.silencioso, forcar=getattr(a, "forcar", False))
+
     if not a.substituir and not pode_enviar():
         msg = _t("Já existe um backup nesta conta. Restaure-o primeiro (ou escolha substituí-lo).")
         salvar_estado(resultado="erro", erro=msg, precisa_decidir=True)
@@ -992,15 +1075,14 @@ IOSchedulingClass=idle
 TimeoutStartSec=1h
 """
 TIMER = """[Unit]
-Description=Backup automático da conta no Google Drive
+Description=Sincronização e backup automático da conta no Google Drive
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=2h
-# relógio de parede: depois de suspender/hibernar o backup atrasado roda ao acordar
-OnCalendar=*-*-* 00/2:00:00
+OnBootSec=3min
+OnUnitActiveSec=20min
+OnCalendar=*:0/20
 Persistent=true
-RandomizedDelaySec=5min
+RandomizedDelaySec=2min
 
 [Install]
 WantedBy=timers.target
@@ -1073,7 +1155,16 @@ def main():
     p = sub.add_parser("sincronizar")
     p.add_argument("--silencioso", action="store_true")
     p.add_argument("--substituir", action="store_true", help="envia mesmo havendo backup de outra máquina")
+    p.add_argument("--forcar", action="store_true", help="força puxar alterações mesmo da mesma máquina")
     p.set_defaults(f=cmd_sincronizar)
+    p = sub.add_parser("puxar", help="busca e aplica alterações remotas do Google Drive")
+    p.add_argument("--silencioso", action="store_true")
+    p.add_argument("--forcar", action="store_true", help="força puxar alterações mesmo da mesma máquina")
+    p.set_defaults(f=lambda a: 0 if puxar_alteracoes_remotas(silencioso=a.silencioso, forcar=a.forcar) else 0)
+    p = sub.add_parser("verificar", help="busca e aplica alterações remotas do Google Drive")
+    p.add_argument("--silencioso", action="store_true")
+    p.add_argument("--forcar", action="store_true", help="força puxar alterações mesmo da mesma máquina")
+    p.set_defaults(f=lambda a: 0 if puxar_alteracoes_remotas(silencioso=a.silencioso, forcar=a.forcar) else 0)
     p = sub.add_parser("restaurar")
     p.add_argument("--sim", action="store_true")
     p.add_argument("--sem-pacotes", action="store_true")

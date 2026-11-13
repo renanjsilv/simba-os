@@ -13,7 +13,7 @@
 # Se a máquina desligar no meio: rode de novo (as sobras da montagem são apagadas no começo).
 # Se cair só no envio: ferramentas/enviar-iso continua de onde parou.
 # SIMBA_SEM_ENVIO=1: para depois do teste, sem enviar.
-# Depois: teste completo na VM (ferramentas/testar-vm) e ferramentas/promover.
+# Depois (teste completo já passou): ferramentas/promover leva os pacotes do teste ao estável.
 set -Eeuo pipefail
 R="$(cd "$(dirname "$0")/.." && pwd)"
 source "$R/ferramentas/config.sh"
@@ -46,7 +46,9 @@ for w in /mnt/dados/gerar-iso/.work-* /var/tmp/gerar-iso/.work-*; do
   echo "   apagando sobra: $w"; sudo rm -rf "$w"
 done
 
-CANAL=${SIMBA_CANAL:-estavel}
+# Padrão: canal de TESTE. Os usuários só recebem depois do teste completo, com
+# ferramentas/promover. SIMBA_CANAL=estavel publica direto (emergência: correção de segurança).
+CANAL=${SIMBA_CANAL:-teste}
 echo "── 1/4 assinando pacotes novos e publicando no canal $CANAL"
 cd "$R/dist"
 for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do
@@ -95,4 +97,4 @@ fi
 echo "── 4/4 enviando para o SourceForge ($VERSAO/)"
 ENVIAR_SEM_SENHA=1 "$R/ferramentas/enviar-iso"
 avisar emblem-ok-symbolic "ISO $VERSAO publicada" "https://sourceforge.net/projects/simba-os/files/$VERSAO/"
-echo "✓ pronto. Próximo: teste completo na VM e ferramentas/promover"
+echo "✓ pronto (teste completo passou). Próximo: ferramentas/promover (pacotes do teste → estável)"

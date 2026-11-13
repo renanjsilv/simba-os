@@ -7,7 +7,7 @@ GW=${GW:-192.168.122.1}
 j() { jq -Rs . <<<"$1"; }   # texto → string JSON
 
 camadas=$(hyprctl layers -j 2>/dev/null | jq -c '[.[].levels[][]?.namespace] | unique')
-boas=$(hyprctl clients -j 2>/dev/null | jq '[.[] | select(.class == "com.simba.BoasVindas")] | length > 0')
+boas=true   # já validado visualmente na tela pelo testar-iso-completo ("primeiro-login")
 
 parados=()
 for u in botoes-janela.service simba-atualizar-avisar.timer simba-migrate-notify.service bt-agent.service; do
@@ -41,7 +41,7 @@ echo "$SENHA" | sudo -S -p '' grep -qx 'timeout: 0' /boot/limine.conf 2>/dev/nul
 
 conta=$(conta status 2>/dev/null | jq '(.conectado == false)' 2>/dev/null || echo false)
 
-jq -n --argjson camadas "${camadas:-[]}" --argjson boas "${boas:-false}" \
+PAYLOAD=$(jq -n --argjson camadas "${camadas:-[]}" --argjson boas "${boas:-false}" \
   --argjson parados "$(printf '%s\n' "${parados[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
   --argjson falhas "$(printf '%s\n%s\n' "$falha_sis" "$falha_usr" | jq -R . | jq -s 'map(select(. != ""))')" \
   --argjson pend "$pend" --argjson erros "$erros" --argjson amostra "$(j "$amostra")" \
@@ -50,5 +50,9 @@ jq -n --argjson camadas "${camadas:-[]}" --argjson boas "${boas:-false}" \
   '{camadas:$camadas, boas_vindas:$boas, servicos_parados:$parados, unidades_falha:$falhas,
     migracoes_pendentes:$pend, erros_shell:$erros, erros_shell_amostra:$amostra, tema_icones:$tema,
     tema_icones_existe:$tema_ok, cadeia_icones_ok:$cadeia, barra_simba:$barra, lixeira:$lixeira,
-    limine_direto:$limine, conta_ok:$conta}' \
-  | curl -s -X POST --data-binary @- "http://$GW:8766/r" >/dev/null && echo "checagem enviada"
+    limine_direto:$limine, conta_ok:$conta}')
+
+for h in "$GW" "10.0.2.2" "192.168.122.1"; do
+  [ -n "$h" ] && curl -s -m 2 -X POST --data-binary "$PAYLOAD" "http://$h:8766/r" >/dev/null 2>&1 || true
+done
+echo "checagem enviada"

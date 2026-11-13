@@ -714,19 +714,23 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
         wallpaper_aplicado = False
         if fundo_remoto:
             # Se o caminho é um arquivo de sistema (/usr/share/backgrounds/...) ou já existe localmente
-            if Path(fundo_remoto).is_file() and str(Path(fundo_remoto).resolve()) != fundo_local_atual:
-                _aplicar_fundo(fundo_remoto)
-                wallpaper_aplicado = True
+            if Path(fundo_remoto).is_file():
+                if str(Path(fundo_remoto).resolve()) != fundo_local_atual:
+                    _aplicar_fundo(fundo_remoto)
+                    wallpaper_aplicado = True
             else:
-                # Baixa a imagem da pasta extra/fundo do Google Drive
+                # Papel de parede personalizado de outra máquina: baixa da pasta extra/fundo
                 destino = HOME / ".local/share/conta/fundo"
                 destino.mkdir(parents=True, exist_ok=True)
-                r = rc("copy", f"{dados}/extra/fundo", str(destino), check=False, timeout=60)
-                if r.returncode == 0:
-                    imgs = [p for p in destino.iterdir() if p.is_file()]
-                    if imgs and str(imgs[0].resolve()) != fundo_local_atual:
-                        _aplicar_fundo(imgs[0])
-                        wallpaper_aplicado = True
+                try:
+                    r = rc("copy", f"{dados}/extra/fundo", str(destino), check=False, timeout=30)
+                    if r.returncode == 0:
+                        imgs = [p for p in destino.iterdir() if p.is_file()]
+                        if imgs and str(imgs[0].resolve()) != fundo_local_atual:
+                            _aplicar_fundo(imgs[0])
+                            wallpaper_aplicado = True
+                except (subprocess.TimeoutExpired, Exception):
+                    pass
 
         if wallpaper_aplicado:
             mudancas.append(_t("papel de parede"))

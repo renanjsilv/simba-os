@@ -1,0 +1,8 @@
+[Default Applications]
+# Executáveis do Windows abrem no Wine (o arquivador declarava esses tipos e ganhava: o .exe
+# "não abria"). Sem o Wine instalado, estas linhas são ignoradas.
+application/vnd.microsoft.portable-executable=wine.desktop
+application/x-ms-dos-executable=wine.desktop
+application/x-msdownload=wine.desktop
+application/x-msi=wine.desktop
+application/x-ms-shortcut=wine.desktop

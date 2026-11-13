@@ -1,0 +1,166 @@
+#!/bin/bash
+# testar-iso-completo — teste de ponta a ponta da ISO numa VM descartável, sem ninguém:
+#   instala (lendo a tela por OCR a cada passo), reinicia no sistema instalado, espera a área de
+#   trabalho e roda uma checagem dentro da sessão (barra, papel de parede, serviços, migrações,
+#   erros da barra, ícones, Lixeira, Limine…). O resultado volta para cá pela rede da VM.
+#
+#   testar-iso-completo <iso> [--manter]     sai com 0 se tudo passou
+#     --manter   não apaga a VM no fim (para olhar: TESTAR_VM=simba-auto ferramentas/testar-vm tela)
+#
+# Relatório e capturas de cada etapa: ~/.cache/simba-testes/<versão>-<data>/
+# Na VM: teclado americano (para digitar os comandos), desbloqueio do disco pelo TPM e login
+# automático (para não depender de senha), usuário "teste", senha "simba123".
+set -uo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+ISO=${1:?uso: testar-iso-completo <iso> [--manter]}
+MANTER=0; [ "${2:-}" = --manter ] && MANTER=1
+export TESTAR_VM=simba-auto TESTAR_VM_3D=0 TESTAR_VM_SSH=2225
+T="$R/ferramentas/testar-vm"
+C=(virsh -q -c qemu:///session)
+PORTA=8766
+SENHA=simba123
+NOME=$(basename "$ISO" .iso)
+OUT="$HOME/.cache/simba-testes/$NOME-$(date +%Y%m%d-%H%M)"
+mkdir -p "$OUT"
+LOG="$OUT/teste.log"
+exec > >(tee "$LOG") 2>&1
+
+passo() { printf '\n── [%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+falha() { printf '✗ %s\n' "$*"; captura "falha"; fim 1; }
+N=0
+captura() { N=$((N + 1)); "$T" tela "$OUT/$(printf %02d "$N")-$1.png" >/dev/null 2>&1 || true; }
+SERVIDOR=""
+fim() {
+  [ -n "$SERVIDOR" ] && kill "$SERVIDOR" 2>/dev/null
+  [ "$MANTER" = 1 ] || "$T" apagar >/dev/null 2>&1
+  echo "relatório: $OUT"
+  exit "$1"
+}
+trap 'fim 1' INT TERM
+
+# texto na tela agora (OCR)
+ocr() {
+  local p=/tmp/testar-iso-completo-$$.png
+  "$T" tela "$p" >/dev/null 2>&1 || return 1
+  magick "$p" -resize 200% -colorspace Gray "$p.g.png" 2>/dev/null
+  tesseract "$p.g.png" - -l eng 2>/dev/null | tr '\n' ' '
+  rm -f "$p" "$p.g.png"
+}
+# espera um texto (expressão regular, sem diferenciar maiúsculas) aparecer na tela
+esperar() {  # esperar <regex> <segundos> <nome da etapa>
+  local i
+  for ((i = 0; i < $2; i += 3)); do
+    if ocr | grep -qiE "$1"; then captura "$3"; return 0; fi
+    sleep 3
+  done
+  return 1
+}
+tecla() { "$T" tecla "$@"; sleep 0.6; }
+texto() { "$T" texto "$1"; sleep 0.4; }
+
+# ── servidor local que entrega a checagem e recebe o resultado ──────────────────────
+CHECAGEM="$R/ferramentas/testar-iso-completo.checagem"
+python3 -I - "$PORTA" "$CHECAGEM" "$OUT/resultado.json" <<'PY' &
+import http.server, sys
+porta, script, saida = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        corpo = open(script, "rb").read()
+        self.send_response(200); self.send_header("Content-Length", str(len(corpo))); self.end_headers()
+        self.wfile.write(corpo)
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        open(saida, "wb").write(self.rfile.read(n))
+        self.send_response(200); self.end_headers(); self.wfile.write(b"ok\n")
+http.server.HTTPServer(("127.0.0.1", porta), H).serve_forever()
+PY
+SERVIDOR=$!
+
+# ── 1. instalação ────────────────────────────────────────────────────────────────────
+passo "criando a VM com $(basename "$ISO")"
+"$T" apagar >/dev/null 2>&1
+"$T" criar "$ISO" >/dev/null || falha "não deu para criar a VM"
+INICIO=$SECONDS
+
+esperar "Idioma" 300 "idioma" || falha "o instalador não apareceu em 5 min"
+echo "   instalador na tela em $((SECONDS - INICIO)) s"
+tecla KEY_ENTER                                     # Português (Brasil)
+esperar "teclado" 30 "teclado" || falha "tela do teclado não apareceu"
+tecla KEY_DOWN; tecla KEY_DOWN; tecla KEY_ENTER     # Inglês (EUA)
+esperar "Seu nome" 30 "nome" || falha "tela do nome não apareceu"
+texto "Teste Auto"; tecla KEY_ENTER
+esperar "usu" 30 "usuario" || falha "tela do nome de usuário não apareceu"
+tecla KEY_LEFTCTRL KEY_U; texto "teste"; tecla KEY_ENTER
+esperar "Senha" 30 "senha" || falha "tela da senha não apareceu"
+texto "$SENHA"; tecla KEY_ENTER
+sleep 1; texto "$SENHA"; tecla KEY_ENTER              # confirmação
+esperar "computador" 30 "computador" || falha "tela do nome do computador não apareceu"
+tecla KEY_ENTER
+esperar "disco" 30 "disco" || falha "tela do disco não apareceu"
+tecla KEY_ENTER
+esperar "TPM|automaticamente" 30 "tpm" || falha "tela do TPM não apareceu"
+tecla KEY_ENTER                                     # Sim: desbloqueio pelo TPM
+esperar "sem senha|automaticamente" 30 "entrada" || falha "tela do login automático não apareceu"
+tecla KEY_LEFT; tecla KEY_ENTER                     # Sim: login automático
+esperar "Instalar agora|Tudo pronto" 30 "resumo" || falha "resumo não apareceu"
+tecla KEY_LEFT; tecla KEY_ENTER
+passo "instalando"
+esperar "foi instalado|E agora" 1800 "instalado" || falha "a instalação não terminou em 30 min (ou deu erro)"
+echo "   instalado em $((SECONDS - INICIO)) s desde o boot da ISO"
+
+# ── 2. primeiro boot ─────────────────────────────────────────────────────────────────
+passo "reiniciando no sistema instalado"
+"$T" ejetar
+tecla KEY_ENTER                                     # Reiniciar agora (a VM desliga)
+for _ in $(seq 60); do [ "$("${C[@]}" domstate "$TESTAR_VM" 2>/dev/null)" = desligado ] || [ "$("${C[@]}" domstate "$TESTAR_VM" 2>/dev/null)" = "shut off" ] && break; sleep 2; done
+"$T" ligar >/dev/null 2>&1
+BOOT=$SECONDS
+esperar "Bem-vindo|Simba OS|Pular" 300 "primeiro-login" || falha "a área de trabalho não apareceu em 5 min"
+echo "   área de trabalho em $((SECONDS - BOOT)) s"
+sleep 15                                            # notificações, serviços do 1º login
+captura "area-de-trabalho"
+
+# ── 3. checagem dentro da sessão ─────────────────────────────────────────────────────
+passo "checagem dentro da sessão"
+tecla KEY_LEFTMETA KEY_ENTER                        # terminal
+sleep 4
+texto "curl -s \$(ip r|awk '/def/{print \$3;exit}'):$PORTA/c|bash"
+tecla KEY_ENTER
+for _ in $(seq 90); do [ -s "$OUT/resultado.json" ] && break; sleep 2; done
+captura "checagem"
+[ -s "$OUT/resultado.json" ] || falha "a checagem não respondeu (terminal não abriu ou sem rede para o hospedeiro)"
+
+# ── 4. avaliação ─────────────────────────────────────────────────────────────────────
+passo "resultado"
+python3 -I - "$OUT/resultado.json" <<'PY'
+import json, sys
+r = json.load(open(sys.argv[1]))
+testes = [
+    ("barra na tela", "simba-bar" in r.get("camadas", [])),
+    ("papel de parede na tela", "simba-background" in r.get("camadas", [])),
+    ("área de trabalho (ícones)", "configuracoes-area" in r.get("camadas", [])),
+    ("canto 'mostrar a área de trabalho'", "botoes-janela-area" in r.get("camadas", [])),
+    ("boas-vindas abertas", r.get("boas_vindas", False)),
+    ("serviços do Simba ligados", not r.get("servicos_parados")),
+    ("nenhuma unidade com falha", not r.get("unidades_falha")),
+    ("sem migração pendente", r.get("migracoes_pendentes", 1) == 0),
+    ("barra sem erros no registro", r.get("erros_shell", 1) == 0),
+    ("tema de ícones existe", r.get("tema_icones_existe", False)),
+    ("cadeia de ícones da barra", r.get("cadeia_icones_ok", False)),
+    ("barra embaixo com Menu Iniciar", r.get("barra_simba", False)),
+    ("Lixeira na área de trabalho", r.get("lixeira", False)),
+    ("Limine liga direto (timeout 0)", r.get("limine_direto", False)),
+    ("conta responde (desconectada)", r.get("conta_ok", False)),
+]
+for nome, ok in testes:
+    print(f"  {'✓' if ok else '✗'} {nome}")
+for k in ("servicos_parados", "unidades_falha", "erros_shell_amostra"):
+    if r.get(k):
+        print(f"      {k}: {r[k]}")
+falhas = [n for n, ok in testes if not ok]
+print(f"\n{'PASSOU' if not falhas else 'FALHOU'}: {len(testes) - len(falhas)}/{len(testes)}")
+sys.exit(1 if falhas else 0)
+PY
+st=$?
+fim $st

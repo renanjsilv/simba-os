@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Executar aplicativo Windows (Simba)
+GenericName=Integrador de Aplicativos Windows
+Comment=Executa aplicativos e jogos Windows de forma inteligente com Wine ou Proton
+Exec=simba-exe %f
+MimeType=application/vnd.microsoft.portable-executable;application/x-ms-dos-executable;application/x-msdownload;application/x-wine-extension-exe;application/x-msi;application/x-bat;
+Icon=wine
+Terminal=false
+Categories=System;Utility;Emulator;
+StartupNotify=true
+NoDisplay=true

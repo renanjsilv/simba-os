@@ -46,3 +46,11 @@ text/x-c=nvim.desktop
 text/x-c++=nvim.desktop
 application/xml=nvim.desktop
 text/xml=nvim.desktop
+
+application/vnd.microsoft.portable-executable=simba-exe.desktop
+application/x-ms-dos-executable=simba-exe.desktop
+application/x-msdownload=simba-exe.desktop
+application/x-wine-extension-exe=simba-exe.desktop
+application/x-msi=simba-exe.desktop
+application/x-bat=simba-exe.desktop
+

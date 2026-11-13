@@ -3,7 +3,7 @@
 # bloqueio, sistema de idiomas (catálogos), atualização ("Atualizar tudo") e utilitários.
 pkgname=simba-apps
 pkgver=1.1.12
-pkgrel=44
+pkgrel=45
 pkgdesc="Simba OS: apps e ferramentas próprios (Configurações, Explorador, Gerenciador de Tarefas…)"
 arch=('x86_64')   # calço da ponte do AnyDesk (shim.c) é compilado aqui
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -22,7 +22,9 @@ optdepends=('rclone: nuvens no Explorador e backup da Conta no Google Drive'
             'flatpak: Loja de Apps'
             'fwupd: atualização de firmware em "Atualizar tudo"'
             'localsend: enviar arquivos para o celular'
-            'simba-draco: assistente de voz Draco')
+            'simba-draco: assistente de voz Draco'
+            'wine-staging: execução de programas Windows (.exe, .msi)'
+            'umu-launcher: execução de jogos Windows com Proton e DXVK')
 install=simba-apps.install
 
 build() {

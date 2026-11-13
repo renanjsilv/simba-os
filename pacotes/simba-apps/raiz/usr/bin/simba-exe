@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""simba-exe — Integrador nativo e inteligente de executáveis Windows (.exe, .msi, .bat).
+
+Analisa o executável e seleciona o melhor interpretador do mercado:
+- Jogos e motores 3D (DirectX, Vulkan, Unreal, Unity, etc.): executa com Proton / UMU (umu-run)
+  com DXVK, VKD3D, protonfixes e aceleração máxima.
+- Softwares e utilitários gerais: executa com Wine Staging com baixo consumo de memória
+  e inicialização instantânea.
+"""
+
+import os
+import sys
+import shutil
+import subprocess
+import argparse
+from pathlib import Path
+
+# Palavras-chave e assinaturas para detecção inteligente
+GAME_KEYWORDS = {
+    "game", "jogo", "jogos", "play", "rpg", "chaos", "repack",
+    "trainer", "unreal", "unity", "godot", "cryengine", "steam"
+}
+
+GAME_DIRS = {
+    "games", "jogos", "steamapps", "lutris", "heroic", "bottles", "roms"
+}
+
+# Assinaturas binárias (procuradas em ASCII e UTF-16LE)
+GRAPHICS_SIGS = [
+    b"d3d9.dll", b"d3d11.dll", b"d3d12.dll", b"dxgi.dll", b"vulkan-1.dll",
+    b"xinput1_3.dll", b"xinput1_4.dll", b"xinput9_1_0.dll", b"dinput8.dll",
+    b"x3daudio", b"nvapi64.dll", b"amd_ags_x64.dll"
+]
+
+ENGINE_SIGS = [
+    b"unityplayer.dll", b"unitycrashhandler", b"unrealengine", b"epicgames",
+    b"godot", b"cryengine", b"physx", b"fmod", b"wwise", b"criware",
+    b"binkvideo", b"steam_api.dll", b"steam_api64.dll", b"galaxy.dll",
+    b"eos_sdk", b"miles64.dll"
+]
+
+INSTALLER_SIGS = [
+    b"inno setup", b"nullsoft install", b"installshield", b"wise installation"
+]
+
+
+def notify(title: str, message: str, icon: str = "wine"):
+    """Envia notificação nativa da área de trabalho."""
+    try:
+        subprocess.Popen(
+            ["notify-send", "-a", "Simba OS", "-i", icon, title, message],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        pass
+
+
+def analyze_target(file_path: Path) -> dict:
+    """Analisa o arquivo e define o melhor interpretador."""
+    filename = file_path.name.lower()
+    parent_dirs = [p.name.lower() for p in file_path.parents]
+
+    # Pontuação de jogo
+    score = 0
+    reasons = []
+
+    # 1. Pistas no nome do arquivo
+    for kw in GAME_KEYWORDS:
+        if kw in filename:
+            score += 2
+            reasons.append(f"nome:{kw}")
+
+    # 2. Pistas no diretório onde o arquivo reside
+    for gd in GAME_DIRS:
+        if gd in parent_dirs:
+            score += 3
+            reasons.append(f"pasta:{gd}")
+
+    # 3. Leitura do cabeçalho binário (primeiros 15 MB para rapidez)
+    is_installer = any(k in filename for k in ["setup", "install", "instalador"])
+    try:
+        with open(file_path, "rb") as f:
+            chunk = f.read(15 * 1024 * 1024)
+            lower_chunk = chunk.lower()
+
+            for sig in ENGINE_SIGS:
+                if sig in lower_chunk or sig.decode("latin1", errors="ignore").encode("utf-16le") in lower_chunk:
+                    score += 4
+                    reasons.append(f"motor:{sig.decode('latin1', errors='ignore')}")
+
+            for sig in GRAPHICS_SIGS:
+                if sig in lower_chunk or sig.decode("latin1", errors="ignore").encode("utf-16le") in lower_chunk:
+                    score += 3
+                    reasons.append(f"graficos:{sig.decode('latin1', errors='ignore')}")
+
+            for sig in INSTALLER_SIGS:
+                if sig in lower_chunk or sig.decode("latin1", errors="ignore").encode("utf-16le") in lower_chunk:
+                    is_installer = True
+                    reasons.append(f"instalador:{sig.decode('latin1', errors='ignore')}")
+    except Exception:
+        pass
+
+    is_game = score >= 2
+    return {
+        "is_game": is_game,
+        "is_installer": is_installer,
+        "score": score,
+        "reasons": reasons
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Simba OS — Integrador inteligente de aplicações Windows (.exe)"
+    )
+    parser.add_argument("arquivo", help="Caminho para o executável (.exe, .msi, .bat)")
+    parser.add_argument("args", nargs=argparse.REMAINDER, help="Argumentos repassados ao programa")
+    parser.add_argument("--modo", choices=["auto", "jogo", "app", "wine", "proton", "umu"],
+                        default="auto", help="Forçar modo de execução")
+    parser.add_argument("--prefixo", help="Caminho personalizado do WINEPREFIX")
+
+    parsed = parser.parse_args()
+
+    target = Path(parsed.arquivo).resolve()
+    if not target.exists():
+        notify("Erro ao abrir", f"Arquivo não encontrado: {target}", "dialog-error")
+        sys.exit(1)
+
+    # Diretório base dos prefixos do Simba
+    base_data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "simba-exe"
+    prefixes_dir = base_data / "prefixes"
+    prefixes_dir.mkdir(parents=True, exist_ok=True)
+
+    analysis = analyze_target(target)
+
+    # Determina o interpretador
+    env_runner = os.environ.get("SIMBA_RUNNER", "").lower()
+    has_umu = shutil.which("umu-run") is not None
+    has_wine = shutil.which("wine") is not None
+
+    if not has_wine and not has_umu:
+        notify("Simba OS", "Nenhum interpretador Windows (Wine ou UMU) encontrado.", "dialog-error")
+        sys.exit(1)
+
+    # Decisão do modo
+    if parsed.modo in ["jogo", "proton", "umu"] or env_runner in ["jogo", "proton", "umu"]:
+        use_game = True
+    elif parsed.modo in ["app", "wine"] or env_runner in ["app", "wine"]:
+        use_game = False
+    else:
+        use_game = analysis["is_game"]
+
+    # Se selecionado jogo mas não tem umu-run, faz fallback para wine
+    if use_game and not has_umu:
+        use_game = False
+
+    app_name = target.stem.replace("_", " ").title()
+
+    # Prepara ambiente
+    env = os.environ.copy()
+
+    # Muda diretório para o diretório do executável (compatibilidade Windows)
+    os.chdir(target.parent)
+
+    extra_args = parsed.args or []
+
+    if use_game:
+        # Modo Jogo: UMU + Proton com DXVK/VKD3D e fsync
+        game_prefix = Path(parsed.prefixo) if parsed.prefixo else (prefixes_dir / "jogos")
+        game_prefix.mkdir(parents=True, exist_ok=True)
+
+        env["WINEPREFIX"] = str(game_prefix)
+        env["GAMEID"] = f"simba-{target.stem.lower()[:32]}"
+        env["UMU_RUNTIME_UPDATE"] = "0"  # não trava no primeiro boot baixando o runtime inteiro
+        
+        # Opcional: GameMode se disponível
+        gamemoderun = shutil.which("gamemoderun")
+
+        notify(
+            "Simba OS — Modo Jogo",
+            f"Iniciando {app_name} com Proton (DXVK / VKD3D)...",
+            "applications-games"
+        )
+
+        cmd = ["umu-run", str(target)] + extra_args
+        if gamemoderun:
+            cmd = [gamemoderun] + cmd
+
+        try:
+            p = subprocess.Popen(cmd, env=env)
+            sys.exit(p.wait())
+        except Exception as e:
+            # Fallback transparente para Wine caso UMU falhe
+            notify("Aviso", "Proton indisponível, iniciando com Wine...", "dialog-warning")
+            cmd = ["wine", str(target)] + extra_args
+            p = subprocess.Popen(cmd, env=env)
+            sys.exit(p.wait())
+
+    else:
+        # Modo Aplicativo: Wine Staging leve e rápido
+        app_prefix = Path(parsed.prefixo) if parsed.prefixo else (prefixes_dir / "apps")
+        app_prefix.mkdir(parents=True, exist_ok=True)
+
+        env["WINEPREFIX"] = str(app_prefix)
+        env["WINEDEBUG"] = env.get("WINEDEBUG", "-all")  # suprime logs excessivos para velocidade
+
+        notify(
+            "Simba OS — Modo Aplicativo",
+            f"Iniciando {app_name} com Wine...",
+            "wine"
+        )
+
+        # Se for arquivo .msi, chama msiexec /i
+        if target.suffix.lower() == ".msi":
+            cmd = ["wine", "msiexec", "/i", str(target)] + extra_args
+        elif target.suffix.lower() in [".bat", ".cmd"]:
+            cmd = ["wine", "cmd", "/c", str(target)] + extra_args
+        else:
+            cmd = ["wine", str(target)] + extra_args
+
+        p = subprocess.Popen(cmd, env=env)
+        sys.exit(p.wait())
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,53 @@
+#!/bin/bash
+# Roda DENTRO da VM (sessão do usuário, aberto pelo testar-iso-completo num terminal) e manda o
+# resultado em JSON de volta para o hospedeiro (mesmo endereço de onde veio).
+SENHA=simba123
+GW=$(ip r | awk '/default/{print $3; exit}')
+j() { jq -Rs . <<<"$1"; }   # texto → string JSON
+
+camadas=$(hyprctl layers -j 2>/dev/null | jq -c '[.[].levels[][]?.namespace] | unique')
+boas=$(hyprctl clients -j 2>/dev/null | jq '[.[] | select(.class == "com.simba.BoasVindas")] | length > 0')
+
+parados=()
+for u in botoes-janela.service simba-atualizar-avisar.timer simba-migrate-notify.service bt-agent.service; do
+  systemctl --user cat "$u" >/dev/null 2>&1 || continue
+  systemctl --user is-enabled --quiet "$u" || parados+=("$u")
+done
+falha_sis=$(systemctl --failed --no-legend --plain 2>/dev/null | awk '{print $1}')
+falha_usr=$(systemctl --user --failed --no-legend --plain 2>/dev/null | awk '{print "usuario:"$1}')
+
+pend=$(simba-migrate --pending 2>/dev/null | sed '/^\s*$/d' | wc -l)
+
+erros=0; amostra=""
+for d in /run/user/$UID/quickshell/by-id/*/; do
+  [ -f "$d/log.log" ] || continue
+  e=$(grep -E 'ERROR|TypeError|ReferenceError' "$d/log.log" | grep -viE 'portal|crashed' )
+  [ -n "$e" ] && { erros=$((erros + $(wc -l <<<"$e"))); amostra+=$(head -2 <<<"$e" | cut -c1-200)$'\n'; }
+done
+
+tema=$(gsettings get org.gnome.desktop.interface icon-theme 2>/dev/null | tr -d "'")
+tema_ok=false; [ -n "$tema" ] && { [ -d "/usr/share/icons/$tema" ] || [ -d "$HOME/.local/share/icons/$tema" ]; } && tema_ok=true
+cadeia_ok=false; /etc/xdg/quickshell/configuracoes/bin/icones cadeia >/dev/null 2>&1 && cadeia_ok=true
+
+barra=$(jq -r '(.bar.position == "bottom") and ([.bar.layout.left[]?.id] | index("botaoiniciar") != null)' \
+  ~/.config/simba/shell.json 2>/dev/null || echo false)
+
+lixeira=$(/etc/xdg/quickshell/configuracoes/bin/area listar "$(xdg-user-dir DESKTOP)" --lixeira 2>/dev/null \
+  | jq '.[0].especial == "lixeira"' 2>/dev/null || echo false)
+
+limine=false
+echo "$SENHA" | sudo -S -p '' grep -qx 'timeout: 0' /boot/limine.conf 2>/dev/null && limine=true
+
+conta=$(conta status 2>/dev/null | jq '(.conectado == false)' 2>/dev/null || echo false)
+
+jq -n --argjson camadas "${camadas:-[]}" --argjson boas "${boas:-false}" \
+  --argjson parados "$(printf '%s\n' "${parados[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
+  --argjson falhas "$(printf '%s\n%s\n' "$falha_sis" "$falha_usr" | jq -R . | jq -s 'map(select(. != ""))')" \
+  --argjson pend "$pend" --argjson erros "$erros" --argjson amostra "$(j "$amostra")" \
+  --argjson tema_ok "$tema_ok" --arg tema "$tema" --argjson cadeia "$cadeia_ok" --argjson barra "$barra" \
+  --argjson lixeira "$lixeira" --argjson limine "$limine" --argjson conta "$conta" \
+  '{camadas:$camadas, boas_vindas:$boas, servicos_parados:$parados, unidades_falha:$falhas,
+    migracoes_pendentes:$pend, erros_shell:$erros, erros_shell_amostra:$amostra, tema_icones:$tema,
+    tema_icones_existe:$tema_ok, cadeia_icones_ok:$cadeia, barra_simba:$barra, lixeira:$lixeira,
+    limine_direto:$limine, conta_ok:$conta}' \
+  | curl -s -X POST --data-binary @- "http://$GW:8766/r" >/dev/null && echo "checagem enviada"

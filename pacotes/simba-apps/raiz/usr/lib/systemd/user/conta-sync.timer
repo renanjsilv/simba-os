@@ -3,9 +3,8 @@ Description=Sincronização e backup automático da conta no Google Drive
 
 [Timer]
 OnBootSec=3min
+# 20 min depois da última sincronização (antes também OnCalendar=*:0/20: disparava em dobro)
 OnUnitActiveSec=20min
-OnCalendar=*:0/20
-Persistent=true
 RandomizedDelaySec=2min
 
 [Install]

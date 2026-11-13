@@ -57,7 +57,8 @@ CACHE = HOME / ".cache/conta"
 EXTRA = CACHE / "extra"
 FERRAMENTA = Path(__file__).resolve()
 RUN = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
-TRAVA = RUN / "conta.lock"
+# testes (CONTA_HOME): trava própria, para não brigar com o conta de verdade desta máquina
+TRAVA = (HOME / ".cache/conta" if os.environ.get("CONTA_HOME") else RUN) / "conta.lock"
 NOME_REMOTO = "conta-gdrive"
 NOME_CRIPTO = "conta-cripto"
 PASTA = "Simba Conta"
@@ -223,6 +224,7 @@ def conectado():
 
 class Trava:
     def __enter__(self):
+        TRAVA.parent.mkdir(parents=True, exist_ok=True)
         self.f = open(TRAVA, "w")
         try:
             fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -363,7 +365,7 @@ def preparar_extras(c, lista=()):
         pass
     meta = {
         "data": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "maquina": socket.gethostname(),
+        "maquina": nome_maquina(),
         "usuario": os.environ.get("USER", ""),
         "tema": tema.read_text().strip() if tema.exists() else "",
         "tema_boot": plymouth,
@@ -377,6 +379,7 @@ def preparar_extras(c, lista=()):
             (EXTRA / "fundo").mkdir(parents=True, exist_ok=True)
             shutil.copy2(fundo, EXTRA / "fundo" / fundo.name)
             meta["fundo"] = str(fundo)
+            meta["fundo_hash"] = _hash_arquivo(fundo)
     except OSError:
         pass
     if (EXTRA / "brave" / "Bookmarks").exists():
@@ -418,7 +421,7 @@ def rede_limitada():
 
 
 def info_dispositivo_local():
-    maquina = socket.gethostname()
+    maquina = nome_maquina()
     usuario = getpass.getuser()
     eh_laptop = False
     try:
@@ -881,6 +884,26 @@ def _progresso(proc, rotulo):
     return proc.wait()
 
 
+def limpar_lixeira(dados):
+    """Apaga do Drive as pastas lixeira/<AAAAMMDD-HHMMSS> com mais de 30 dias.
+    Antes era `rclone delete --min-age 30d`, que percorria a lixeira inteira e
+    passava de 10 min (derrubando o backup). Agora só lista as pastas do topo.
+    Nunca faz o backup falhar."""
+    try:
+        r = rc("lsf", "--dirs-only", f"{dados}/lixeira", check=False, timeout=120)
+        limite = datetime.datetime.now() - datetime.timedelta(days=30)
+        for nome in r.stdout.split():
+            nome = nome.rstrip("/")
+            try:
+                data = datetime.datetime.strptime(nome, "%Y%m%d-%H%M%S")
+            except ValueError:
+                continue
+            if data < limite:
+                rc("purge", f"{dados}/lixeira/{nome}", check=False, timeout=300)
+    except Exception as e:  # noqa: BLE001
+        print(_t("limpeza da lixeira ignorada: %1", e), file=sys.stderr)
+
+
 def publicar_ferramenta():
     """Restaurador e a própria ferramenta, sem criptografia, na raiz da pasta."""
     base = FERRAMENTA.parent
@@ -898,6 +921,57 @@ def pode_enviar():
     if e.get("ultima") or e.get("restaurado") or e.get("ultima_remota_aplicada"):
         return True
     return not remoto_meta()
+
+
+def nome_maquina():
+    return os.environ.get("CONTA_MAQUINA") or socket.gethostname()   # CONTA_MAQUINA: testes
+
+
+def _hash_arquivo(p):
+    """Identidade do papel de parede pelo conteúdo (o caminho muda de uma máquina para outra)."""
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(p, "rb") as f:
+            h.update(f.read(64 * 1024 * 1024))
+    except OSError:
+        return ""
+    return h.hexdigest()[:20]
+
+
+def _fundo_local():
+    try:
+        img = (HOME / ".local/state/simba/current/background").resolve(strict=True)
+        return img, _hash_arquivo(img)
+    except OSError:
+        return None, ""
+
+
+def _tema_local():
+    arq = HOME / ".local/state/simba/current/theme.name"
+    return arq.read_text().strip() if arq.exists() else ""
+
+
+def _decidir(local, remoto, base, remoto_mais_novo):
+    """Sincronização em três vias (como o git): base = último valor combinado entre esta
+    máquina e o Drive. Só o Drive mudou → aplicar; só aqui mudou → enviar; os dois mudaram para
+    valores diferentes → conflito. Antes comparava só local × remoto e via \"conflito\" a cada
+    troca feita em outra máquina (e podia desfazer a troca)."""
+    if not remoto or local == remoto:
+        return "igual"
+    if base is None:                      # nunca combinamos: vale o mais novo
+        return "aplicar" if remoto_mais_novo else "enviar"
+    if remoto == base:
+        return "enviar"
+    if local == base:
+        return "aplicar"
+    return "conflito"
+
+
+def marcar_base_enviada():
+    """Depois de enviar: o que está aqui passa a ser a base combinada."""
+    _img, h = _fundo_local()
+    salvar_estado(base_fundo=h, base_tema=_tema_local())
 
 
 def puxar_alteracoes_remotas(silencioso=False, forcar=False):
@@ -923,13 +997,13 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
 
         data_remota = meta_remoto.get("data")
         maquina_remota = meta_remoto.get("maquina", "")
-        maquina_local = socket.gethostname()
+        maquina_local = nome_maquina()
 
         e = estado()
         ultima_aplicada = e.get("ultima_remota_aplicada", "")
         ultima_local = e.get("ultima", "")
 
-        # Se for a mesma máquina e não foi forçado, não é alteração de outra máquina
+        # Mesma máquina: o que está no Drive é o nosso próprio envio
         if not forcar and maquina_remota == maquina_local:
             return False
 
@@ -937,89 +1011,70 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
         if not forcar and data_remota == ultima_aplicada:
             return False
 
-        # Se nosso último envio local é mais recente que o remoto, mantém o local
-        if not forcar and ultima_local and data_remota <= ultima_local:
-            return False
 
         c = config()
         dados = remoto_dados(c)
         mudancas = []
 
-        # 1. Sincronização dinâmica de Papel de Parede
-        fundo_remoto = meta_remoto.get("fundo")
-        fundo_local_atual = None
-        try:
-            link = HOME / ".local/state/simba/current/background"
-            if link.exists():
-                fundo_local_atual = str(link.resolve())
-        except OSError:
-            pass
+        # 1–2. Papel de parede e tema: decisão em três vias (ver _decidir)
+        img_local, fundo_local = _fundo_local()
+        fundo_remoto = meta_remoto.get("fundo_hash") or ""
+        tema_local, tema_remoto = _tema_local(), meta_remoto.get("tema") or ""
+        mais_novo = bool(data_remota and (not ultima_local or data_remota > ultima_local))
+        if forcar:                                    # "usar a versão da nuvem"
+            d_fundo = "aplicar" if fundo_remoto and fundo_remoto != fundo_local else "igual"
+            d_tema = "aplicar" if tema_remoto and tema_remoto != tema_local else "igual"
+        else:
+            d_fundo = _decidir(fundo_local, fundo_remoto, e.get("base_fundo"), mais_novo)
+            d_tema = _decidir(tema_local, tema_remoto, e.get("base_tema"), mais_novo)
+        if "conflito" in (d_fundo, d_tema):
+            conflito_info = {
+                "maquina_remota": maquina_remota, "data_remota": data_remota, "data_local": ultima_local,
+                "tema_remoto": tema_remoto, "tema_local": tema_local,
+                "fundo_remoto": meta_remoto.get("fundo", ""), "fundo_local": str(img_local or ""),
+            }
+            salvar_estado(conflito=conflito_info)
+            avisar(_t("Simba Conta — Conflito"),
+                   _t("Alterações em %1 concorrem com as locais. Abra as Configurações para escolher.", maquina_remota))
+            if not silencioso:
+                print(_t("Conflito detectado entre %1 e a máquina local.", maquina_remota))
+            return False
 
-        # 2. Sincronização dinâmica de Tema
-        tema_remoto = meta_remoto.get("tema")
-        tema_local_atual = None
-        tema_arq = HOME / ".local/state/simba/current/theme.name"
-        if tema_arq.exists():
-            tema_local_atual = tema_arq.read_text().strip()
-
-        # Detecção de conflito concorrente de personalização
-        if not forcar and ultima_local:
-            try:
-                dt_remota = datetime.datetime.fromisoformat(data_remota).astimezone(datetime.timezone.utc)
-                dt_local = datetime.datetime.fromisoformat(ultima_local).astimezone(datetime.timezone.utc)
-                diff_min = abs((dt_remota - dt_local).total_seconds()) / 60.0
-                if diff_min < 45 and (
-                    (tema_remoto and tema_local_atual and tema_remoto != tema_local_atual) or
-                    (fundo_remoto and fundo_local_atual and Path(fundo_remoto).is_file() and str(Path(fundo_remoto).resolve()) != fundo_local_atual)
-                ):
-                    conflito_info = {
-                        "maquina_remota": maquina_remota,
-                        "data_remota": data_remota,
-                        "data_local": ultima_local,
-                        "tema_remoto": tema_remoto,
-                        "tema_local": tema_local_atual,
-                        "fundo_remoto": fundo_remoto,
-                        "fundo_local": fundo_local_atual
-                    }
-                    salvar_estado(conflito=conflito_info)
-                    avisar(_t("Simba Conta — Conflito"),
-                           _t("Alterações em %1 concorrem com as locais. Abra as Configurações para escolher.", maquina_remota))
-                    if not silencioso:
-                        print(_t("Conflito detectado entre %1 e a máquina local.", maquina_remota))
-                    return False
-            except Exception:
-                pass
-
-        wallpaper_aplicado = False
-        if fundo_remoto:
-            # Se o caminho é um arquivo de sistema (/usr/share/backgrounds/...) ou já existe localmente
-            if Path(fundo_remoto).is_file():
-                if str(Path(fundo_remoto).resolve()) != fundo_local_atual:
-                    _aplicar_fundo(fundo_remoto)
-                    wallpaper_aplicado = True
+        if d_fundo == "aplicar":
+            alvo = None
+            original = Path(meta_remoto.get("fundo") or "")
+            if original.name and original.is_file() and _hash_arquivo(original) == fundo_remoto:
+                alvo = original                       # imagem que existe aqui também (do sistema)
             else:
-                # Papel de parede personalizado de outra máquina: baixa da pasta extra/fundo
                 destino = HOME / ".local/share/conta/fundo"
                 destino.mkdir(parents=True, exist_ok=True)
                 try:
-                    r = rc("copy", f"{dados}/extra/fundo", str(destino), check=False, timeout=30)
-                    if r.returncode == 0:
-                        imgs = [p for p in destino.iterdir() if p.is_file()]
-                        if imgs and str(imgs[0].resolve()) != fundo_local_atual:
-                            _aplicar_fundo(imgs[0])
-                            wallpaper_aplicado = True
-                except (subprocess.TimeoutExpired, Exception):
-                    pass
+                    rc("copy", f"{dados}/extra/fundo", str(destino), check=False, timeout=60)
+                    alvo = next((f for f in destino.iterdir() if f.is_file() and _hash_arquivo(f) == fundo_remoto), None)
+                except (subprocess.SubprocessError, OSError):
+                    alvo = None
+            if alvo:
+                _aplicar_fundo(alvo)
+                mudancas.append(_t("papel de parede"))
+                salvar_estado(base_fundo=fundo_remoto)
+        elif d_fundo == "igual" and fundo_remoto:
+            salvar_estado(base_fundo=fundo_remoto)
 
-        if wallpaper_aplicado:
-            mudancas.append(_t("papel de parede"))
-
-        if tema_remoto and tema_remoto != tema_local_atual and shutil.which("simba-theme-set") and not os.environ.get("CONTA_HOME"):
+        if d_tema == "aplicar" and shutil.which("simba-theme-set") and not os.environ.get("CONTA_HOME"):
             try:
                 subprocess.run(["simba-theme-set", tema_remoto], capture_output=True, timeout=60)
                 mudancas.append(_t("tema (%1)", tema_remoto))
-            except Exception:
+                salvar_estado(base_tema=tema_remoto)
+            except (subprocess.SubprocessError, OSError):
                 pass
+        elif d_tema == "aplicar" and os.environ.get("CONTA_HOME"):
+            # testes: grava o nome do tema (o que simba-theme-set faria), sem trocar a tela
+            (HOME / ".local/state/simba/current").mkdir(parents=True, exist_ok=True)
+            (HOME / ".local/state/simba/current/theme.name").write_text(tema_remoto + "\n")
+            mudancas.append(_t("tema (%1)", tema_remoto))
+            salvar_estado(base_tema=tema_remoto)
+        elif d_tema == "igual" and tema_remoto:
+            salvar_estado(base_tema=tema_remoto)
 
         # 3. Sincronização dinâmica de Favoritos / Atalhos do Navegador (Brave/Simba)
         brave_remoto = meta_remoto.get("brave")
@@ -1104,8 +1159,15 @@ def cmd_sincronizar(a):
             except Exception:
                 pass
 
-    # Antes de enviar, confere se outra máquina publicou novidades (ex.: trocou wallpaper ou tema)
-    puxar_alteracoes_remotas(silencioso=a.silencioso, forcar=getattr(a, "forcar", False))
+    # Antes de enviar, confere se outra máquina publicou novidades (ex.: trocou wallpaper ou tema).
+    # "Manter a versão deste computador" (substituir) não puxa nada: antes puxava com forcar e
+    # aplicava a versão da nuvem antes de enviar, o contrário do que a pessoa escolheu.
+    if not a.substituir:
+        puxar_alteracoes_remotas(silencioso=a.silencioso, forcar=getattr(a, "forcar", False))
+        if estado().get("conflito"):
+            if not a.silencioso:
+                print(_t("Há um conflito com outra máquina: escolha em Configurações › Contas antes de enviar."))
+            return 0   # não envia: enviar agora apagaria a mudança da outra máquina
 
     # Aplica favoritos pendentes do navegador se o Brave foi fechado
     aplicar_brave_se_pendente()
@@ -1145,7 +1207,8 @@ def cmd_sincronizar(a):
             publicar_ferramenta()
             agora = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
             salvar_estado(ultima=agora, resultado="ok", tamanho=total, arquivos=len(lista), progresso="", remoto_meta=meta,
-                          precisa_decidir=False)
+                          precisa_decidir=False, conflito=None)
+            marcar_base_enviada()
             if not a.silencioso:
                 avisar(_t("Backup concluído"), _t("%1 arquivos sincronizados com o Google Drive.", len(lista)))
             return 0
@@ -1250,6 +1313,7 @@ def cmd_restaurar(a):
             if pendente:
                 corpo += " " + pendente
             cmd_auto(type("A", (), {"modo": "liga"})())
+            marcar_base_enviada()          # aqui agora é igual ao backup: base combinada
             avisar(_t("Restauração concluída"), corpo)
             print(corpo)
             if not a.sem_pacotes and a.sim and sys.stdin.isatty() and (faltando["pacman"] or faltando["aur"]):
@@ -1265,7 +1329,14 @@ def cmd_restaurar(a):
 
 
 def _aplicar_fundo(img):
-    if os.environ.get("CONTA_HOME") or not shutil.which("simba-theme-bg-set"):
+    if os.environ.get("CONTA_HOME"):               # testes: só o link, sem mexer na tela
+        link = HOME / ".local/state/simba/current/background"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        if link.is_symlink() or link.exists():
+            link.unlink()
+        link.symlink_to(Path(img).resolve())
+        return
+    if not shutil.which("simba-theme-bg-set"):
         return
     subprocess.run(["simba-theme-bg-set", str(img)], capture_output=True, timeout=30)
 

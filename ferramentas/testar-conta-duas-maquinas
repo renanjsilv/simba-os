@@ -1,0 +1,69 @@
+#!/bin/bash
+# testar-conta-duas-maquinas — sincronização da conta entre duas máquinas, sem Google nem rede:
+# duas pastas pessoais (A e B) no mesmo "Drive" (uma pasta local), cada uma com seu nome de
+# máquina. Confere que a troca de papel de parede/tema feita numa chega na outra, que mudança
+# simultânea vira conflito (sem apagar nenhuma), e que "manter a deste computador" mantém.
+set -uo pipefail
+R="$(cd "$(dirname "$0")/.." && pwd)"
+CONTA="$R/pacotes/simba-apps/raiz/usr/share/simba-apps/conta/conta.py"
+T=$(mktemp -d)
+export CONTA_REMOTO="$T/drive/"
+A=$T/A; B=$T/B
+ok=0; falhou=0
+checa() { if eval "$2"; then echo "  ✓ $1"; ok=$((ok + 1)); else echo "  ✗ $1"; falhou=$((falhou + 1)); fi; }
+conta() { local casa=$1 maq=$2; shift 2; CONTA_HOME=$casa CONTA_MAQUINA=$maq python3 -I "$CONTA" "$@" >/dev/null 2>&1; }
+fundo_de() { readlink -f "$1/.local/state/simba/current/background" 2>/dev/null | xargs -r sha256sum | cut -c1-12; }
+img() { magick -size 16x16 "xc:$2" "$1"; }
+por_fundo() {  # por_fundo <casa> <cor>
+  mkdir -p "$1/Imagens" "$1/.local/state/simba/current"
+  img "$1/Imagens/$2.png" "$2"; ln -sfn "$1/Imagens/$2.png" "$1/.local/state/simba/current/background"
+}
+por_tema() { mkdir -p "$1/.local/state/simba/current"; echo "$2" > "$1/.local/state/simba/current/theme.name"; }
+conflito() { CONTA_HOME=$1 python3 -I -c "import json,sys;e=json.load(open('$1/.local/state/conta/estado.json'));sys.exit(0 if e.get('conflito') else 1)" 2>/dev/null; }
+
+for casa in "$A" "$B"; do mkdir -p "$casa/.config/simba"; echo '{"version":1}' > "$casa/.config/simba/shell.json"; done
+echo "── 1. A faz o primeiro backup; B (máquina nova) restaura"
+por_fundo "$A" red; por_tema "$A" white
+conta "$A" maqA sincronizar --silencioso
+conta "$B" maqB restaurar --sim --sem-pacotes
+checa "B ficou com o papel de parede de A" '[ "$(fundo_de "$B")" = "$(fundo_de "$A")" ]'
+
+echo "── 2. A troca o papel de parede e o tema; B sincroniza depois"
+por_fundo "$A" blue; por_tema "$A" black
+conta "$A" maqA sincronizar --silencioso
+conta "$B" maqB sincronizar --silencioso
+checa "B recebeu o papel de parede novo (sem conflito)" '[ "$(fundo_de "$B")" = "$(fundo_de "$A")" ] && ! conflito "$B"'
+checa "B recebeu o tema novo" '[ "$(cat "$B/.local/state/simba/current/theme.name" 2>/dev/null)" = black ]'
+
+echo "── 3. A sincroniza de novo: nada muda (não desfaz)"
+antes=$(fundo_de "$A")
+conta "$A" maqA sincronizar --silencioso
+checa "A continua com o papel de parede dele" '[ "$(fundo_de "$A")" = "$antes" ] && ! conflito "$A"'
+
+echo "── 4. B troca o papel de parede; A recebe"
+por_fundo "$B" green
+conta "$B" maqB sincronizar --silencioso
+conta "$A" maqA sincronizar --silencioso
+checa "A recebeu o papel de parede de B" '[ "$(fundo_de "$A")" = "$(fundo_de "$B")" ] && ! conflito "$A"'
+
+echo "── 5. as duas trocam ao mesmo tempo: conflito, e ninguém apaga a mudança do outro"
+por_fundo "$A" yellow; por_fundo "$B" purple
+conta "$A" maqA sincronizar --silencioso
+conta "$B" maqB sincronizar --silencioso
+checa "B acusou conflito" 'conflito "$B"'
+checa "B manteve o papel de parede dele (não aplicou o de A)" '[ "$(fundo_de "$B")" != "$(fundo_de "$A")" ]'
+amarelo=$(fundo_de "$A")
+conta "$A" maqA sincronizar --silencioso
+checa "A não foi desfeito pelo B (B não enviou com conflito pendente)" '[ "$(fundo_de "$A")" = "$amarelo" ]'
+
+echo "── 6. B escolhe \"manter a deste computador\"; A recebe a de B"
+conta "$B" maqB resolver local
+roxo=$(fundo_de "$B")
+checa "B continua com o papel de parede dele depois de resolver" '[ "$roxo" = "$(fundo_de "$B")" ] && ! conflito "$B"'
+conta "$A" maqA sincronizar --silencioso
+checa "A recebeu o papel de parede escolhido em B" '[ "$(fundo_de "$A")" = "$roxo" ]'
+
+rm -rf "$T"
+echo
+[ $falhou = 0 ] && echo "PASSOU: $ok/$((ok + falhou))" || echo "FALHOU: $ok/$((ok + falhou))"
+[ $falhou = 0 ]

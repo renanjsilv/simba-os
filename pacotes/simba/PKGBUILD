@@ -3,7 +3,7 @@
 # Derivado do Omarchy (MIT, ver /usr/share/licenses/simba/omarchy-MIT.txt).
 pkgname=simba
 pkgver=1.1.9
-pkgrel=21
+pkgrel=22
 pkgdesc="Simba OS: área de trabalho, ferramentas e configurações do sistema"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -11,7 +11,7 @@ license=('MIT')
 options=('!debug' '!strip')
 depends=('cantarell-fonts' 'bash' 'curl' 'fakeroot' 'git' 'gnome-keyring' 'gum' 'hicolor-icon-theme' 'hyprland' 'jq' 'limine'
          'limine-mkinitcpio-hook' 'limine-snapper-sync' 'neovim>=0.9.0' 'pacman-contrib' 'perl' 'pipewire'
-         'plymouth' 'quickshell' 'sddm' 'snapper' 'ttf-jetbrains-mono-nerd' 'uwsm' 'wireplumber'
+         'plymouth' 'quickshell' 'sddm' 'snap-pac' 'snapper' 'ttf-jetbrains-mono-nerd' 'uwsm' 'wireplumber'
          'xdg-desktop-portal-hyprland')
 optdepends=('simba-apps: Configurações, Explorador, Gerenciador de Tarefas e os demais apps do Simba OS')
 replaces=('omarchy' 'omarchy-nvim' 'omarchy-settings' 'omarchy-themes-intros')

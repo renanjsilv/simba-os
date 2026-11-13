@@ -5,7 +5,7 @@
 # base e boot
 base base-devel linux linux-firmware linux-headers intel-ucode amd-ucode sof-firmware
 btrfs-progs cryptsetup dosfstools exfatprogs ntfs-3g efibootmgr mkinitcpio
-limine limine-mkinitcpio-hook limine-snapper-sync snapper plymouth zram-generator
+limine limine-mkinitcpio-hook limine-snapper-sync snapper snap-pac plymouth zram-generator
 sudo man-db less inetutils whois unzip
 
 # rede, som, energia, Bluetooth, impressão
@@ -40,7 +40,7 @@ wl-clipboard grim slurp wtype imagemagick inotify-tools socat plocate yay-bin
 # menu (Instalar) como Flatpak do Flathub, que baixa o programa direto do Spotify
 steam lib32-mesa lib32-vulkan-intel lib32-vulkan-radeon
 # compatibilidade Windows (.exe, .msi, jogos e aplicativos)
-wine-staging wine-mono wine-gecko umu-launcher gamemode
+wine-staging wine-mono wine-gecko umu-launcher gamemode mangohud icoutils
 
 # Simba
 simba simba-apps simba-draco simba-keyring

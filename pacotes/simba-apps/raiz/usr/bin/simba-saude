@@ -78,6 +78,15 @@ def main():
         achados.append({"tipo": "pacnew", "titulo": _t("Configurações novas para revisar (.pacnew)"), "itens": pacnew,
                         "dica": _t("Compare com: sudo pacdiff")})
 
+    try:
+        btrfs_out = sh("btrfs", "device", "stats", "-c", "/")
+        btrfs_erros = [l.strip() for l in btrfs_out.splitlines() if re.search(r"\b[1-9][0-9]*\b", l)]
+        if btrfs_erros:
+            achados.append({"tipo": "btrfs", "titulo": _t("Erros detectados no sistema de arquivos (Btrfs)"), "itens": btrfs_erros,
+                            "dica": _t("Recomenda-se executar: sudo btrfs scrub start /")})
+    except Exception:
+        pass
+
     if not os.path.isdir(f"/usr/lib/modules/{os.uname().release}"):
         achados.append({"tipo": "reiniciar", "titulo": _t("Reinicie o computador"), "itens": [_t("O kernel foi atualizado")],
                         "dica": _t("Até reiniciar, dispositivos novos (pendrive, fone USB) podem não funcionar")})

@@ -2369,5 +2369,7 @@
  " · microfone ligado": " · microphone on",
  " · mudo": " · muted",
  "Feito em Quickshell, com as cores e a fonte do tema atual. Código em /etc/xdg/quickshell/configuracoes · preferências em ~/.config/configuracoes · Super+P, clique direito na área de trabalho e esta janela rodam no mesmo processo.": "Made with Quickshell, using the current theme's colors and font. Code in /etc/xdg/quickshell/configuracoes · preferences in ~/.config/configuracoes · Super+P, desktop right-click and this window run in the same process.",
- "Trazendo o papel de parede…": "Bringing back the wallpaper…"
+ "Trazendo o papel de parede…": "Bringing back the wallpaper…",
+ "Erros detectados no sistema de arquivos (Btrfs)": "Errors detected in filesystem (Btrfs)",
+ "Recomenda-se executar: sudo btrfs scrub start /": "Recommended action: sudo btrfs scrub start /"
 }

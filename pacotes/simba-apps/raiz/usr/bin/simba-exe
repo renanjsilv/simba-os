@@ -197,27 +197,181 @@ def analyze_target(file_path: Path) -> dict:
     }
 
 
+def integrate_installed_shortcuts(prefix: Path = None, is_game: bool = True):
+    """Escaneia o prefixo e o diretório de aplicações por atalhos (.desktop / .lnk) recém-instalados,
+    criando lançadores nativos padronizados no menu de aplicativos do Simba OS."""
+    apps_dir = Path.home() / ".local/share/applications"
+    apps_dir.mkdir(parents=True, exist_ok=True)
+
+    wine_apps_dir = apps_dir / "wine"
+    created_launchers = []
+
+    # 1. Processa .desktop criados pelo Wine sob ~/.local/share/applications/wine/
+    if wine_apps_dir.exists():
+        for dt_path in wine_apps_dir.glob("**/*.desktop"):
+            try:
+                content = dt_path.read_text(encoding="utf-8", errors="ignore")
+                dt_name = dt_path.name.lower()
+
+                # Oculta desinstaladores, links para websites, readmes e ajuda
+                is_junk = any(j in dt_name or j in content.lower() for j in [
+                    "desinstalar", "uninstall", "unins000", "readme", "ajuda", "help",
+                    "website", "homepage", "documentation", "support", "manual"
+                ])
+                if is_junk:
+                    if "NoDisplay=true" not in content:
+                        dt_path.write_text(content.strip() + "\nNoDisplay=true\n", encoding="utf-8")
+                    continue
+
+                props = {}
+                for line in content.splitlines():
+                    if "=" in line and not line.strip().startswith("#"):
+                        k, v = line.split("=", 1)
+                        props[k.strip()] = v.strip()
+
+                app_title = props.get("Name", dt_path.stem)
+                exe_dir = props.get("Path", "")
+                icon_name = props.get("Icon", "applications-games" if is_game else "application-x-executable")
+                wmclass = props.get("StartupWMClass", "")
+
+                target_exe = None
+                if exe_dir and Path(exe_dir).is_dir():
+                    dir_path = Path(exe_dir)
+                    if wmclass and (dir_path / wmclass).exists():
+                        target_exe = dir_path / wmclass
+                    else:
+                        exes = [
+                            f for f in dir_path.glob("*.exe")
+                            if not any(u in f.name.lower() for u in ["unins", "setup", "install", "crash"])
+                        ]
+                        if exes:
+                            best = next((e for e in exes if app_title.lower().replace(" ", "") in e.name.lower()), exes[0])
+                            target_exe = best
+
+                if target_exe and target_exe.exists():
+                    clean_id = "".join(c if c.isalnum() else "_" for c in app_title.lower()).strip("_")
+                    if not is_game and (apps_dir / f"simba-game-{clean_id}.desktop").exists():
+                        continue
+                    new_dt_path = apps_dir / f"simba-{'game' if is_game else 'app'}-{clean_id}.desktop"
+
+                    new_content = [
+                        "[Desktop Entry]",
+                        f"Name={app_title}",
+                        f"Comment={'Jogo Windows integrado pelo Simba OS' if is_game else 'Aplicativo Windows integrado pelo Simba OS'}",
+                        f"Exec=simba-exe {'--modo jogo ' if is_game else ''}\"{target_exe}\"",
+                        f"Path={target_exe.parent}",
+                        f"Icon={icon_name}",
+                        "Terminal=false",
+                        "Type=Application",
+                        f"Categories={'Game;' if is_game else 'Utility;Application;'}",
+                    ]
+                    if wmclass:
+                        new_content.append(f"StartupWMClass={wmclass}")
+
+                    new_dt_path.write_text("\n".join(new_content) + "\n", encoding="utf-8")
+                    created_launchers.append(app_title)
+
+                    if "NoDisplay=true" not in content:
+                        dt_path.write_text(content.strip() + "\nNoDisplay=true\n", encoding="utf-8")
+            except Exception:
+                pass
+
+    # 2. Se temos prefixo, varre também por .lnk na Área de Trabalho ou Menu Iniciar virtual
+    prefixes_to_check = [prefix] if prefix else [Path.home() / ".local/share/simba-exe/prefixes/jogos",
+                                                  Path.home() / ".local/share/simba-exe/prefixes/apps",
+                                                  Path.home() / ".wine"]
+    for pfx in prefixes_to_check:
+        if not pfx or not pfx.exists():
+            continue
+        drive_c = pfx / "drive_c"
+        desktop_dirs = [
+            drive_c / "users/Public/Desktop",
+            drive_c / "ProgramData/Microsoft/Windows/Start Menu/Programs"
+        ]
+        users_dir = drive_c / "users"
+        if users_dir.is_dir():
+            for u in users_dir.iterdir():
+                desktop_dirs.append(u / "Desktop")
+                desktop_dirs.append(u / "AppData/Roaming/Microsoft/Windows/Start Menu/Programs")
+
+        for d in desktop_dirs:
+            if not d.is_dir():
+                continue
+            for lnk in d.glob("**/*.lnk"):
+                lnk_name = lnk.stem
+                if any(u in lnk_name.lower() for u in ["unins", "desinstalar", "help", "ajuda"]):
+                    continue
+                clean_id = "".join(c if c.isalnum() else "_" for c in lnk_name.lower()).strip("_")
+                if (apps_dir / f"simba-game-{clean_id}.desktop").exists() or (apps_dir / f"simba-app-{clean_id}.desktop").exists():
+                    continue
+                new_dt_path = apps_dir / f"simba-{'game' if is_game else 'app'}-{clean_id}.desktop"
+                if not new_dt_path.exists():
+                    new_content = [
+                        "[Desktop Entry]",
+                        f"Name={lnk_name}",
+                        f"Comment={'Jogo Windows integrado pelo Simba OS' if is_game else 'Aplicativo Windows integrado pelo Simba OS'}",
+                        f"Exec=simba-exe {'--modo jogo ' if is_game else ''}\"{lnk}\"",
+                        "Terminal=false",
+                        "Type=Application",
+                        f"Icon={'applications-games' if is_game else 'application-x-executable'}",
+                        f"Categories={'Game;' if is_game else 'Utility;Application;'}",
+                    ]
+                    try:
+                        new_dt_path.write_text("\n".join(new_content) + "\n", encoding="utf-8")
+                        created_launchers.append(lnk_name)
+                    except Exception:
+                        pass
+
+    if created_launchers:
+        try:
+            subprocess.run(["update-desktop-database", str(apps_dir)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        distinct = list(dict.fromkeys(created_launchers))
+        nomes = ", ".join(distinct[:3])
+        notify(
+            "Instalação Concluída!",
+            f"Atalho para '{nomes}' adicionado ao seu menu de aplicativos.",
+            "applications-games" if is_game else "wine"
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Simba OS — Integrador inteligente de aplicações Windows (.exe)"
     )
-    parser.add_argument("arquivo", help="Caminho para o executável (.exe, .msi, .bat)")
+    parser.add_argument("arquivo", nargs="?", default="", help="Caminho para o executável (.exe, .msi, .bat)")
     parser.add_argument("args", nargs=argparse.REMAINDER, help="Argumentos repassados ao programa")
     parser.add_argument("--modo", choices=["auto", "jogo", "app", "wine", "proton", "umu"],
                         default="auto", help="Forçar modo de execução")
     parser.add_argument("--prefixo", help="Caminho personalizado do WINEPREFIX")
+    parser.add_argument("--hud", action="store_true", help="Ativar overlay de métricas (FPS, GPU, CPU) MangoHud")
+    parser.add_argument("--integrar", action="store_true", help="Escanear e integrar atalhos de jogos/apps já instalados")
 
     parsed = parser.parse_args()
-
-    target = Path(parsed.arquivo).resolve()
-    if not target.exists():
-        notify("Erro ao abrir", f"Arquivo não encontrado: {target}", "dialog-error")
-        sys.exit(1)
 
     # Diretório base dos prefixos do Simba
     base_data = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "simba-exe"
     prefixes_dir = base_data / "prefixes"
     prefixes_dir.mkdir(parents=True, exist_ok=True)
+
+    if parsed.integrar or (not parsed.arquivo and len(sys.argv) == 1):
+        # Modo integração autônoma
+        integrate_installed_shortcuts(prefixes_dir / "jogos", is_game=True)
+        integrate_installed_shortcuts(prefixes_dir / "apps", is_game=False)
+        integrate_installed_shortcuts(Path.home() / ".wine", is_game=True)
+        print("Atalhos do Windows sincronizados com o menu de aplicativos.")
+        return
+
+    if not parsed.arquivo:
+        parser.print_help()
+        sys.exit(1)
+
+    target = Path(parsed.arquivo).resolve()
+    if not target.exists():
+        notify("Erro ao abrir", f"Arquivo não encontrado: {target}", "dialog-error")
+        sys.exit(1)
 
     analysis = analyze_target(target)
 
@@ -273,29 +427,40 @@ def main():
         env["WINE_FULLSCREEN_FSR"] = env.get("WINE_FULLSCREEN_FSR", "1")
         env["WINE_FULLSCREEN_FSR_STRENGTH"] = env.get("WINE_FULLSCREEN_FSR_STRENGTH", "2")
 
+        cmd = ["umu-run", str(target)] + extra_args
+
+        # Opcional: MangoHud (overlay de FPS e métricas)
+        use_hud = parsed.hud or os.environ.get("MANGOHUD") == "1" or os.environ.get("SIMBA_HUD") == "1"
+        if use_hud:
+            env["MANGOHUD"] = "1"
+            mangohud_bin = shutil.which("mangohud")
+            if mangohud_bin:
+                cmd = [mangohud_bin] + cmd
+
         # Opcional: GameMode se disponível
         gamemoderun = shutil.which("gamemoderun")
-
-        gpu_desc = " na GPU dedicada" if gpu_env else ""
-        notify(
-            "Simba OS — Modo Jogo",
-            f"Iniciando {app_name} com Proton (DXVK / VKD3D{gpu_desc})...\nPreparando ambiente gráfico e shaders.",
-            "applications-games"
-        )
-
-        cmd = ["umu-run", str(target)] + extra_args
         if gamemoderun:
             cmd = [gamemoderun] + cmd
 
         try:
             p = subprocess.Popen(cmd, env=env)
-            sys.exit(p.wait())
+            ret = p.wait()
+            if ret == 0 and analysis["is_installer"]:
+                integrate_installed_shortcuts(game_prefix, is_game=True)
+            sys.exit(ret)
         except Exception as e:
             # Fallback transparente para Wine caso UMU falhe
             notify("Aviso", "Proton indisponível, iniciando com Wine...", "dialog-warning")
             cmd = ["wine", str(target)] + extra_args
+            if use_hud and shutil.which("mangohud"):
+                cmd = [shutil.which("mangohud")] + cmd
+            if gamemoderun:
+                cmd = [gamemoderun] + cmd
             p = subprocess.Popen(cmd, env=env)
-            sys.exit(p.wait())
+            ret = p.wait()
+            if ret == 0 and analysis["is_installer"]:
+                integrate_installed_shortcuts(game_prefix, is_game=True)
+            sys.exit(ret)
 
     else:
         # Modo Aplicativo: Wine Staging leve e rápido
@@ -336,7 +501,10 @@ def main():
             cmd = ["wine", str(target)] + extra_args
 
         p = subprocess.Popen(cmd, env=env)
-        sys.exit(p.wait())
+        ret = p.wait()
+        if ret == 0 and analysis["is_installer"]:
+            integrate_installed_shortcuts(app_prefix, is_game=False)
+        sys.exit(ret)
 
 
 if __name__ == "__main__":

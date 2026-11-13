@@ -1,0 +1,3 @@
+# Presets padrão do Simba OS para manutenção de armazenamento e pacotes
+enable fstrim.timer
+enable paccache.timer

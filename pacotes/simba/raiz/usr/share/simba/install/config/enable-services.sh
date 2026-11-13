@@ -16,3 +16,6 @@ systemctl enable sddm.service
 # whole session down. [Install] pulls in systemd-oomd.socket via Also=, which
 # is what the user manager reports app.slice candidacy over.
 systemctl enable systemd-oomd.service
+# Manutenção preventiva periódica: descarte de blocos SSD/NVMe (fstrim) e limpeza de cache de pacotes
+systemctl enable fstrim.timer
+systemctl enable paccache.timer

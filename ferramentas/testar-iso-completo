@@ -184,7 +184,8 @@ tecla KEY_ENTER                                     # Reiniciar agora (a VM desl
 for _ in $(seq 60); do [ "$("${C[@]}" domstate "$TESTAR_VM" 2>/dev/null)" = desligado ] || [ "$("${C[@]}" domstate "$TESTAR_VM" 2>/dev/null)" = "shut off" ] && break; sleep 2; done
 "$T" ligar >/dev/null 2>&1
 BOOT=$SECONDS
-esperar "Bem-vindo|Pular|Vamos" 300 "primeiro-login"   # (só "Simba OS" casava com a tela de boot) || falha "a área de trabalho não apareceu em 5 min"
+# primeiro login = boas-vindas na tela (só "Simba OS" casava com a tela de boot)
+esperar "Bem-vindo|Pular|Vamos" 300 "primeiro-login" || falha "a área de trabalho não apareceu em 5 min"
 echo "   área de trabalho em $((SECONDS - BOOT)) s"
 sleep 15                                            # notificações, serviços do 1º login
 captura "area-de-trabalho"

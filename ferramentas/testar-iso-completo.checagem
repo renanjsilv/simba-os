@@ -2,6 +2,12 @@
 # Roda DENTRO da VM (sessão do usuário, aberto pelo testar-iso-completo num terminal) e manda o
 # resultado em JSON de volta para o hospedeiro (mesmo endereço de onde veio).
 SENHA=simba123
+# roda como serviço de usuário: se a sessão não exportou, descobre o Hyprland e o Wayland
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$UID}
+if [ -z "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; then
+  HYPRLAND_INSTANCE_SIGNATURE=$(ls -t "$XDG_RUNTIME_DIR/hypr" 2>/dev/null | head -1); export HYPRLAND_INSTANCE_SIGNATURE
+fi
+export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
 GW=$(ip r | awk '/default/{print $3; exit}')
 GW=${GW:-192.168.122.1}
 j() { jq -Rs . <<<"$1"; }   # texto → string JSON

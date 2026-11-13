@@ -8,8 +8,11 @@
 #     --manter   não apaga a VM no fim (para olhar: TESTAR_VM=simba-auto ferramentas/testar-vm tela)
 #
 # Relatório e capturas de cada etapa: ~/.cache/simba-testes/<versão>-<data>/
-# Na VM: teclado americano (para digitar os comandos), desbloqueio do disco pelo TPM e login
-# automático (para não depender de senha), usuário "teste", senha "simba123".
+# Na VM: teclado americano, desbloqueio do disco pelo TPM e login automático (para não depender
+# de senha), usuário "teste", senha "simba123". A checagem não é digitada (as boas-vindas pegam o
+# foco do teclado): antes de reiniciar, ainda no sistema do pendrive (que tem o agente do QEMU),
+# o teste abre o disco instalado e põe nele um serviço de usuário que roda a checagem sozinho
+# quando a sessão gráfica sobe e manda o resultado para cá pelo gateway da VM (passt → este PC).
 set -uo pipefail
 R="$(cd "$(dirname "$0")/.." && pwd)"
 ISO=${1:?uso: testar-iso-completo <iso> [--manter]}
@@ -18,8 +21,6 @@ export TESTAR_VM=simba-auto TESTAR_VM_3D=0 TESTAR_VM_SSH=2225
 T="$R/ferramentas/testar-vm"
 C=(virsh -q -c qemu:///session)
 PORTA=8766
-HOST_IP=$(ip r | awk '/default/{print $3; exit}')
-HOST_IP=${HOST_IP:-10.0.2.2}
 SENHA=simba123
 NOME=$(basename "$ISO" .iso)
 OUT="$HOME/.cache/simba-testes/$NOME-$(date +%Y%m%d-%H%M)"
@@ -56,6 +57,22 @@ esperar() {  # esperar <regex> <segundos> <nome da etapa>
     sleep 3
   done
   return 1
+}
+# roda um comando bash no sistema do pendrive (agente do QEMU) e mostra a saída
+na_vm() {
+  local arg pid r i
+  arg=$(jq -cn --arg c "$1" '["-c",$c]')
+  pid=$("${C[@]}" qemu-agent-command "$TESTAR_VM" --timeout 15 \
+    "{\"execute\":\"guest-exec\",\"arguments\":{\"path\":\"/bin/bash\",\"arg\":$arg,\"capture-output\":true}}" 2>/dev/null | jq -r .return.pid) || return 1
+  [ -n "$pid" ] && [ "$pid" != null ] || return 1
+  for i in $(seq 60); do
+    r=$("${C[@]}" qemu-agent-command "$TESTAR_VM" --timeout 15 "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}" 2>/dev/null)
+    [ "$(jq -r .return.exited <<<"$r")" = true ] && break
+    sleep 1
+  done
+  jq -r '.return["out-data"] // ""' <<<"$r" | base64 -d
+  jq -r '.return["err-data"] // ""' <<<"$r" | base64 -d >&2
+  return "$(jq -r '.return.exitcode // 1' <<<"$r")"
 }
 tecla() { "$T" tecla "$@"; sleep 0.6; }
 texto() { "$T" texto "$1"; sleep 0.4; }
@@ -116,7 +133,51 @@ passo "instalando"
 esperar "foi instalado|E agora" 1800 "instalado" || falha "a instalação não terminou em 30 min (ou deu erro)"
 echo "   instalado em $((SECONDS - INICIO)) s desde o boot da ISO"
 
-# ── 2. primeiro boot ─────────────────────────────────────────────────────────────────
+# ── 2. prepara a checagem no disco instalado (ainda no sistema do pendrive) ──────────
+passo "preparando a checagem no sistema instalado"
+UNIDADE='[Unit]
+Description=Teste automático do Simba OS (testar-iso-completo)
+After=graphical-session.target
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/lib/simba-teste-checagem
+[Install]
+WantedBy=graphical-session.target'
+INICIADOR=$(cat <<'SH'
+#!/bin/bash
+# baixa a checagem do PC que roda o teste (gateway da VM → passt → hospedeiro) e roda
+sleep 40
+gw=$(ip r | awk '/default/{print $3; exit}')
+for h in "$gw" 10.0.2.2; do
+  [ -n "$h" ] && curl -sf -m 10 "http://$h:PORTA/c" -o /tmp/simba-checagem.sh && break
+done
+exec bash /tmp/simba-checagem.sh
+SH
+)
+INICIADOR=${INICIADOR//PORTA/$PORTA}
+B64I=$(printf '%s\n' "$INICIADOR" | base64 -w0)
+B64=$(printf '%s\n' "$UNIDADE" | base64 -w0)
+na_vm "set -e
+alvo=\$(lsblk -rpno NAME,TYPE,FSTYPE | awk '\$2==\"crypt\" && \$3==\"btrfs\" {print \$1; exit}')
+aberto=0
+if [ -z \"\$alvo\" ]; then
+  dev=\$(lsblk -rpno NAME,FSTYPE | awk '\$2==\"crypto_LUKS\" {print \$1; exit}')
+  printf %s '$SENHA' | cryptsetup open \"\$dev\" simba-teste -
+  alvo=/dev/mapper/simba-teste; aberto=1
+fi
+mkdir -p /mnt/simba-teste
+mount -o subvol=@ \"\$alvo\" /mnt/simba-teste
+d=/mnt/simba-teste/etc/systemd/user
+mkdir -p \"\$d/graphical-session.target.wants\"
+echo '$B64' | base64 -d > \"\$d/simba-teste-checagem.service\"
+mkdir -p /mnt/simba-teste/usr/local/lib
+echo '$B64I' | base64 -d > /mnt/simba-teste/usr/local/lib/simba-teste-checagem
+ln -sf ../simba-teste-checagem.service \"\$d/graphical-session.target.wants/simba-teste-checagem.service\"
+sync; umount /mnt/simba-teste
+[ \$aberto = 1 ] && cryptsetup close simba-teste
+echo checagem-instalada" | grep -q checagem-instalada || falha "não deu para preparar a checagem no disco instalado"
+
+# ── 3. primeiro boot ─────────────────────────────────────────────────────────────────
 passo "reiniciando no sistema instalado"
 "$T" ejetar
 tecla KEY_ENTER                                     # Reiniciar agora (a VM desliga)
@@ -128,24 +189,13 @@ echo "   área de trabalho em $((SECONDS - BOOT)) s"
 sleep 15                                            # notificações, serviços do 1º login
 captura "area-de-trabalho"
 
-# ── 3. checagem dentro da sessão ─────────────────────────────────────────────────────
-passo "checagem dentro da sessão"
-tecla KEY_LEFTMETA KEY_ENTER                        # abre o terminal
-sleep 5
-tecla KEY_LEFTALT KEY_TAB                           # foca a próxima janela
-sleep 1
-tecla KEY_LEFTMETA KEY_LEFT                         # reforça foco na janela à esquerda (terminal)
-sleep 1
-texto "curl -s http://$HOST_IP:$PORTA/c -o /tmp/c.sh"
-tecla KEY_ENTER
-sleep 2
-texto "bash /tmp/c.sh"
-tecla KEY_ENTER
-for _ in $(seq 90); do [ -s "$OUT/resultado.json" ] && break; sleep 2; done
+# ── 4. checagem (o serviço roda sozinho ~40 s depois da sessão subir) ───────────────
+passo "esperando a checagem da sessão"
+for _ in $(seq 120); do [ -s "$OUT/resultado.json" ] && break; sleep 2; done
 captura "checagem"
-[ -s "$OUT/resultado.json" ] || falha "a checagem não respondeu (terminal não abriu ou sem rede para o hospedeiro)"
+[ -s "$OUT/resultado.json" ] || falha "a checagem não respondeu (serviço não rodou ou sem rede para o hospedeiro)"
 
-# ── 4. avaliação ─────────────────────────────────────────────────────────────────────
+# ── 5. avaliação ─────────────────────────────────────────────────────────────────────
 passo "resultado"
 python3 -I - "$OUT/resultado.json" <<'PY'
 import json, sys

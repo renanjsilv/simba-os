@@ -5,7 +5,8 @@
 #
 #   1. assina os pacotes novos de dist/ e publica no canal de teste ([simba-os-testing])
 #   2. monta a ISO com o canal de teste (sudo iso/construir, SIMBA_ISO_CANAL=teste)
-#   3. conferência: .sha256 e teste rápido na VM (ferramentas/testar-iso-boot: a ISO inicia
+#   3. conferência: .sha256, teste rápido (testar-iso-boot) e teste COMPLETO (testar-iso-completo:
+#      instala, reinicia e checa a sessão — se falhar, não envia). Antes: teste rápido (a ISO inicia
 #      e o instalador sobe); se falhar, não envia
 #   4. envia para o SourceForge, pasta <versão>/ (ferramentas/enviar-iso, chave SSH ~/.ssh/sourceforge)
 #
@@ -78,6 +79,14 @@ ISO="$SAIDA/simba-os-$VERSAO-x86_64.iso"
 ls -lh "$ISO"
 cat "$ISO.sha256"
 "$R/ferramentas/testar-iso-boot" "$ISO"
+# teste completo (instala, reinicia, checa a sessão): obrigatório antes de enviar.
+# SIMBA_SEM_TESTE_COMPLETO=1 pula (só para emergência).
+if [ -z "${SIMBA_SEM_TESTE_COMPLETO:-}" ]; then
+  echo "── teste completo na VM (instalação + primeiro login, ~10 min)"
+  "$R/ferramentas/testar-iso-completo" "$ISO" || {
+    avisar dialog-error-symbolic "ISO $VERSAO: teste completo falhou" "Nada foi enviado. Veja ~/.cache/simba-testes/"
+    echo "✗ teste completo falhou: nada foi enviado" >&2; exit 1; }
+fi
 
 if [ -n "${SIMBA_SEM_ENVIO:-}" ]; then
   avisar emblem-ok-symbolic "ISO $VERSAO pronta" "$ISO"

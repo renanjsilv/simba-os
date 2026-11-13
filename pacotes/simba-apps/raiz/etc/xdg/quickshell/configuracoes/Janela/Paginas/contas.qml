@@ -346,6 +346,30 @@ Pagina {
     }
   }
 
+  // ── avisos de conexão e navegador ─────────────────────────────────────────
+  Aviso {
+    visible: pg.conectado && !!(pg.s && pg.s.rede_limitada)
+    tipo: "aviso"
+    glifo: Icones.wifi
+    texto: I18n.t("Conexão limitada detectada (dados móveis/roteamento celular). O Simba OS está espaçando a sincronização automática para economizar sua franquia de dados.")
+  }
+
+  Aviso {
+    visible: pg.conectado && !!(pg.s && pg.s.brave_pendente)
+    tipo: "info"
+    glifo: Icones.sync
+    texto: I18n.t("Novos favoritos e atalhos recebidos da nuvem estão prontos para o navegador.")
+    acoes: Botao {
+      texto: I18n.t("Aplicar agora")
+      tipo: "primario"
+      habilitado: !pg.ocupado
+      onClicado: Sistema.rodar(["conta", "brave"], function(o, code) {
+        pg.atualizar()
+        Navegacao.confirmar(code === 0 ? I18n.t("Favoritos aplicados!") : (o.trim() || I18n.t("Feche o navegador antes")), code === 0 ? Icones.checkCircle : Icones.alert)
+      })
+    }
+  }
+
   // ── automático / restaurar / sair ────────────────────────────────────────
   Secao { visible: pg.conectado; titulo: I18n.t("Backup e restauração") }
   Cartao {
@@ -399,6 +423,33 @@ Pagina {
       Botao { visible: !pg.confirmarSair; texto: I18n.t("Sair"); habilitado: !pg.ocupado; onClicado: pg.confirmarSair = true }
       Botao { visible: pg.confirmarSair; texto: I18n.t("Cancelar"); tipo: "fantasma"; onClicado: pg.confirmarSair = false }
       Botao { visible: pg.confirmarSair; texto: I18n.t("Sair da conta"); tipo: "perigo"; onClicado: { pg.confirmarSair = false; Sistema.rodar(["conta", "sair"], function() { Navegacao.versaoFoto++; pg.atualizar() }) } }
+    }
+  }
+
+  // ── dispositivos no ecossistema ──────────────────────────────────────────
+  Secao {
+    visible: pg.conectado && !!(pg.s && pg.s.dispositivos && pg.s.dispositivos.length > 0)
+    titulo: I18n.t("Dispositivos no ecossistema")
+    detalhe: I18n.t("Computadores vinculados a este Simba Conta e sincronizados via Google Drive.")
+  }
+  Cartao {
+    visible: pg.conectado && !!(pg.s && pg.s.dispositivos && pg.s.dispositivos.length > 0)
+    Repeater {
+      model: pg.s && pg.s.dispositivos ? pg.s.dispositivos : []
+      delegate: Linha {
+        glifo: modelData.tipo === "laptop" ? Icones.laptop : Icones.monitor
+        titulo: modelData.maquina + (modelData.este_dispositivo ? " (" + I18n.t("Este computador") + ")" : "")
+        descricao: (modelData.este_dispositivo ? I18n.t("Último envio: ") : I18n.t("Última sincronização: ")) +
+                   pg.quando(modelData.data) +
+                   (modelData.tema ? " · " + I18n.t("Tema: ") + modelData.tema : "")
+        Texto {
+          visible: modelData.este_dispositivo
+          text: I18n.t("Ativo")
+          color: Tema.sucesso
+          font.weight: Font.Medium
+          font.pixelSize: Tema.tLegenda + 1
+        }
+      }
     }
   }
 

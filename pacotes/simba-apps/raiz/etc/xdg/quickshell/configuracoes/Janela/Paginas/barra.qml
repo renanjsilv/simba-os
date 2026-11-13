@@ -30,7 +30,7 @@ Pagina {
     "simba.network": I18n.t("Rede"), "simba.power": I18n.t("Energia e bateria"), "simba.spacer": I18n.t("Espaçador"),
     "simba.system-update": I18n.t("Atualizações"), "simba.tailscale": I18n.t("Tailscale"), "simba.tray": I18n.t("Bandeja do sistema"),
     "simba.weather": I18n.t("Clima"), "simba.workspaces": I18n.t("Áreas de trabalho"), "tarefas": I18n.t("Barra de tarefas"),
-    "areas": I18n.t("Áreas de trabalho"), "bandeja": I18n.t("Seta de ícones ocultos")
+    "areas": I18n.t("Áreas de trabalho"), "bandeja": I18n.t("Seta de ícones ocultos"), "nuvem": I18n.t("Simba Conta (Nuvem)")
   })
   readonly property var glifos: ({
     "simba.active-window": Icones.dockWindow, "simba.agents": Icones.robot, "simba.audio": Icones.volumeHigh,
@@ -40,7 +40,7 @@ Pagina {
     "simba.network": Icones.wifi, "simba.power": Icones.battery, "simba.spacer": Icones.dotsHorizontal,
     "simba.system-update": Icones.update, "simba.tailscale": Icones.lan, "simba.tray": Icones.apps,
     "simba.weather": Icones.weatherSunny, "simba.workspaces": Icones.viewGridOutline, "tarefas": Icones.apps,
-    "areas": Icones.viewGridOutline, "bandeja": Icones.chevronUp
+    "areas": Icones.viewGridOutline, "bandeja": Icones.chevronUp, "nuvem": Icones.cloud
   })
   function nome(id) {
     if (nomes[id]) return nomes[id]

@@ -178,12 +178,93 @@ Item {
     }
   }
 
+  // ── monitoramento da conta e nuvem ──────────────────────────────────────
+  FileView {
+    id: nuvemFile
+    path: Quickshell.env("HOME") + "/.local/state/conta/estado.json"
+    watchChanges: true
+    printErrors: false
+    property var dados: ({})
+    readonly property bool conectado: dados && (dados.ultima || dados.remoto_meta || dados.conectado)
+    readonly property bool sincronizando: dados && (dados.sincronizando || dados.rodando || (dados.progresso && dados.progresso !== ""))
+    readonly property string erro: dados && dados.resultado === "erro" ? String(dados.erro || "") : ""
+    onFileChanged: reload()
+    onLoaded: { try { dados = JSON.parse(text()) } catch (e) { dados = {} } }
+  }
+
   // ── barra: seta + apps visíveis ─────────────────────────────────────────
   Grid {
     id: linha
     anchors.centerIn: parent
-    columns: root.vertical ? 1 : 1 + root.appsVisiveis.length
+    columns: root.vertical ? 1 : 1 + (nuvemItem.visible ? 1 : 0) + root.appsVisiveis.length
     spacing: 0
+
+    Item {
+      id: nuvemItem
+      visible: nuvemFile.conectado
+      width: visible ? (root.vertical ? root.barSize : root.tamIcone + 12) : 0
+      height: visible ? (root.vertical ? root.tamIcone + 12 : root.barSize) : 0
+
+      Rectangle {
+        anchors.fill: parent
+        anchors.margins: 2
+        radius: Math.min(7, height / 2)
+        color: root.fg
+        opacity: nuvemArea.containsMouse ? 0.08 : 0
+      }
+
+      Text {
+        id: iconeNuvem
+        anchors.centerIn: parent
+        text: nuvemFile.sincronizando ? "\u{F06B0}" : (nuvemFile.erro !== "" ? "\u{F0028}" : "\u{F01BE}")
+        color: nuvemFile.erro !== "" ? Color.urgent : (nuvemFile.sincronizando ? Color.accent : root.fg)
+        font.family: root.fonte
+        font.pixelSize: root.tamIcone
+        opacity: nuvemFile.sincronizando ? pulsoAnim.opacidade : 0.85
+
+        RotationAnimation on rotation {
+          running: nuvemFile.sincronizando
+          from: 0; to: 360
+          duration: 1200
+          loops: Animation.Infinite
+        }
+      }
+
+      SequentialAnimation {
+        id: pulsoAnim
+        property real opacidade: 1.0
+        running: nuvemFile.sincronizando
+        loops: Animation.Infinite
+        NumberAnimation { target: pulsoAnim; property: "opacidade"; from: 0.4; to: 1.0; duration: 600; easing.type: Easing.InOutQuad }
+        NumberAnimation { target: pulsoAnim; property: "opacidade"; from: 1.0; to: 0.4; duration: 600; easing.type: Easing.InOutQuad }
+      }
+
+      MouseArea {
+        id: nuvemArea
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        cursorShape: Qt.PointingHandCursor
+        onClicked: function(m) {
+          if (m.button === Qt.RightButton) {
+            Quickshell.execDetached(["/usr/bin/conta", "puxar", "--forcar"])
+          } else {
+            Quickshell.execDetached(["/usr/bin/configuracoes", "contas"])
+          }
+        }
+        onEntered: {
+          if (root.bar) {
+            var msg = I18n.t("Simba Conta")
+            if (nuvemFile.sincronizando) msg += ": " + I18n.t("Sincronizando...")
+            else if (nuvemFile.erro !== "") msg += ": " + I18n.t("Erro na sincronização")
+            else msg += ": " + I18n.t("Sincronizado")
+            msg += "\n" + I18n.t("Clique: Configurações · Botão direito: Sincronizar agora")
+            root.bar.showTooltip(nuvemItem, msg)
+          }
+        }
+        onExited: if (root.bar) root.bar.hideTooltip(nuvemItem)
+      }
+    }
 
     Item {
       id: seta

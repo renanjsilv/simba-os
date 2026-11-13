@@ -57,6 +57,8 @@ Singleton {
   readonly property string clockOutline: "\u{f0150}"
   readonly property string close: "\u{f0156}"
   readonly property string closeCircle: "\u{f0159}"
+  readonly property string cloud: "\u{f015f}"
+  readonly property string cloudSync: "\u{f063d}"
   readonly property string coffee: "\u{f0176}"
   readonly property string cog: "\u{f0493}"
   readonly property string cogOutline: "\u{f08bb}"

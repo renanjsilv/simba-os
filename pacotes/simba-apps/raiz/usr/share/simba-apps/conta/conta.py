@@ -22,6 +22,7 @@ ex. "teste:" para um remoto local), CONTA_HOME (pasta pessoal alternativa).
 import datetime
 import fcntl
 import fnmatch
+import getpass
 import json
 import os
 import re
@@ -224,9 +225,11 @@ class Trava:
             fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise SystemExit(_t("já existe uma sincronização/restauração em andamento"))
+        salvar_estado(sincronizando=True)
         return self
 
     def __exit__(self, *a):
+        salvar_estado(sincronizando=False)
         fcntl.flock(self.f, fcntl.LOCK_UN)
         self.f.close()
 
@@ -368,8 +371,105 @@ def preparar_extras(c, lista=()):
             meta["fundo"] = str(fundo)
     except OSError:
         pass
+    if (EXTRA / "brave" / "Bookmarks").exists():
+        meta["brave"] = {
+            "mtime": (EXTRA / "brave" / "Bookmarks").stat().st_mtime,
+            "data": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        }
+    meta = registrar_dispositivo_local(meta)
     gravar_json(EXTRA / "links.json", LINKS)
     gravar_json(EXTRA / "meta.json", meta)
+    return meta
+
+
+# ── utilitários de rede, dispositivos e navegador ────────────────────────────
+def rede_limitada():
+    """Detecta se a conexão de rede ativa é limitada (dados móveis/hotspot celular)."""
+    try:
+        r = subprocess.run(
+            ["busctl", "get-property", "org.freedesktop.NetworkManager",
+             "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager", "Metered"],
+            capture_output=True, text=True, timeout=2
+        )
+        if r.returncode == 0:
+            val = r.stdout.strip().split()[-1]
+            if val in ("1", "3"):
+                return True
+    except Exception:
+        pass
+    try:
+        r = subprocess.run(["nmcli", "-g", "GENERAL.METERED", "dev", "show"],
+                           capture_output=True, text=True, timeout=2)
+        if r.returncode == 0:
+            for l in r.stdout.splitlines():
+                if "yes" in l.lower():
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def info_dispositivo_local():
+    maquina = socket.gethostname()
+    usuario = getpass.getuser()
+    eh_laptop = False
+    try:
+        eh_laptop = any(p.name.startswith("BAT") for p in Path("/sys/class/power_supply").iterdir())
+    except Exception:
+        pass
+
+    fundo = ""
+    try:
+        link = HOME / ".local/state/simba/current/background"
+        if link.exists():
+            fundo = str(link.resolve())
+    except Exception:
+        pass
+
+    tema = ""
+    try:
+        tema_arq = HOME / ".local/state/simba/current/theme.name"
+        if tema_arq.exists():
+            tema = tema_arq.read_text().strip()
+    except Exception:
+        pass
+
+    return {
+        "maquina": maquina,
+        "usuario": usuario,
+        "tipo": "laptop" if eh_laptop else "desktop",
+        "data": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "tema": tema or "padrão",
+        "fundo": fundo or "",
+        "versao": "Simba OS"
+    }
+
+
+def registrar_dispositivo_local(meta):
+    disps = meta.get("dispositivos")
+    if not isinstance(disps, dict):
+        disps = {}
+
+    rem_meta = estado().get("remoto_meta", {})
+    if isinstance(rem_meta, dict):
+        for k, v in rem_meta.get("dispositivos", {}).items():
+            if isinstance(v, dict) and k not in disps:
+                disps[k] = v
+        rem_maq = rem_meta.get("maquina")
+        if rem_maq and rem_maq not in disps:
+            disps[rem_maq] = {
+                "maquina": rem_maq,
+                "usuario": rem_meta.get("usuario", ""),
+                "tipo": "desktop",
+                "data": rem_meta.get("data", ""),
+                "tema": rem_meta.get("tema", ""),
+                "fundo": rem_meta.get("fundo", ""),
+                "versao": "Simba OS"
+            }
+
+    info = info_dispositivo_local()
+    disps[info["maquina"]] = info
+    meta["dispositivos"] = disps
     return meta
 
 
@@ -386,6 +486,20 @@ def cmd_status(_a):
             fcntl.flock(f, fcntl.LOCK_UN)
     except BlockingIOError:
         rodando = True
+
+    remoto_m = e.get("remoto_meta", {})
+    dispositivos_map = remoto_m.get("dispositivos", {}) if isinstance(remoto_m, dict) else {}
+    info_local = info_dispositivo_local()
+    info_local["este_dispositivo"] = True
+    lista_dispositivos = [info_local]
+    maq_local = info_local["maquina"]
+    if isinstance(dispositivos_map, dict):
+        for k, v in dispositivos_map.items():
+            if k != maq_local and isinstance(v, dict):
+                disp = dict(v)
+                disp["este_dispositivo"] = False
+                lista_dispositivos.append(disp)
+
     print(json.dumps({
         "rclone": bool(rclone_bin()),
         "conectado": lig,
@@ -402,6 +516,10 @@ def cmd_status(_a):
         "arquivos": e.get("arquivos", 0),
         "progresso": e.get("progresso", ""),
         "rodando": rodando,
+        "sincronizando": rodando or bool(e.get("sincronizando")),
+        "rede_limitada": rede_limitada(),
+        "brave_pendente": (HOME / ".local/share/conta/brave-pendente").is_dir(),
+        "dispositivos": lista_dispositivos,
         "entrando": e.get("entrando", False),
         "remoto_meta": e.get("remoto_meta", {}),
         "precisa_decidir": e.get("precisa_decidir", False),
@@ -672,7 +790,11 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
     (ex.: papel de parede alterado no notebook) e aplica dinamicamente."""
     if not conectado():
         return False
+    salvar_estado(sincronizando=True)
     try:
+        # Se havia favoritos do navegador aguardando o fechamento do Brave, tenta aplicar
+        aplicar_brave_se_pendente()
+
         meta_remoto = remoto_meta()
         if not meta_remoto or not meta_remoto.get("data"):
             return False
@@ -749,7 +871,37 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
             except Exception:
                 pass
 
-        # 3. Salva carimbo da sincronização remota
+        # 3. Sincronização dinâmica de Favoritos / Atalhos do Navegador (Brave/Simba)
+        brave_remoto = meta_remoto.get("brave")
+        if brave_remoto and config().get("categorias", {}).get("historico", True):
+            destino_temp = HOME / ".local/share/conta/brave-remoto"
+            destino_temp.mkdir(parents=True, exist_ok=True)
+            try:
+                r = rc("copy", f"{dados}/extra/brave", str(destino_temp), check=False, timeout=30)
+                if r and r.returncode == 0:
+                    bm_remoto = destino_temp / "Bookmarks"
+                    bm_local = BRAVE / "Bookmarks"
+                    difere = False
+                    if bm_remoto.exists():
+                        if not bm_local.exists() or bm_remoto.read_bytes() != bm_local.read_bytes():
+                            difere = True
+                    if difere:
+                        if _brave_aberto():
+                            pendente = HOME / ".local/share/conta/brave-pendente"
+                            if pendente.exists():
+                                shutil.rmtree(pendente, ignore_errors=True)
+                            shutil.copytree(destino_temp, pendente)
+                            avisar(_t("Simba Conta — Navegador"),
+                                   _t("Novos favoritos recebidos de %1. Eles serão aplicados quando você fechar o navegador.", maquina_remota or _t("outra máquina")))
+                            mudancas.append(_t("favoritos do navegador (pendente)"))
+                        else:
+                            guarda = HOME / ".local/share/conta/antes-da-restauracao" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+                            _restaurar_brave(destino_temp, guarda)
+                            mudancas.append(_t("favoritos do navegador"))
+            except (subprocess.TimeoutExpired, Exception):
+                pass
+
+        # 4. Salva carimbo da sincronização remota
         salvar_estado(ultima_remota_aplicada=data_remota, remoto_meta=meta_remoto)
 
         if mudancas:
@@ -768,6 +920,8 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
         if not silencioso:
             print(_t("verificação remota falhou: %1", exc), file=sys.stderr)
         return False
+    finally:
+        salvar_estado(sincronizando=False)
 
 
 def cmd_sincronizar(a):
@@ -775,8 +929,29 @@ def cmd_sincronizar(a):
         print(_t("não conectado"), file=sys.stderr)
         return 0 if a.silencioso else 1  # timer de um clone ainda sem login: não é falha
 
+    # Conexão limitada (dados móveis / hotspot do celular):
+    # Se o timer rodar em conexão limitada, espaça para 2 horas para poupar a franquia
+    limitada = rede_limitada()
+    salvar_estado(rede_limitada=limitada)
+    if limitada and not getattr(a, "forcar", False) and not a.substituir:
+        e = estado()
+        ultima_data_str = e.get("ultima")
+        if ultima_data_str:
+            try:
+                ultima_dt = datetime.datetime.fromisoformat(ultima_data_str)
+                agora = datetime.datetime.now(datetime.timezone.utc)
+                if (agora - ultima_dt.astimezone(datetime.timezone.utc)).total_seconds() < 7200:
+                    if not a.silencioso:
+                        print(_t("Conexão limitada detectada (dados móveis). Sincronização espaçada para economizar dados."))
+                    return 0
+            except Exception:
+                pass
+
     # Antes de enviar, confere se outra máquina publicou novidades (ex.: trocou wallpaper ou tema)
     puxar_alteracoes_remotas(silencioso=a.silencioso, forcar=getattr(a, "forcar", False))
+
+    # Aplica favoritos pendentes do navegador se o Brave foi fechado
+    aplicar_brave_se_pendente()
 
     if not a.substituir and not pode_enviar():
         msg = _t("Já existe um backup nesta conta. Restaure-o primeiro (ou escolha substituí-lo).")
@@ -1017,6 +1192,21 @@ def cmd_brave(_a):
     shutil.rmtree(src)
     avisar(_t("Histórico do Brave restaurado"))
     return 0
+
+
+def aplicar_brave_se_pendente():
+    """Se houver favoritos ou histórico baixados da nuvem aguardando e o Brave estiver fechado, aplica."""
+    pendente = HOME / ".local/share/conta/brave-pendente"
+    if pendente.is_dir() and not _brave_aberto():
+        try:
+            guarda = HOME / ".local/share/conta/antes-da-restauracao" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            _restaurar_brave(pendente, guarda)
+            shutil.rmtree(pendente, ignore_errors=True)
+            avisar(_t("Simba Conta — Navegador"), _t("Favoritos e histórico da nuvem aplicados ao navegador."))
+            return True
+        except Exception:
+            pass
+    return False
 
 
 def pacotes_faltando(pasta):

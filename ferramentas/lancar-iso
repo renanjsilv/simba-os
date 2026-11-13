@@ -45,7 +45,8 @@ for w in /mnt/dados/gerar-iso/.work-* /var/tmp/gerar-iso/.work-*; do
   echo "   apagando sobra: $w"; sudo rm -rf "$w"
 done
 
-echo "── 1/4 assinando pacotes novos e publicando no canal de teste"
+CANAL=${SIMBA_CANAL:-estavel}
+echo "── 1/4 assinando pacotes novos e publicando no canal $CANAL"
 cd "$R/dist"
 for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do
   f=$(ls "$p"-[0-9]*.pkg.tar.zst 2>/dev/null | grep -v -- '-debug-' | sort -V | tail -1)
@@ -53,14 +54,20 @@ for p in "${PACOTES[@]}" "${PUBLICAR_AUR[@]}"; do
   [[ -s $f.sig && $f.sig -nt $f ]] || { echo "   assinando $f"; gpg --batch --yes -u "$CHAVE" --detach-sign "$f"; }
 done
 cd "$R"
-PUBLICAR_SEM_CONSTRUIR=1 "$R/ferramentas/publicar"
+if [ "$CANAL" = estavel ]; then
+  PUBLICAR_SEM_CONSTRUIR=1 "$R/ferramentas/publicar" --direto
+  ISO_CANAL_FLAG=""
+else
+  PUBLICAR_SEM_CONSTRUIR=1 "$R/ferramentas/publicar"
+  ISO_CANAL_FLAG="SIMBA_ISO_CANAL=teste"
+fi
 
 echo "── 2/4 montando a ISO (demora)"
 # uma 2ª tentativa: falhas de download (pacote corrompido no cache ou espelho no meio da
 # sincronização) somem sozinhas — o pacman apaga o arquivo ruim e baixa de novo
-if ! sudo SIMBA_ISO_CANAL=teste "$R/iso/construir"; then
+if ! sudo $ISO_CANAL_FLAG "$R/iso/construir"; then
   echo "── a montagem falhou; tentando mais uma vez em 1 min"; sleep 60
-  sudo SIMBA_ISO_CANAL=teste "$R/iso/construir"
+  sudo $ISO_CANAL_FLAG "$R/iso/construir"
 fi
 
 echo "── 3/4 conferência"

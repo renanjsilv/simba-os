@@ -27,7 +27,33 @@ Item {
   readonly property string ajudante: "/usr/bin/simba-central"
 
   property var st: ({ wifi: true, ssid: "", bluetooth: false, naoperturbe: false, claro: false, luznoturna: false,
-                      economia: false, volume: 50, mudo: false, brilho: 100, bateria: null, carregando: false })
+                      economia: false, volume: 50, mudo: false, brilho: 100, bateria: null, carregando: false,
+                      saidas_audio: [] })
+  property bool mostrarSaidas: false
+  readonly property var saidasAudio: st.saidas_audio || []
+  readonly property var saidaAtual: {
+    for (var i = 0; i < saidasAudio.length; i++) {
+      if (saidasAudio[i].padrao) return saidasAudio[i]
+    }
+    return saidasAudio.length > 0 ? saidasAudio[0] : null
+  }
+  function gTipoSaida(tipo) {
+    if (tipo === "bluetooth") return "\u{F0970}"
+    if (tipo === "headphones") return "\u{F02CB}"
+    if (tipo === "hdmi") return "\u{F0A24}"
+    return "\u{F04C3}"
+  }
+  readonly property string gSaidaAtual: saidaAtual ? gTipoSaida(saidaAtual.tipo) : "\u{F0142}"
+
+  function trocarSaidaAudio(disp) {
+    if (st.saidas_audio) {
+      var arr = st.saidas_audio.map(function(s) {
+        return Object.assign({}, s, { padrao: s.id === disp.id || (s.nome && s.nome === disp.nome) })
+      })
+      st = Object.assign({}, st, { saidas_audio: arr })
+    }
+    acao(["saida-audio", String(disp.id), disp.nome || ""])
+  }
 
   // ── cores do painel (segue o tema; destaque cinza vira o texto, como na Configurações) ──
   function lum(c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b }
@@ -160,7 +186,7 @@ Item {
     anchor.rect.y: root.vertical ? root.height - implicitHeight : (root.bar && root.bar.position === "bottom" ? -implicitHeight - 6 : root.height + 6)
 
     property bool grabPronto: false
-    onVisibleChanged: { grabPronto = false; if (visible) ativarGrab.restart() }
+    onVisibleChanged: { grabPronto = false; if (!visible) mostrarSaidas = false; if (visible) ativarGrab.restart() }
     Timer { id: ativarGrab; interval: 60; onTriggered: painel.grabPronto = painel.visible }
     HyprlandFocusGrab { active: painel.grabPronto; windows: [painel]; onCleared: painel.visible = false }
 
@@ -355,8 +381,12 @@ Item {
           property string glifo: ""
           property int valor: 0
           property int minimo: 0
+          property bool temAcaoDireita: false
+          property string glifoDireita: ""
+          property bool ativaDireita: false
           signal mudou(int v)
           signal clicouGlifo()
+          signal clicouDireita()
           width: parent.width; height: 34
           Text {
             id: ig
@@ -394,9 +424,33 @@ Item {
           }
           Text {
             id: num
-            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            anchors { right: d.temAcaoDireita ? btnExtra.left : parent.right; rightMargin: d.temAcaoDireita ? 6 : 0; verticalCenter: parent.verticalCenter }
             width: 30; horizontalAlignment: Text.AlignRight
             text: d.valor; color: root.texto; opacity: 0.7; font.pixelSize: 12
+          }
+          Rectangle {
+            id: btnExtra
+            visible: d.temAcaoDireita
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: 28; height: 28; radius: 14
+            color: d.ativaDireita ? root.realce : (me.containsMouse ? root.alfa(root.texto, 0.14) : root.alfa(root.texto, 0.07))
+            scale: me.pressed ? 0.92 : 1
+            Behavior on scale { NumberAnimation { duration: 80 } }
+            Behavior on color { ColorAnimation { duration: 100 } }
+            Text {
+              anchors.centerIn: parent
+              text: d.glifoDireita
+              color: d.ativaDireita ? root.sobreRealce : root.texto
+              font.family: root.fonte
+              font.pixelSize: 15
+            }
+            MouseArea {
+              id: me
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: d.clicouDireita()
+            }
           }
         }
         // aplica no máximo a cada 60 ms enquanto arrasta
@@ -406,8 +460,105 @@ Item {
         Deslizante {
           glifo: root.gVol
           valor: root.st.mudo ? 0 : root.st.volume
+          temAcaoDireita: true
+          glifoDireita: root.mostrarSaidas ? "\u{F0140}" : root.gSaidaAtual
+          ativaDireita: root.mostrarSaidas
           onMudou: function(v) { root.st = Object.assign({}, root.st, { volume: v, mudo: false }); if (!aplicaVol.running) aplicaVol.start() }
           onClicouGlifo: { root.acao(["mudo"]); root.st = Object.assign({}, root.st, { mudo: !root.st.mudo }) }
+          onClicouDireita: { root.mostrarSaidas = !root.mostrarSaidas }
+        }
+
+        // seletor de saída de áudio (fone, bluetooth, alto-falante)
+        Rectangle {
+          id: painelSaidas
+          visible: root.mostrarSaidas && root.saidasAudio.length > 0
+          width: parent.width
+          height: visible ? colSaidas.implicitHeight + 16 : 0
+          radius: 12
+          color: root.alfa(root.texto, root.escuro ? 0.08 : 0.05)
+          border.width: 1; border.color: root.alfa(root.texto, 0.10)
+          clip: true
+
+          Column {
+            id: colSaidas
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+            spacing: 4
+
+            Row {
+              width: parent.width
+              spacing: 6
+              Text {
+                text: I18n.t("Saída de som")
+                color: root.texto; opacity: 0.65; font.pixelSize: 11; font.weight: Font.DemiBold
+              }
+            }
+
+            Repeater {
+              model: root.saidasAudio
+              delegate: Rectangle {
+                id: itemSaida
+                required property var modelData
+                width: colSaidas.width; height: 36; radius: 8
+                color: itemSaida.modelData.padrao ? root.alfa(root.realce, 0.20) : (ms.containsMouse ? root.alfa(root.texto, 0.08) : "transparent")
+                border.width: itemSaida.modelData.padrao ? 1 : 0
+                border.color: root.realce
+
+                Row {
+                  anchors { left: parent.left; leftMargin: 10; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                  spacing: 10
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.gTipoSaida(itemSaida.modelData.tipo)
+                    color: itemSaida.modelData.padrao ? root.realce : root.texto
+                    font.family: root.fonte; font.pixelSize: 16
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 60
+                    text: itemSaida.modelData.descricao || itemSaida.modelData.nome
+                    color: root.texto
+                    font.pixelSize: 12
+                    font.weight: itemSaida.modelData.padrao ? Font.DemiBold : Font.Normal
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: itemSaida.modelData.padrao
+                    text: "\u{F012C}"
+                    color: root.realce
+                    font.family: root.fonte; font.pixelSize: 14
+                  }
+                }
+
+                MouseArea {
+                  id: ms
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.trocarSaidaAudio(itemSaida.modelData)
+                  }
+                }
+              }
+            }
+
+            Rectangle {
+              width: colSaidas.width; height: 26; radius: 6
+              color: mCfgSom.containsMouse ? root.alfa(root.texto, 0.08) : "transparent"
+              Row {
+                anchors.centerIn: parent; spacing: 6
+                Text { text: "\u{F0493}"; color: root.texto; opacity: 0.6; font.family: root.fonte; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: I18n.t("Mais configurações de som"); color: root.texto; opacity: 0.7; font.pixelSize: 11; anchors.verticalCenter: parent.verticalCenter }
+              }
+              MouseArea {
+                id: mCfgSom; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                onClicked: { painel.visible = false; Quickshell.execDetached(["/usr/bin/configuracoes", "som"]) }
+              }
+            }
+          }
         }
         Deslizante {
           glifo: "\u{F00E0}"

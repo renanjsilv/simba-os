@@ -351,7 +351,7 @@ else
   BASE_ISO=$(ls "$WORK"/out/*.iso)
   rm -rf "$WORK/archiso-work"
   mkdir -p "$CACHE_LIVE"
-  ls -t "$CACHE_LIVE"/*.iso 2>/dev/null | tail -n +3 | xargs -r rm -f    # guarda só as 2 últimas
+  (ls -t "$CACHE_LIVE"/*.iso 2>/dev/null || true) | tail -n +3 | xargs -r rm -f    # guarda só as 2 últimas
   cp "$BASE_ISO" "$CACHE_LIVE/$CHAVE_LIVE.iso"
 fi
 

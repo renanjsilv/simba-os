@@ -16,8 +16,56 @@ luz_on()   { local t; t=$(hyprctl hyprsunset temperature 2>/dev/null | grep -oE 
 perfil()   { powerprofilesctl get 2>/dev/null; }
 b() { "$@" && echo true || echo false; }
 
+saidas_audio() {
+  python3 -c '
+import subprocess, re, json
+def get_sinks():
+    try:
+        def_sink = subprocess.check_output(["pactl", "get-default-sink"], text=True).strip()
+    except Exception:
+        def_sink = ""
+    try:
+        raw = subprocess.check_output(["pactl", "list", "sinks"], text=True)
+    except Exception:
+        return []
+    sinks = []
+    blocks = raw.split("Sink #")
+    for b in blocks[1:]:
+        name_m = re.search(r"^\s*Name:\s*(.+)$", b, re.M)
+        desc_m = re.search(r"^\s*Description:\s*(.+)$", b, re.M)
+        obj_m = re.search(r"^\s*object\.id\s*=\s*\"?(\d+)\"?", b, re.M)
+        bus_m = re.search(r"^\s*device\.bus\s*=\s*\"?([^\s\"]+)\"?", b, re.M)
+        form_m = re.search(r"^\s*device\.form_factor\s*=\s*\"?([^\s\"]+)\"?", b, re.M)
+        if not name_m:
+            continue
+        name = name_m.group(1).strip()
+        desc = desc_m.group(1).strip() if desc_m else name
+        oid = int(obj_m.group(1)) if obj_m else 0
+        bus = bus_m.group(1).lower() if bus_m else ""
+        form = form_m.group(1).lower() if form_m else ""
+        text_all = (name + " " + desc + " " + bus + " " + form).lower()
+        if "bluetooth" in bus or "bluez" in text_all:
+            tipo = "bluetooth"
+        elif "headphone" in text_all or "headset" in text_all or "fone" in text_all:
+            tipo = "headphones"
+        elif "hdmi" in text_all or "displayport" in text_all:
+            tipo = "hdmi"
+        else:
+            tipo = "speaker"
+        sinks.append({
+            "id": oid,
+            "nome": name,
+            "descricao": desc,
+            "tipo": tipo,
+            "padrao": (name == def_sink)
+        })
+    return sinks
+print(json.dumps(get_sinks(), ensure_ascii=False))
+' 2>/dev/null || echo '[]'
+}
+
 estado() {
-  local ssid vol mudo bri bmax bat carregando claro
+  local ssid vol mudo bri bmax bat carregando claro saidas
   ssid=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2=="802-11-wireless"{print $1; exit}')
   read -r vol mudo < <(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{printf "%d %s\n", $2*100+0.5, ($3=="[MUTED]")?"true":"false"}')
   bri=$(brightnessctl -m 2>/dev/null | head -1 | cut -d, -f4 | tr -d %)
@@ -28,13 +76,15 @@ t=open('$HOME/.local/state/simba/current/theme/colors.toml').read()
 m=re.search(r'^\s*background\s*=\s*[\"\']?#([0-9a-fA-F]{6})',t,re.M)
 h=m.group(1) if m else '000000'; r,g,b=(int(h[i:i+2],16)/255 for i in (0,2,4))
 print('true' if .2126*r+.7152*g+.0722*b>.5 else 'false')" 2>/dev/null || echo false)
+  saidas=$(saidas_audio)
   jq -cn --argjson wifi "$(b wifi_on)" --arg ssid "$ssid" --argjson bt "$(b bt_on)" \
     --argjson dnd "$(b dnd_on)" --argjson claro "$claro" --argjson luz "$(b luz_on)" \
     --arg perfil "$(perfil)" --argjson vol "${vol:-0}" --argjson mudo "${mudo:-false}" \
     --argjson bri "${bri:-0}" --argjson bat "${bat:-null}" --argjson carregando "$carregando" \
+    --argjson saidas "$saidas" \
     '{wifi:$wifi, ssid:$ssid, bluetooth:$bt, naoperturbe:$dnd, claro:$claro, luznoturna:$luz,
       economia:($perfil=="power-saver"), perfil:$perfil, volume:$vol, mudo:$mudo, brilho:$bri,
-      bateria:$bat, carregando:$carregando}'
+      bateria:$bat, carregando:$carregando, saidas_audio:$saidas}'
 }
 
 # Chamada de vídeo pelo navegador (Meet, Teams, Zoom, Discord…): um navegador com um fluxo de
@@ -98,6 +148,17 @@ print(json.dumps(saida, ensure_ascii=False))
 
 case "${1:-}" in
   estado) estado ;;
+  saidas-audio) saidas_audio ;;
+  saida-audio)
+    id=${2:-}
+    nome=${3:-}
+    if [[ -n $id && -n $nome ]]; then
+      simba-audio-output-set-default "$id" "$nome" >/dev/null 2>&1 || wpctl set-default "$id" 2>/dev/null || pactl set-default-sink "$nome" 2>/dev/null || true
+    elif [[ -n $id ]]; then
+      wpctl set-default "$id" 2>/dev/null || true
+    elif [[ -n $nome ]]; then
+      pactl set-default-sink "$nome" 2>/dev/null || true
+    fi ;;
   chamada) chamada ;;
   chamada-mudo)
     c=$(chamada); [[ $(jq -r .ativa <<<"$c") == true ]] || exit 0

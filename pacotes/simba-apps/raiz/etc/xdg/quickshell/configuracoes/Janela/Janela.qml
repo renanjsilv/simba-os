@@ -44,6 +44,7 @@ Scope {
       { id: "janelas", titulo: I18n.t("Janelas e animações"), aba: I18n.t("Janelas"), glifo: Icones.dockWindow } ] },
     { id: "g-apps", titulo: I18n.t("Aplicativos"), glifo: Icones.apps, paginas: [
       { id: "apps", titulo: I18n.t("Aplicativos padrão"), glifo: Icones.apps },
+      { id: "wine", titulo: I18n.t("Compatibilidade Windows"), aba: I18n.t("Windows (.exe)"), glifo: Icones.gamepadVariant },
       { id: "agentes", titulo: I18n.t("Agentes de IA"), glifo: Icones.robot } ] }
   ]
   // todas as páginas, na ordem dos grupos (busca, Ctrl+PgUp/PgDn)

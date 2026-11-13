@@ -184,7 +184,12 @@ var itens = [
   ["sistema", "fuso", "Fuso horário", "", "fuso horario hora relogio timezone"],
   ["sistema", "limpar", "Liberar espaço", "Caches de apps, AUR e programação, lixeira e pacotes antigos", "limpar espaco disco cache lixeira liberar armazenamento cheio"],
   ["sistema", "reiniciarShell", "Reiniciar a barra e as notificações", "", "reiniciar shell barra travou"],
-  ["sistema", "sobreApp", "Sobre o app Configurações", "", "app configuracoes versao"]
+  ["sistema", "sobreApp", "Sobre o app Configurações", "", "app configuracoes versao"],
+  // Compatibilidade Windows
+  ["wine", "wineIntegrar", "Sincronizar atalhos do Windows", "Detecta jogos e aplicativos instalados no Wine", "wine proton exe jogos instalador atalhos lancador sincronizar"],
+  ["wine", "wineCfg", "Configuração do Wine (winecfg)", "Painel de controle do Wine, bibliotecas DLL e áudio", "winecfg wine configuracao dll windows versao painel"],
+  ["wine", "winePrefixos", "Prefixos do Simba (Jogos e Aplicativos)", "Gerenciar pastas virtuais do Windows no sistema", "prefixo prefixos pasta drive_c jogos apps umu"],
+  ["wine", "wineHud", "Métricas e FPS em Jogos (MangoHud)", "Monitor de desempenho gráfico e temperatura", "mangohud fps temperatura gpu cpu hud telemetria jogos"]
 ]
 
 function normalizar(s) {

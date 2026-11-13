@@ -143,6 +143,36 @@ Pagina {
       }
       Botao { texto: I18n.t("Atualizar tudo"); tipo: "primario"; onClicado: Sistema.solto(["simba-atualizar", "aplicar"]) }
     }
+    // Programa de testes: liga o canal [simba-os-testing] (simba-canal), que recebe as
+    // novidades antes de todo mundo. A senha é pedida pelo pkexec (janela do Simba).
+    Linha {
+      id: linhaTeste
+      chave: "canalTeste"; glifo: Icones.flask
+      property bool ativo: false
+      property bool mudando: false
+      titulo: I18n.t("Programa de testes (versões beta)")
+      descricao: mudando ? I18n.t("Trocando o canal de atualizações…")
+                 : (ativo ? I18n.t("Você recebe as novidades antes de todo mundo. Podem ter defeitos — avise se encontrar algum.")
+                          : I18n.t("Receba as novidades do Simba OS antes do lançamento para todos."))
+      function ler() { Sistema.sh("grep -q '^\\[simba-os-testing\\]' /etc/pacman.conf && echo sim", function(o) { linhaTeste.ativo = o.trim() === "sim" }) }
+      Component.onCompleted: ler()
+      Interruptor {
+        ligado: linhaTeste.ativo
+        onAlternado: function(v) {
+          linhaTeste.mudando = true
+          Sistema.rodar(["pkexec", "/usr/bin/simba-canal", v ? "teste" : "estavel"], function(out, code) {
+            linhaTeste.mudando = false
+            linhaTeste.ler()                      // senha cancelada: volta ao estado real
+            if (code === 0) {
+              Sistema.notificar(v ? I18n.t("Programa de testes ligado. Procurando as versões em teste…")
+                                  : I18n.t("De volta ao canal estável."), "󰂖")
+              pg.verificando = true
+              Sistema.json(["simba-atualizar", "verificar"], function(r) { pg.verificando = false; if (r) pg.atu = r })
+            }
+          })
+        }
+      }
+    }
   }
 
   // ── changelog do que está para atualizar (simba-novidades) ───────────────

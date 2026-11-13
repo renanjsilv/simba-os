@@ -246,6 +246,7 @@ Singleton {
   readonly property string tuneVertical: "\u{f066a}"
   readonly property string undo: "\u{f054c}"
   readonly property string update: "\u{f06b0}"
+  readonly property string flask: "\u{f0093}"          // programa de testes (versões beta)
   readonly property string video: "\u{f0567}"
   readonly property string viewDashboard: "\u{f056e}"
   readonly property string viewGrid: "\u{f0570}"

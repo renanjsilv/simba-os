@@ -2467,5 +2467,11 @@
  "Pausar por 24h": "Pause for 24h",
  "Sincronização pausada por 24h": "Sync paused for 24h",
  "Retomar": "Resume",
- "Enviar com LocalSend (celular e PC)": "Send with LocalSend (phone and PC)"
+ "Enviar com LocalSend (celular e PC)": "Send with LocalSend (phone and PC)",
+ "Programa de testes (versões beta)": "Testing program (beta versions)",
+ "Trocando o canal de atualizações…": "Switching the update channel…",
+ "Você recebe as novidades antes de todo mundo. Podem ter defeitos — avise se encontrar algum.": "You get new features before everyone else. They may have bugs — let us know if you find one.",
+ "Receba as novidades do Simba OS antes do lançamento para todos.": "Get Simba OS updates before they ship to everyone.",
+ "Programa de testes ligado. Procurando as versões em teste…": "Testing program on. Looking for test versions…",
+ "De volta ao canal estável.": "Back on the stable channel."
 }

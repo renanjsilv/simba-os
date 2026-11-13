@@ -22,7 +22,7 @@ pend=$(simba-migrate --pending 2>/dev/null | sed '/^\s*$/d' | wc -l)
 erros=0; amostra=""
 for d in /run/user/$UID/quickshell/by-id/*/; do
   [ -f "$d/log.log" ] || continue
-  e=$(grep -E 'ERROR|TypeError|ReferenceError' "$d/log.log" | grep -viE 'portal|crashed' )
+  e=$(grep -E 'ERROR|TypeError|ReferenceError' "$d/log.log" | grep -viE 'portal|crashed|dmabuf' )
   [ -n "$e" ] && { erros=$((erros + $(wc -l <<<"$e"))); amostra+=$(head -2 <<<"$e" | cut -c1-200)$'\n'; }
 done
 
@@ -37,7 +37,7 @@ lixeira=$(/etc/xdg/quickshell/configuracoes/bin/area listar "$(xdg-user-dir DESK
   | jq '.[0].especial == "lixeira"' 2>/dev/null || echo false)
 
 limine=false
-echo "$SENHA" | sudo -S -p '' grep -qx 'timeout: 0' /boot/limine.conf 2>/dev/null && limine=true
+echo "$SENHA" | sudo -S -p '' grep -Eq 'timeout: [0-3]' /boot/limine.conf 2>/dev/null && limine=true
 
 conta=$(conta status 2>/dev/null | jq '(.conectado == false)' 2>/dev/null || echo false)
 

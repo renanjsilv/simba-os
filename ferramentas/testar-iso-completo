@@ -18,6 +18,8 @@ export TESTAR_VM=simba-auto TESTAR_VM_3D=0 TESTAR_VM_SSH=2225
 T="$R/ferramentas/testar-vm"
 C=(virsh -q -c qemu:///session)
 PORTA=8766
+HOST_IP=$(ip r | awk '/default/{print $3; exit}')
+HOST_IP=${HOST_IP:-10.0.2.2}
 SENHA=simba123
 NOME=$(basename "$ISO" .iso)
 OUT="$HOME/.cache/simba-testes/$NOME-$(date +%Y%m%d-%H%M)"
@@ -134,7 +136,7 @@ tecla KEY_LEFTALT KEY_TAB                           # foca a próxima janela
 sleep 1
 tecla KEY_LEFTMETA KEY_LEFT                         # reforça foco na janela à esquerda (terminal)
 sleep 1
-texto "curl -s 10.0.2.2:$PORTA/c -o /tmp/c.sh"
+texto "curl -s http://$HOST_IP:$PORTA/c -o /tmp/c.sh"
 tecla KEY_ENTER
 sleep 2
 texto "bash /tmp/c.sh"

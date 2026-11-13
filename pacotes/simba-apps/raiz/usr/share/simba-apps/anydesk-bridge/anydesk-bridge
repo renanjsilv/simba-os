@@ -68,6 +68,13 @@ for _ in $(seq 50); do
   sleep 0.1
 done
 
+# O processo de sessão do AnyDesk (aberto pelo serviço a cada conexão, como este usuário)
+# procura o XAUTHORITY no ambiente dos processos da sessão; quando cai num processo que já
+# morreu, não acha o cookie, não abre o display e a conexão falha com desk_rt_ipc_error.
+# Libera o display para este usuário (só local: -nolisten tcp), sem depender do cookie.
+env DISPLAY="$DPY" XAUTHORITY="$STATE/Xauthority" xhost +SI:localuser:"$(id -un)" >/dev/null 2>&1 ||
+  echo "anydesk-bridge: xhost falhou (instale xorg-xhost)" >&2
+
 # Mesmo layout do Hyprland no X virtual (ç, acentos, teclas ABNT2)
 env DISPLAY="$DPY" XAUTHORITY="$STATE/Xauthority" \
   setxkbmap -layout "$KB_LAYOUT" ${KB_VARIANT:+-variant "$KB_VARIANT"} \

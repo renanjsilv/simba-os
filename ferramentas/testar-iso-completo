@@ -63,8 +63,13 @@ CHECAGEM="$R/ferramentas/testar-iso-completo.checagem"
 python3 -I - "$PORTA" "$CHECAGEM" "$OUT/resultado.json" <<'PY' &
 import http.server, sys
 porta, script, saida = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+log_file = saida + ".http.log"
 class H(http.server.BaseHTTPRequestHandler):
-    def log_message(self, *a): pass
+    def log_message(self, fmt, *a):
+        try:
+            with open(log_file, "a") as f:
+                f.write(f"[{self.client_address[0]}] " + fmt % a + "\n")
+        except Exception: pass
     def do_GET(self):
         corpo = open(script, "rb").read()
         self.send_response(200); self.send_header("Content-Length", str(len(corpo))); self.end_headers()
@@ -125,8 +130,10 @@ captura "area-de-trabalho"
 passo "checagem dentro da sessão"
 tecla KEY_LEFTMETA KEY_ENTER                        # abre o terminal
 sleep 5
-tecla KEY_LEFTALT KEY_TAB                           # foca o terminal
-sleep 2
+tecla KEY_LEFTALT KEY_TAB                           # foca a próxima janela
+sleep 1
+tecla KEY_LEFTMETA KEY_LEFT                         # reforça foco na janela à esquerda (terminal)
+sleep 1
 texto "curl -s 10.0.2.2:$PORTA/c -o /tmp/c.sh"
 tecla KEY_ENTER
 sleep 2

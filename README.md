@@ -19,7 +19,7 @@ barra de tarefas, Menu Iniciar, Configurações e aplicativos próprios, em port
 </p>
 
 <p>
-<a href="https://sourceforge.net/projects/simba-os/files/0.1.0/"><img alt="Baixar o Simba OS 0.1.0" src="https://img.shields.io/badge/Baixar_ISO-0.1.0_%C2%B7_4%2C0_GB-2ea44f?style=for-the-badge&logo=linux&logoColor=white"></a>
+<a href="https://sourceforge.net/projects/simba-os/files/0.1.3/"><img alt="Baixar o Simba OS 0.1.3" src="https://img.shields.io/badge/Baixar_ISO-0.1.3_%C2%B7_4%2C2_GB-2ea44f?style=for-the-badge&logo=linux&logoColor=white"></a>
 </p>
 
 <p>
@@ -49,8 +49,8 @@ Todo o sistema está em português do Brasil, com inglês como segunda opção. 
 um pacote pacman comum, com atualizações assinadas.
 
 > [!NOTE]
-> **Versão 0.1.0 (beta inicial).** A ISO está disponível para
-> [download](https://sourceforge.net/projects/simba-os/files/0.1.0/) e o passo a passo está em
+> **Versão 0.1.3 (beta).** A ISO está disponível para
+> [download](https://sourceforge.net/projects/simba-os/files/0.1.3/) e o passo a passo está em
 > [docs/INSTALAR.md](docs/INSTALAR.md). Foi testada em máquina virtual e em poucos computadores:
 > relatos de problemas nas [Issues](https://github.com/renanjsilv/simba-os/issues) ajudam muito.
 
@@ -122,16 +122,16 @@ O sistema vem com 18 papéis de parede próprios, claros e escuros.
 
 ### Pela ISO
 
-**[Baixar o Simba OS 0.1.0](https://sourceforge.net/projects/simba-os/files/0.1.0/)** (4,0 GB, x86_64, UEFI)
+**[Baixar o Simba OS 0.1.3](https://sourceforge.net/projects/simba-os/files/0.1.3/)** (4,2 GB, x86_64, UEFI)
 
 O passo a passo completo, do download ao primeiro uso, está em **[docs/INSTALAR.md](docs/INSTALAR.md)**:
 conferir o download, gravar o pendrive, dar boot, as perguntas do instalador e problemas comuns.
 
 | | |
 |---|---|
-| Arquivo | `simba-os-0.1.0-x86_64.iso` |
-| Tamanho | 4,0 GB |
-| SHA-256 | `633bb881c38cd7db93517fd0e0dcf6164445c859e79ef723d4aee11a9ac9f1ea` |
+| Arquivo | `simba-os-0.1.3-x86_64.iso` |
+| Tamanho | 4,2 GB |
+| SHA-256 | `6a1e7b999b0633a3abf8da6a648e01c26fd0de93cf08f737fa6918a190531a66` |
 | Requisitos | x86_64, UEFI, Secure Boot desligado, disco de 25 GB ou mais (todo apagado) |
 
 ### Num Arch Linux já instalado

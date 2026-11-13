@@ -37,6 +37,8 @@ wl-clipboard grim slurp wtype imagemagick inotify-tools socat plocate yay-bin
 # escolhe um provedor qualquer de lib32-vulkan-driver). o Spotify é instalado pelo
 # menu (Instalar) como Flatpak do Flathub, que baixa o programa direto do Spotify
 steam lib32-mesa lib32-vulkan-intel lib32-vulkan-radeon
+# compatibilidade Windows (.exe, .msi, jogos e aplicativos)
+wine-staging wine-mono wine-gecko umu-launcher gamemode
 
 # Simba
 simba simba-apps simba-draco simba-keyring

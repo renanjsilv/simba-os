@@ -643,6 +643,10 @@ if [ ! -f "$T/boot/EFI/limine/limine_x64.efi" ] && [ ! -f "$T/boot/EFI/limine/BO
 fi
 x arch-chroot "$T" limine-mkinitcpio || echo "aviso: limine-mkinitcpio" >> "$LOG"
 x arch-chroot "$T" limine-snapper-sync || true
+if [ -f "$T/boot/limine.conf" ]; then
+  sed -i -e '/^#\{0,1\}timeout:/d' -e '/^#\{0,1\}quiet:/d' "$T/boot/limine.conf"
+  sed -i '1i timeout: 0\nquiet: yes' "$T/boot/limine.conf"
+fi
 
 for l in '\EFI\limine\limine_x64.efi' '\EFI\limine\BOOTX64.EFI' '\EFI\BOOT\BOOTX64.EFI'; do
   if [ -f "$T/boot${l//\\//}" ]; then

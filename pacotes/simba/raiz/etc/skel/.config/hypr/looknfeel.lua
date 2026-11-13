@@ -117,5 +117,10 @@ o.window("com.simba.GerarIso", { opacity = "1 1" })
 -- Calculadora (substituta do Omacalc) flutuante, como era a do Simba
 o.window("org.gnome.Calculator", { float = true })
 
+-- Executáveis e jogos Windows (Wine / Proton / UMU)
+o.window("(steam_app_.*|gamescope)", { immediate = true, tag = "-default-opacity", opacity = "1 1" })
+o.window("(wine|.*\\.exe|explorer\\.exe)", { tag = "-default-opacity", opacity = "1 1" })
+o.window("(.*[sS]etup.*|.*[iI]nstall.*|winetricks|zenity)", { float = true, center = true })
+
 -- Janelas maximizadas sem borda (janelas.lua põe a etiqueta janelas-max nelas).
 o.window({ tag = "janelas-max" }, { border_size = 0 })

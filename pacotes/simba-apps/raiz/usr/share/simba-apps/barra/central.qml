@@ -28,20 +28,32 @@ Item {
 
   property var st: ({ wifi: true, ssid: "", bluetooth: false, naoperturbe: false, claro: false, luznoturna: false,
                       economia: false, volume: 50, mudo: false, brilho: 100, bateria: null, carregando: false,
-                      saidas_audio: [] })
+                      saidas_audio: [], entradas_audio: [] })
   property bool mostrarSaidas: false
   readonly property var saidasAudio: st.saidas_audio || []
+  readonly property var entradasAudio: st.entradas_audio || []
   readonly property var saidaAtual: {
     for (var i = 0; i < saidasAudio.length; i++) {
       if (saidasAudio[i].padrao) return saidasAudio[i]
     }
     return saidasAudio.length > 0 ? saidasAudio[0] : null
   }
+  readonly property var entradaAtual: {
+    for (var i = 0; i < entradasAudio.length; i++) {
+      if (entradasAudio[i].padrao) return entradasAudio[i]
+    }
+    return entradasAudio.length > 0 ? entradasAudio[0] : null
+  }
   function gTipoSaida(tipo) {
     if (tipo === "bluetooth") return "\u{F0970}"
     if (tipo === "headphones") return "\u{F02CB}"
     if (tipo === "hdmi") return "\u{F0A24}"
     return "\u{F04C3}"
+  }
+  function gTipoEntrada(tipo) {
+    if (tipo === "bluetooth") return "\u{F0970}"
+    if (tipo === "headset") return "\u{F02CB}"
+    return "\u{F036C}"
   }
   readonly property string gSaidaAtual: saidaAtual ? gTipoSaida(saidaAtual.tipo) : "\u{F0142}"
 
@@ -53,6 +65,16 @@ Item {
       st = Object.assign({}, st, { saidas_audio: arr })
     }
     acao(["saida-audio", String(disp.id), disp.nome || ""])
+  }
+
+  function trocarEntradaAudio(disp) {
+    if (st.entradas_audio) {
+      var arr = st.entradas_audio.map(function(s) {
+        return Object.assign({}, s, { padrao: s.id === disp.id || (s.nome && s.nome === disp.nome) })
+      })
+      st = Object.assign({}, st, { entradas_audio: arr })
+    }
+    acao(["entrada-audio", String(disp.id), disp.nome || ""])
   }
 
   // ── cores do painel (segue o tema; destaque cinza vira o texto, como na Configurações) ──
@@ -468,10 +490,10 @@ Item {
           onClicouDireita: { root.mostrarSaidas = !root.mostrarSaidas }
         }
 
-        // seletor de saída de áudio (fone, bluetooth, alto-falante)
+        // seletor de saída e entrada de áudio (fone, microfone, bluetooth, alto-falante)
         Rectangle {
           id: painelSaidas
-          visible: root.mostrarSaidas && root.saidasAudio.length > 0
+          visible: root.mostrarSaidas && (root.saidasAudio.length > 0 || root.entradasAudio.length > 0)
           width: parent.width
           height: visible ? colSaidas.implicitHeight + 16 : 0
           radius: 12
@@ -540,6 +562,75 @@ Item {
                   cursorShape: Qt.PointingHandCursor
                   onClicked: {
                     root.trocarSaidaAudio(itemSaida.modelData)
+                  }
+                }
+              }
+            }
+
+            // divisor para entrada de som
+            Rectangle {
+              visible: root.entradasAudio.length > 0
+              width: colSaidas.width; height: 1
+              color: root.alfa(root.texto, 0.08)
+            }
+
+            Row {
+              visible: root.entradasAudio.length > 0
+              width: parent.width
+              spacing: 6
+              Text {
+                text: I18n.t("Entrada de som (Microfone)")
+                color: root.texto; opacity: 0.65; font.pixelSize: 11; font.weight: Font.DemiBold
+              }
+            }
+
+            Repeater {
+              model: root.entradasAudio
+              delegate: Rectangle {
+                id: itemEntrada
+                required property var modelData
+                width: colSaidas.width; height: 36; radius: 8
+                color: itemEntrada.modelData.padrao ? root.alfa(root.realce, 0.20) : (meMic.containsMouse ? root.alfa(root.texto, 0.08) : "transparent")
+                border.width: itemEntrada.modelData.padrao ? 1 : 0
+                border.color: root.realce
+
+                Row {
+                  anchors { left: parent.left; leftMargin: 10; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                  spacing: 10
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.gTipoEntrada(itemEntrada.modelData.tipo)
+                    color: itemEntrada.modelData.padrao ? root.realce : root.texto
+                    font.family: root.fonte; font.pixelSize: 16
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 60
+                    text: itemEntrada.modelData.descricao || itemEntrada.modelData.nome
+                    color: root.texto
+                    font.pixelSize: 12
+                    font.weight: itemEntrada.modelData.padrao ? Font.DemiBold : Font.Normal
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: itemEntrada.modelData.padrao
+                    text: "\u{F012C}"
+                    color: root.realce
+                    font.family: root.fonte; font.pixelSize: 14
+                  }
+                }
+
+                MouseArea {
+                  id: meMic
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.trocarEntradaAudio(itemEntrada.modelData)
                   }
                 }
               }

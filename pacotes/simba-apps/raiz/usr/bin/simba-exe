@@ -56,6 +56,77 @@ def notify(title: str, message: str, icon: str = "wine"):
         pass
 
 
+def get_hybrid_gpu_env() -> dict:
+    """Detecta GPUs dedicadas (NVIDIA / AMD) em notebooks híbridos para máxima performance em jogos."""
+    env_additions = {}
+    pci_path = Path("/sys/bus/pci/devices")
+    if not pci_path.exists():
+        return env_additions
+
+    has_nvidia = False
+    has_amd_dgpu = False
+    has_igpu = False
+
+    try:
+        for dev in pci_path.iterdir():
+            class_file = dev / "class"
+            vendor_file = dev / "vendor"
+            if not class_file.exists() or not vendor_file.exists():
+                continue
+            pci_class = class_file.read_text().strip()
+            if pci_class.startswith("0x03"):  # VGA ou 3D controller
+                vendor = vendor_file.read_text().strip().lower()
+                if vendor == "0x10de":
+                    has_nvidia = True
+                elif vendor == "0x1002":
+                    has_amd_dgpu = True
+                elif vendor == "0x8086":
+                    has_igpu = True
+    except Exception:
+        pass
+
+    # Em sistemas híbridos com NVIDIA dedicada
+    if has_nvidia and (has_igpu or shutil.which("prime-run")):
+        env_additions["__NV_PRIME_RENDER_OFFLOAD"] = "1"
+        env_additions["__GLX_VENDOR_LIBRARY_NAME"] = "nvidia"
+        env_additions["__VK_LAYER_NV_optimus"] = "NVIDIA_only"
+    elif has_amd_dgpu and has_igpu:
+        env_additions["DRI_PRIME"] = "1"
+
+    return env_additions
+
+
+def ensure_interpreters(has_wine: bool, has_umu: bool) -> tuple[bool, bool]:
+    """Oferece instalação sob demanda caso nenhum interpretador esteja instalado."""
+    if has_wine or has_umu:
+        return has_wine, has_umu
+
+    zenity = shutil.which("zenity")
+    has_display = bool(os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY"))
+
+    if zenity and has_display:
+        try:
+            ret = subprocess.call([
+                zenity, "--question", "--title=Simba OS — Compatibilidade Windows",
+                "--width=440",
+                "--text=Para abrir executáveis Windows (.exe, .msi), o Simba OS precisa instalar o Wine e o Proton.\n\nDeseja instalar os componentes agora?",
+                "--ok-label=Instalar", "--cancel-label=Cancelar"
+            ])
+            if ret == 0:
+                install_cmd = (
+                    "pkexec pacman -S --noconfirm wine-staging wine-mono wine-gecko umu-launcher gamemode "
+                    "| zenity --progress --pulsate --auto-close --title='Simba OS' "
+                    "--text='Instalando suporte a aplicações e jogos Windows...' --width=420"
+                )
+                subprocess.call(install_cmd, shell=True)
+                has_wine = shutil.which("wine") is not None
+                has_umu = shutil.which("umu-run") is not None
+        except Exception:
+            pass
+
+    return has_wine, has_umu
+
+
 def analyze_target(file_path: Path) -> dict:
     """Analisa o arquivo e define o melhor interpretador."""
     filename = file_path.name.lower()
@@ -140,6 +211,9 @@ def main():
     has_wine = shutil.which("wine") is not None
 
     if not has_wine and not has_umu:
+        has_wine, has_umu = ensure_interpreters(has_wine, has_umu)
+
+    if not has_wine and not has_umu:
         notify("Simba OS", "Nenhum interpretador Windows (Wine ou UMU) encontrado.", "dialog-error")
         sys.exit(1)
 
@@ -173,13 +247,19 @@ def main():
         env["WINEPREFIX"] = str(game_prefix)
         env["GAMEID"] = f"simba-{target.stem.lower()[:32]}"
         env["UMU_RUNTIME_UPDATE"] = "0"  # não trava no primeiro boot baixando o runtime inteiro
-        
+
+        # Otimização de GPU híbrida (NVIDIA / AMD)
+        gpu_env = get_hybrid_gpu_env()
+        if gpu_env:
+            env.update(gpu_env)
+
         # Opcional: GameMode se disponível
         gamemoderun = shutil.which("gamemoderun")
 
+        gpu_desc = " na GPU dedicada" if gpu_env else ""
         notify(
             "Simba OS — Modo Jogo",
-            f"Iniciando {app_name} com Proton (DXVK / VKD3D)...",
+            f"Iniciando {app_name} com Proton (DXVK / VKD3D{gpu_desc})...\nPreparando ambiente gráfico e shaders.",
             "applications-games"
         )
 

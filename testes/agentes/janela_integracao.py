@@ -123,14 +123,14 @@ class Teste:
         roteiro.append(("claude-ferramenta.ndjson", 0.15))
         self.enviar("o que tem nesta pasta?")
         yield 0.4
-        # bloco "Pensando" abaixo do texto, junto do indicador de digitação na parte inferior
+        # bloco "Pensando" abaixo do texto; o status aparece só nele (sem "•••" repetido)
         bl, msg, dg = self.win.ativo_bloco, self.win.ativo_mensagem, self.win.ativo_digitando
         filhos, f = [], (msg.get_parent().get_first_child() if msg and msg.get_parent() else None)
         while f is not None:
             filhos.append(f)
             f = f.get_next_sibling()
-        checar(bl in filhos and dg in filhos and filhos.index(msg) < filhos.index(bl) <= filhos.index(dg),
-               "Texto acima do Pensando, Pensando e digitação na parte inferior")
+        checar(bl in filhos and filhos.index(msg) < filhos.index(bl) and dg is None,
+               "Texto acima do Pensando, sem indicador de digitação duplicado")
         print("2) mensagem enviada durante a resposta vai para a fila")
         roteiro.append(("claude-ferramenta.ndjson", 0.05))
         self.enviar("e o tamanho?")

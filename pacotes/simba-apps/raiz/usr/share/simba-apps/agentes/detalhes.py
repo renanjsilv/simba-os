@@ -129,6 +129,7 @@ class PainelDetalhes(Gtk.Box):
         conteudo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         conteudo.add_css_class("detalhes-conteudo")
         topo.set_child(conteudo)
+        topo.get_child().set_scroll_to_focus(False)  # clicar num texto não rola o painel
         self.append(topo)
         # embaixo, ocupando o resto: a linha do tempo, que acompanha o fim
         self.rolagem = Gtk.ScrolledWindow()
@@ -137,6 +138,7 @@ class PainelDetalhes(Gtk.Box):
         baixo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         baixo.add_css_class("detalhes-conteudo")
         self.rolagem.set_child(baixo)
+        self.rolagem.get_child().set_scroll_to_focus(False)  # clicar num texto não rola o painel
         self.append(self.rolagem)
         adj = self.rolagem.get_vadjustment()
         adj.connect("value-changed", self._rolagem_mudou)

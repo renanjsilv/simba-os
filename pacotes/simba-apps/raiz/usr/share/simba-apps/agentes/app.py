@@ -428,6 +428,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.coluna.add_css_class("coluna-chat")
         self.coluna.set_child(self.box_mensagens)
         self.scroller.set_child(self.coluna)
+        # Clicar num texto (ou o foco cair num bloco redesenhado durante a resposta) fazia o
+        # Viewport rolar até o início do widget focado: a conversa "subia sozinha".
+        _sem_rolar_ao_foco(self.scroller)
         # Seguir o fim: enquanto a pessoa está no fim da conversa, a rolagem
         # acompanha o texto novo; se ela rolar para cima para ler, para de seguir.
         self.seguir_fim = True
@@ -2300,10 +2303,6 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         if self.finalizado or self.ativo_mensagem is None:
             return False
         self.ativo_mensagem.definir(self._texto_do_trecho(self.ativo_texto), ao_vivo=self.seguir_fim)
-        # com texto na tela o cabeçalho do bloco sobe com a conversa: o indicador de
-        # digitação, no fim, continua dizendo o que o agente faz
-        if self.ativo_digitando is not None and not self.ativo_digitando.get_visible():
-            self.ativo_digitando.mostrar(self.ativo_bloco.status_atual() if self.ativo_bloco else "")
         self._scroll_para_fim()
         return False
 
@@ -2740,8 +2739,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         bloco.set_visible(ativo)
         card.append(bloco)
 
-        digitando = atividade.Digitando()
-        card.append(digitando)
+        # sem indicador de digitação separado ("•••"): ele repetia o status do bloco Pensando
+        digitando = None
 
         # Ações da resposta (aparecem por inteiro ao passar o mouse): copiar, tentar de novo
         act_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
@@ -2938,6 +2937,12 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._ultimo_valor = adj.get_value()
         self._rolando_sozinho = False
         return False
+
+
+def _sem_rolar_ao_foco(rolagem):
+    vp = rolagem.get_child()
+    if isinstance(vp, Gtk.Viewport):
+        vp.set_scroll_to_focus(False)
 
 
 class App(Adw.Application):

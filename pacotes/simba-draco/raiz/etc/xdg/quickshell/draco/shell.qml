@@ -35,6 +35,15 @@ ShellRoot {
   // scrim / caption box: tinted toward the theme's background
   function scrim(a) { return themeDark ? Qt.rgba(0.02, 0.02, 0.05, a) : Qt.rgba(0.97, 0.97, 0.98, a * 0.92) }
   function ink(a) { return Qt.rgba(themeFg.r, themeFg.g, themeFg.b, a) }
+  // caption box color, and its text tones as "#rrggbb" (StyledText <font> wants a string)
+  readonly property color captionBg: themeDark ? Qt.rgba(0.07, 0.07, 0.11, 1) : Qt.rgba(1, 1, 1, 1)
+  function toward(k) { return Qt.rgba(themeFg.r + (captionBg.r - themeFg.r) * k, themeFg.g + (captionBg.g - themeFg.g) * k, themeFg.b + (captionBg.b - themeFg.b) * k, 1) }
+  function hex(c) {
+    function h(v) { var x = Math.round(v * 255).toString(16); return x.length < 2 ? "0" + x : x }
+    return "#" + h(c.r) + h(c.g) + h(c.b)
+  }
+  readonly property string actionHex: hex(toward(0.35))   // "what it's doing…"
+  readonly property string pendingHex: hex(toward(0.62))  // words not spoken yet
   FileView {
     id: themeColors
     path: Quickshell.env("HOME") + "/.local/state/simba/current/theme/colors.toml"
@@ -339,8 +348,8 @@ ShellRoot {
           id: status
           anchors.horizontalCenter: parent.horizontalCenter
           y: root.h * 0.45 + orb.size * 0.33 + 14
-          width: statusText.implicitWidth + 40
-          height: 34
+          width: statusText.implicitWidth + (status.isError ? 64 : 48)
+          height: 40
           readonly property bool isError: shell.phase === "error"
           readonly property string label: {
             switch (shell.phase) {
@@ -357,9 +366,29 @@ ShellRoot {
           visible: opacity > 0.01
           Behavior on opacity { NumberAnimation { duration: 260 } }
 
+          // frosted pill so the status reads over any wallpaper/window
+          Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: status.isError ? (shell.themeDark ? Qt.rgba(0.35, 0.06, 0.1, 0.55) : Qt.rgba(1, 0.92, 0.92, 0.85))
+                                  : shell.scrim(shell.themeDark ? 0.45 : 0.6)
+            border.width: 1
+            border.color: status.isError ? (shell.themeDark ? Qt.rgba(1, 0.55, 0.62, 0.35) : Qt.rgba(0.7, 0.15, 0.12, 0.3)) : shell.ink(0.10)
+            Behavior on color { ColorAnimation { duration: 200 } }
+          }
+          Text { // "!" badge on errors (Nerd Font alert-circle)
+            visible: status.isError
+            anchors.verticalCenter: parent.verticalCenter
+            x: 18
+            text: "\u{f0028}"
+            color: statusText.color
+            font.pixelSize: 16
+            font.family: "JetBrainsMono Nerd Font"
+          }
           Text {
             id: statusText
             anchors.centerIn: parent
+            anchors.horizontalCenterOffset: status.isError ? 12 : 0
             text: status.shownLabel + (status.isError ? "" : dots.text)
             color: status.isError ? (shell.themeDark ? "#ffb4c0" : "#b3261e") : shell.ink(0.92)
             font.family: "Adwaita Sans"
@@ -389,15 +418,26 @@ ShellRoot {
           }
         }
 
-        Text {
+        Row {
           anchors.horizontalCenter: parent.horizontalCenter
           anchors.bottom: parent.bottom
           anchors.bottomMargin: 26
-          text: I18n.t("Esc para cancelar")
-          color: shell.ink(0.45)
-          font.family: "Adwaita Sans"
-          font.pixelSize: 12
-          font.letterSpacing: 0.6
+          spacing: 8
+          Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            width: escText.implicitWidth + 14; height: 22; radius: 6
+            color: shell.ink(0.06)
+            border.width: 1; border.color: shell.ink(0.22)
+            Text { id: escText; anchors.centerIn: parent; text: I18n.t("Esc"); color: shell.ink(0.7); font.family: "Adwaita Sans"; font.pixelSize: 11; font.weight: Font.DemiBold }
+          }
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: I18n.t("para cancelar")
+            color: shell.ink(0.5)
+            font.family: "Adwaita Sans"
+            font.pixelSize: 12
+            font.letterSpacing: 0.4
+          }
         }
       }
 
@@ -475,9 +515,9 @@ ShellRoot {
           readonly property string plain: shell.reply !== "" ? shell.reply : shell.actionText
           readonly property bool hasText: plain !== ""
 
-          width: Math.min(captionText.implicitWidth + 36, Math.min(root.w - 48, 620))
+          width: Math.min(captionText.implicitWidth + 40, Math.min(root.w - 48, 620))
           readonly property bool paged: shell.reply !== "" && shell.pages.length > 1
-          height: captionText.height + 20 + (paged ? 10 : 0)
+          height: captionText.height + 24 + (paged ? 10 : 0)
           anchors.horizontalCenter: parent.horizontalCenter
           y: root.lineY - wave.height / 2 - height - 2
           Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
@@ -485,10 +525,10 @@ ShellRoot {
 
           opacity: hasText ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: 300 } }
-          radius: 18
-          color: shell.themeDark ? Qt.rgba(0.07, 0.07, 0.11, 0.80) : Qt.rgba(1, 1, 1, 0.88)
+          radius: 20
+          color: Qt.rgba(shell.captionBg.r, shell.captionBg.g, shell.captionBg.b, shell.themeDark ? 0.82 : 0.90)
           border.width: 1
-          border.color: shell.ink(0.09)
+          border.color: shell.ink(shell.themeDark ? 0.10 : 0.08)
 
           MouseArea {
             anchors.fill: parent
@@ -521,8 +561,8 @@ ShellRoot {
             id: captionText
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
-            anchors.topMargin: 10
-            width: Math.min(implicitWidth, Math.min(root.w - 48, 620) - 36)
+            anchors.topMargin: 12
+            width: Math.min(implicitWidth, Math.min(root.w - 48, 620) - 40)
             horizontalAlignment: Text.AlignHCenter
             textFormat: Text.StyledText
             wrapMode: Text.WordWrap
@@ -537,12 +577,12 @@ ShellRoot {
             NumberAnimation { id: pageFade; target: captionText; property: "opacity"; from: 0.25; to: 1; duration: 220; easing.type: Easing.OutCubic }
             text: {
               if (shell.reply === "")
-                return "<font color='#a9a9be'>" + shell.escapeHtml(shell.actionText) + "…</font>"
+                return "<font color='" + shell.actionHex + "'>" + shell.escapeHtml(shell.actionText) + "…</font>"
               var pg = shell.pages[shell.page] || [0, shell.words.length]
               var n = Math.min(Math.max(Math.ceil(shell.revealed), pg[0]), pg[1])
               var spoken = shell.escapeHtml(shell.words.slice(pg[0], n).join(" "))
               var rest = shell.escapeHtml(shell.words.slice(n, pg[1]).join(" "))
-              return spoken + (rest ? (spoken ? " " : "") + "<font color='#5c5c72'>" + rest + "</font>" : "")
+              return spoken + (rest ? (spoken ? " " : "") + "<font color='" + shell.pendingHex + "'>" + rest + "</font>" : "")
             }
           }
         }

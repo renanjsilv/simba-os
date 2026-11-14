@@ -48,7 +48,7 @@ try:
     else:
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         rec = subprocess.Popen(
-            ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "-"],
+            ["pw-record", "--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         try:
             while raw := rec.stdout.read(CHUNK * 2):

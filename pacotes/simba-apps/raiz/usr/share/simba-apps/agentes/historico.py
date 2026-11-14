@@ -410,13 +410,12 @@ class HistoricoMixin:
                 texto = msg.get("texto", "")
                 if texto:
                     widgets["mensagem"].definir(texto)
-                atividade = msg.get("atividade") or []
-                if atividade:
-                    widgets["status_row"].set_visible(True)
-                    widgets["toggle"].set_visible(True)
-                    widgets["spinner"].stop()
-                    widgets["spinner"].set_visible(False)
-                    widgets["log_buf"].set_text("\n".join(atividade))
+                    widgets["mensagem"].concluir()
+                # bloco "Pensando" como ficou no fim da resposta (conversas antigas
+                # só têm a lista de textos "atividade": viram passos simples)
+                widgets["bloco"].seguro = bool(msg.get("seguro"))
+                widgets["bloco"].carregar(msg)
+                widgets["card"].atualizar_acoes(widgets["bloco"].passos)
             elif tipo == "sistema":
                 self._adicionar_sistema(msg.get("texto", ""), registro=False)
             elif tipo == "handover":
@@ -436,7 +435,7 @@ class HistoricoMixin:
         if ultimo_agente:
             for i, item in enumerate(self.dropdown_items):
                 if item["id"] == ultimo_agente:
-                    self.dropdown.set_selected(i)
+                    self.dropdown.escolher(i)
                     break
 
         self.empty_state.set_visible(not self.conversa_mensagens)

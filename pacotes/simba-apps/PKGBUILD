@@ -3,7 +3,7 @@
 # bloqueio, sistema de idiomas (catálogos), atualização ("Atualizar tudo") e utilitários.
 pkgname=simba-apps
 pkgver=1.1.12
-pkgrel=55
+pkgrel=57
 pkgdesc="Simba OS: apps e ferramentas próprios (Configurações, Explorador, Gerenciador de Tarefas…)"
 arch=('x86_64')   # calço da ponte do AnyDesk (shim.c) é compilado aqui
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -16,6 +16,8 @@ depends=('simba>=1.1.9-8' 'quickshell' 'python' 'python-gobject' 'gtk4' 'libadwa
          'xorg-xhost'
          # navegador embutido no chat dos Agentes de IA (simba-navegador)
          'webkitgtk-6.0'
+         # realce de código nas respostas e no painel de código do chat
+         'gtksourceview5'
          # plugin de janelas (compilado por usuário contra o Hyprland instalado)
          'gcc' 'make' 'pkgconf')
 optdepends=('rclone: nuvens no Explorador e backup da Conta no Google Drive'

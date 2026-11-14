@@ -68,7 +68,9 @@ AGENTES = {
                  "login": ["opencode", "auth", "login"], "conta": [".local/share/opencode/auth.json"],
                  # OpenCode 2 guarda a conta no banco (opencode.db), não em auth.json; a lista
                  # de credenciais abaixo é a fonte oficial (auth.json fica só como reserva)
-                 "verifica": ["opencode", "auth", "list", "--format", "json"], "verificaJson": "connections"},
+                 "verifica": ["opencode", "auth", "list", "--format", "json"], "verificaJson": "connections",
+                 # Sem conta, usa os modelos grátis do OpenCode ("…-free"): é o "Começar grátis".
+                 "gratis": True},
     "copilot":  {"nome": "GitHub Copilot", "modelo": "GitHub",
                  "cmd": ["copilot", "--allow-all"],
                  # sem --allow-all, o modo -p nega as ferramentas que pediriam aprovação
@@ -111,7 +113,7 @@ def montar_comando(a, pedido, cfg, sessao=None, continuar=False, seguro=False):
     """
     info = AGENTES[a]
     base = info.get("cmdSeguro") if seguro else info["cmd"]
-    cmd = aplicar_modelo(a, list(base), modelo_escolhido(a, cfg))
+    cmd = aplicar_modelo(a, list(base), modelo_efetivo(a, cfg))
     if sessao and info.get("retomar"):
         modelo = info["retomar"]
     elif continuar and info.get("continue"):
@@ -328,6 +330,64 @@ def modelo_escolhido(a, cfg):
     return valor.strip() if isinstance(valor, str) else ""
 
 
+# ── modo grátis (OpenCode sem conta) ───────────────────────────────────────
+# Sem conta conectada, o OpenCode só tem os modelos "opencode/…-free". O chat usa o
+# melhor deles; quando um esgota, fica de lado por uma hora e o próximo assume.
+GRATIS_PREFERIDOS = ["deepseek-v4.1-flash-free", "glm-5.3-flash-free", "minimax-m3.1-flash-free",
+                     "mimo-v2.6-flash-free", "nemotron-3.5-super-vl-free"]
+GRATIS_ESGOTADOS = ESTADO / "gratis-esgotados.json"
+AVISO_GRATIS = ("No modo grátis o provedor pode usar suas conversas para melhorar os modelos. "
+                "Para mais privacidade e respostas melhores, conecte sua conta.")
+
+
+def modo_gratis(a):
+    """True quando o agente roda sem conta, só com os modelos grátis."""
+    return bool(AGENTES.get(a, {}).get("gratis")) and conectado(a, verificar=False) is not True
+
+
+def _gratis_fora():
+    try:
+        d = json.loads(GRATIS_ESGOTADOS.read_text())
+        return {m: t for m, t in d.items() if float(t) > time.time()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def modelos_gratis():
+    vals = [o["valor"] for o in modelos("opencode") if str(o.get("valor", "")).endswith("-free")]
+    if not vals:
+        vals = [o["valor"] for o in modelos("opencode", atualizar=True) if str(o.get("valor", "")).endswith("-free")]
+    if not vals:
+        vals = [v for v in MODELOS_ESTATICOS["opencode"] if v.endswith("-free")]
+    nome = lambda v: v.split("/", 1)[-1]
+    return sorted(set(vals), key=lambda v: (GRATIS_PREFERIDOS.index(nome(v)) if nome(v) in GRATIS_PREFERIDOS
+                                            else len(GRATIS_PREFERIDOS), v))
+
+
+def modelo_gratis():
+    fora, lista = _gratis_fora(), modelos_gratis()
+    return next((m for m in lista if m not in fora), lista[0] if lista else "")
+
+
+def marcar_gratis_esgotado(modelo, segundos=3600):
+    """Põe um modelo grátis de lado; False se não sobrou nenhum outro."""
+    fora = _gratis_fora()
+    fora[modelo] = time.time() + segundos
+    ESTADO.mkdir(parents=True, exist_ok=True)
+    GRATIS_ESGOTADOS.write_text(json.dumps(fora))
+    return any(m not in fora for m in modelos_gratis())
+
+
+def modelo_efetivo(a, cfg):
+    """O modelo escolhido; no modo grátis, só vale se for grátis (senão, o melhor grátis)."""
+    m = modelo_escolhido(a, cfg)
+    if modo_gratis(a) and not m.endswith("-free"):
+        return modelo_gratis()
+    if modo_gratis(a) and m in _gratis_fora():
+        return modelo_gratis()
+    return m
+
+
 def aplicar_modelo(a, cmd, modelo, interativo=False):
     """Acrescenta a flag de modelo ao comando, quando o CLI aceita."""
     if not modelo:
@@ -439,7 +499,8 @@ def ler_config(verificar=True):
     # que a interface abre ou troca um modelo — era o que travava a janela.
     if not existe or not c:
         c["ordem"] = list(instalados)
-        c["inativos"] = [a for a in instalados if verificar and conectado(a) is not True]
+        c["inativos"] = [a for a in instalados if verificar and conectado(a) is not True
+                         and not AGENTES[a].get("gratis")]
     else:
         c.setdefault("ordem", list(instalados))
         c.setdefault("inativos", [])
@@ -585,6 +646,9 @@ def esgotado_ate(a):
 
 
 def marcar_esgotado(a, ate_iso=None):
+    # Modo grátis: esgotou o modelo, não o agente; o próximo modelo grátis continua.
+    if modo_gratis(a) and marcar_gratis_esgotado(modelo_efetivo(a, ler_config(verificar=False))):
+        return
     if not ate_iso:
         volta = uso(a).get("sessaoVolta") or uso(a).get("semanaVolta")
         ate_iso = _futuro(volta) if volta else None
@@ -604,7 +668,7 @@ def marcar_esgotado(a, ate_iso=None):
 def candidatos(c, pular=(), verificar=True, seguro=False):
     return [a for a in c["ordem"] if a in AGENTES and a not in c["inativos"] and a not in pular
             and _achar(a) and (not seguro or suporta_seguro(a))
-            and (not verificar or conectado(a) is not False)]
+            and (not verificar or AGENTES[a].get("gratis") or conectado(a) is not False)]
 
 
 def hora(iso):

@@ -15,6 +15,7 @@ import fcntl
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shutil
 import struct
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import motor as M  # noqa: E402
 import anexos  # noqa: E402
 from busca import BuscaMixin  # noqa: E402
+from seletor import Seletor  # noqa: E402
 from central import CentralMixin  # noqa: E402
 import marcas  # noqa: E402
 from estilo import CSS  # noqa: E402
@@ -43,6 +45,9 @@ from historico import HistoricoMixin  # noqa: E402
 from markdown import MarkdownMixin  # noqa: E402
 from painel import PainelMixin  # noqa: E402
 from parser import AgentStreamParser  # noqa: E402
+import atividade  # noqa: E402
+import integracoes  # noqa: E402
+import lateral  # noqa: E402
 import voz  # noqa: E402
 try:  # navegador embutido (WebKitGTK 6); sem ele o chat funciona igual
     import navegador  # noqa: E402
@@ -54,12 +59,39 @@ APP_ID = "com.simba.AgentesDev" if os.environ.get("AGENTES_DEV") else "com.simba
 HOME = Path.home()
 
 
+def _vigiar_interface():
+    """Se a interface ficar mais de 3 s sem responder, grava onde o programa estava
+    em ~/.local/state/agentes/travamentos.log (para achar a causa de um congelamento)."""
+    import faulthandler
+    try:
+        M.ESTADO.mkdir(parents=True, exist_ok=True)
+        arq = open(M.ESTADO / "travamentos.log", "a", buffering=1)
+        if arq.tell() > 400000:
+            arq.truncate(0)
+    except OSError:
+        return
+
+    ultimo = [time.monotonic()]
+
+    def rearmar():
+        agora = time.monotonic()
+        if agora - ultimo[0] > 3:
+            arq.write(f"# a interface ficou {agora - ultimo[0]:.1f} s parada, até "
+                      f"{datetime.now().isoformat(timespec='seconds')} (pilha acima)\n\n")
+        ultimo[0] = agora
+        faulthandler.dump_traceback_later(3, file=arq)
+        return True
+    rearmar()
+    GLib.timeout_add(1000, rearmar)
+
+
 def formatar_uso(uso):
     """'12,3 mil tokens · US$ 0,004' a partir do uso informado pelo agente."""
     if not uso:
         return ""
     partes = []
-    total = int(uso.get("entrada", 0) or 0) + int(uso.get("saida", 0) or 0)
+    total = (int(uso.get("entrada", 0) or 0) + int(uso.get("saida", 0) or 0)
+             + int(uso.get("subagentes", 0) or 0))
     if total:
         partes.append(f"{total / 1000:.1f}k tokens" if total >= 1000 else f"{total} tokens")
     custo = uso.get("custo")
@@ -67,6 +99,14 @@ def formatar_uso(uso):
         partes.append(f"US$ {custo:.3f}")
     return " · ".join(partes)
 
+
+# Vigia das execuções (ver MainWindow._vigiar). Os limites de silêncio vêm da
+# configuração: semSinalMin (20) e semSinalFundoMin (150, com comando em segundo plano).
+VIGIA_PASSO = 5          # s entre uma conferida e outra
+VIGIA_AVISO = 90         # s sem sinal para o status começar a contar o tempo parado
+VIGIA_SAIDA = 120        # s que o processo pode ficar aberto depois de responder, sem nada pendente
+VIGIA_MINIMO = 60        # s: piso do limite de silêncio, por mais baixo que esteja na configuração
+VIGIA_REPETICOES = 30    # mesma ação seguida tantas vezes = preso num laço
 
 _DIAS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 
@@ -112,6 +152,39 @@ def definir_tamanho_pty(fd, linhas=40, colunas=120):
         pass
 
 
+
+
+class AnelUso(Gtk.DrawingArea):
+    """Anel de progresso pequeno (uso do limite), como o medidor do Claude."""
+
+    def __init__(self, tamanho=16):
+        super().__init__()
+        self.frac = 0.0
+        self.set_content_width(tamanho)
+        self.set_content_height(tamanho)
+        self.set_valign(Gtk.Align.CENTER)
+        self.set_draw_func(self._desenhar)
+
+    def definir(self, frac):
+        frac = max(0.0, min(1.0, float(frac or 0)))
+        if abs(frac - self.frac) > 0.001:
+            self.frac = frac
+            self.queue_draw()
+
+    def _desenhar(self, _area, cr, larg, alt):
+        import math
+        cor = self.get_color()
+        r = min(larg, alt) / 2 - 1.6
+        cx, cy = larg / 2, alt / 2
+        cr.set_line_width(2.6)
+        cr.set_source_rgba(cor.red, cor.green, cor.blue, 0.18)
+        cr.arc(cx, cy, r, 0, 2 * math.pi)
+        cr.stroke()
+        if self.frac > 0:
+            cr.set_source_rgba(cor.red, cor.green, cor.blue, 0.95)
+            cr.set_line_cap(1)  # redondo
+            cr.arc(cx, cy, r, -math.pi / 2, -math.pi / 2 + 2 * math.pi * self.frac)
+            cr.stroke()
 
 
 class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, PainelMixin, Adw.ApplicationWindow):
@@ -162,14 +235,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         # Elementos da bolha ativa
         self.ativo_mensagem = None
-        self.ativo_status_box = None
-        self.ativo_status_spinner = None
-        self.ativo_status_check = None
-        self.ativo_status_lbl = None
-        self.ativo_status_toggle = None
-        self.ativo_status_revealer = None
-        self.ativo_status_log_buf = None
-        self.ativo_status_historico = []
+        self.ativo_bloco = None        # bloco "Pensando" (atividade.BlocoPensando)
+        self.ativo_digitando = None    # indicador de digitação, no fim da resposta
         self.ativo_duracao_lbl = None
         self.ativo_parser = None
         self.ativo_renderizado = False
@@ -190,9 +257,16 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.modelo_opcoes = []
         self.dropdown_items = []
 
+        self.perguntas = []          # perguntas do agente esperando resposta (simba-chat perguntar)
         self._construir_ui()
         self._carregar_agentes()
         self.connect("close-request", self._ao_fechar)
+        self.integracoes = integracoes.Servidor(self._tratar_integracao)
+        try:
+            self.integracoes.iniciar(APP_ID)
+        except (GLib.Error, OSError) as e:
+            print("simba-chat: controle indisponível:", e, file=sys.stderr)
+        self.connect("close-request", lambda *_: (self.integracoes.parar(), False)[1])
         if self.navegador:
             try:
                 self.navegador.iniciar_controle(APP_ID)
@@ -229,24 +303,14 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         header = Adw.HeaderBar()
         toolbar_view.add_top_bar(header)
 
-        # Seletor de Agente: ícone + dropdown em uma pílula compacta
-        seletor = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=7)
-        seletor.add_css_class("agent-pill")
-        self.icone_seletor = marcas.imagem(marcas.GENERICO, 18)
-        self.icone_seletor.set_valign(Gtk.Align.CENTER)
-        seletor.append(self.icone_seletor)
-
-        self.dropdown_model = Gtk.StringList()
-        self.dropdown = Gtk.DropDown(model=self.dropdown_model)
-        self.dropdown.add_css_class("agent-dropdown")
-        # Lista com o logo de cada agente; o botão fechado mostra só o nome
-        # (o logo do escolhido já fica à esquerda, em self.icone_seletor).
-        self.dropdown.set_factory(self._fabrica_agentes(com_logo=False))
-        self.dropdown.set_list_factory(self._fabrica_agentes(com_logo=True))
-        self.dropdown.set_tooltip_text(_t("Agente de IA ativo"))
-        self.dropdown.connect("notify::selected", self._on_agente_selecionado)
-        seletor.append(self.dropdown)
-        header.pack_start(seletor)
+        # Seletor de agente: pílula com logo + nome; a lista abre num popover com
+        # o logo, o modelo e o estado do limite de cada agente.
+        marcas.registrar()
+        self.dropdown = Seletor(lambda: self.dropdown_items, self._on_agente_selecionado,
+                                cabecalho=_t("Agente de IA"), classe="agent-pill",
+                                icone_fn=lambda it: self._icone_item(it.get("id")))
+        self.icone_seletor = self.dropdown.icone
+        header.pack_start(self.dropdown)
 
         # Botão Nova Conversa
         btn_novo = Gtk.Button(icon_name="document-new-symbolic")
@@ -319,7 +383,11 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.box_mensagens.set_margin_start(24)
         self.box_mensagens.set_margin_end(24)
 
-        self.scroller.set_child(self.box_mensagens)
+        # Coluna de leitura centralizada (como Claude/ChatGPT): até ~900 px de largura
+        self.coluna = Adw.Clamp(maximum_size=920, tightening_threshold=760)
+        self.coluna.add_css_class("coluna-chat")
+        self.coluna.set_child(self.box_mensagens)
+        self.scroller.set_child(self.coluna)
         # Seguir o fim: enquanto a pessoa está no fim da conversa, a rolagem
         # acompanha o texto novo; se ela rolar para cima para ler, para de seguir.
         self.seguir_fim = True
@@ -329,6 +397,11 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         # O estado vazio fica sobreposto à área de rolagem para centralizar de verdade
         self.empty_state = self._criar_estado_vazio()
+        if hasattr(self, "candidatos"):
+            self._atualizar_estado_gratis()
+        # a dica de teclas só aparece na conversa vazia (depois é ruído)
+        self.empty_state.connect("notify::visible",
+                                 lambda e, _p: hasattr(self, "lbl_dica") and self.lbl_dica.set_visible(e.get_visible()))
         self.overlay = Gtk.Overlay()
         self.overlay.set_vexpand(True)
         self.overlay.set_child(self.scroller)
@@ -341,7 +414,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         box_inferior.set_margin_bottom(14)
         box_inferior.set_margin_top(4)
         self.box_inferior = box_inferior
-        box_inferior.append(self._criar_composer())
+        clamp_composer = Adw.Clamp(maximum_size=920, tightening_threshold=760)
+        clamp_composer.set_child(self._criar_composer())
+        box_inferior.append(clamp_composer)
 
         # Atalho de teclado no TextView (Enter envia, Shift+Enter nova linha)
         key_ctrl = Gtk.EventControllerKey()
@@ -357,24 +432,32 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         box_principal.append(self._criar_barra_busca())
         box_principal.append(self.overlay)
         box_principal.append(box_inferior)
+        # Lado direito: navegador embutido ou painel de código (um de cada vez)
         self.navegador = None
+        self.lateral = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.lateral.set_visible(False)
+        self.lateral.set_size_request(420, -1)
         if navegador is not None:
             self.navegador = navegador.PainelNavegador(ao_mostrar=self._mostrar_navegador,
                                                        ao_esconder=self._esconder_navegador)
             self.navegador.set_visible(False)
-            self.divisao = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-            self.divisao.set_wide_handle(True)
-            self.divisao.set_start_child(box_principal)
-            self.divisao.set_end_child(self.navegador)
-            self.divisao.set_resize_start_child(True)
-            self.divisao.set_resize_end_child(True)
-            self.divisao.set_shrink_start_child(False)
-            self.divisao.set_shrink_end_child(False)
-            box_principal.set_size_request(420, -1)
-            self.navegador.set_size_request(420, -1)
-            toolbar_view.set_content(self.divisao)
-        else:
-            toolbar_view.set_content(box_principal)
+            self.navegador.set_hexpand(True)
+            self.lateral.append(self.navegador)
+        self.painel_codigo = lateral.PainelCodigo(ao_fechar=self._painel_codigo_fechado,
+                                                  pasta=lambda: self.work_dir)
+        self.painel_codigo.set_visible(False)
+        self.painel_codigo.set_hexpand(True)
+        self.lateral.append(self.painel_codigo)
+        self.divisao = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.divisao.set_wide_handle(True)
+        self.divisao.set_start_child(box_principal)
+        self.divisao.set_end_child(self.lateral)
+        self.divisao.set_resize_start_child(True)
+        self.divisao.set_resize_end_child(True)
+        self.divisao.set_shrink_start_child(False)
+        self.divisao.set_shrink_end_child(False)
+        box_principal.set_size_request(420, -1)
+        toolbar_view.set_content(self.divisao)
 
         # Arrastar e soltar arquivos/imagens em qualquer lugar da janela
         drop_target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
@@ -443,7 +526,101 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             b.connect("clicked", lambda _b, t=texto: self._usar_sugestao(t))
             sugestoes.append(b)
         box.append(sugestoes)
+        self.sugestoes_vazio = sugestoes
+
+        # Primeiro uso (nenhum agente pronto): um clique e já dá para conversar,
+        # com os modelos grátis do OpenCode, sem conta nem chave.
+        gratis = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        gratis.set_halign(Gtk.Align.CENTER)
+        gratis.set_margin_top(14)
+        self.btn_gratis = Gtk.Button()
+        conteudo = Gtk.Box(spacing=8)
+        self.spinner_gratis = Gtk.Spinner()
+        self.spinner_gratis.set_visible(False)
+        conteudo.append(self.spinner_gratis)
+        self.lbl_btn_gratis = Gtk.Label(label=_t("Começar grátis"))
+        conteudo.append(self.lbl_btn_gratis)
+        self.btn_gratis.set_child(conteudo)
+        self.btn_gratis.add_css_class("suggested-action")
+        self.btn_gratis.add_css_class("pill")
+        self.btn_gratis.set_halign(Gtk.Align.CENTER)
+        self.btn_gratis.connect("clicked", lambda _b: self._comecar_gratis())
+        gratis.append(self.btn_gratis)
+        sub = Gtk.Label(label=_t("Sem conta e sem chave. Você pode conectar Claude, ChatGPT ou Gemini depois."))
+        sub.set_wrap(True)
+        sub.set_justify(Gtk.Justification.CENTER)
+        sub.set_max_width_chars(58)
+        sub.add_css_class("empty-desc")
+        gratis.append(sub)
+        contas = Gtk.Button(label=_t("Usar minha conta"))
+        contas.add_css_class("flat")
+        contas.set_halign(Gtk.Align.CENTER)
+        contas.connect("clicked", lambda _b: self._abrir_central())
+        gratis.append(contas)
+        gratis.set_visible(False)
+        self.box_gratis = gratis
+        box.append(gratis)
+
+        # Transparência: no modo grátis, as conversas podem ir para o treino do provedor.
+        self.lbl_aviso_gratis = Gtk.Label(label=_t(M.AVISO_GRATIS))
+        self.lbl_aviso_gratis.set_wrap(True)
+        self.lbl_aviso_gratis.set_justify(Gtk.Justification.CENTER)
+        self.lbl_aviso_gratis.set_max_width_chars(64)
+        self.lbl_aviso_gratis.set_margin_top(12)
+        self.lbl_aviso_gratis.add_css_class("empty-desc")
+        self.lbl_aviso_gratis.add_css_class("dim-label")
+        self.lbl_aviso_gratis.add_css_class("caption")
+        self.lbl_aviso_gratis.set_visible(False)
+        box.append(self.lbl_aviso_gratis)
         return box
+
+    def _atualizar_estado_gratis(self):
+        """Mostra o "Começar grátis" sem nenhum agente pronto, e o aviso no modo grátis."""
+        if not hasattr(self, "box_gratis"):
+            return
+        sem_agente = not self.candidatos
+        self.box_gratis.set_visible(sem_agente)
+        self.sugestoes_vazio.set_visible(not sem_agente)
+        self.lbl_aviso_gratis.set_visible(bool(self.candidatos) and M.modo_gratis(self.candidatos[0]))
+
+    def _comecar_gratis(self):
+        self.btn_gratis.set_sensitive(False)
+        self.spinner_gratis.set_visible(True)
+        self.spinner_gratis.start()
+        instalado = bool(M._achar("opencode"))
+        self.lbl_btn_gratis.set_label(_t("Preparando…") if instalado else _t("Instalando, pode levar alguns minutos…"))
+
+        def worker():
+            ok = True
+            try:
+                if not instalado:
+                    subprocess.run(["/usr/bin/agentes", "instalar", "opencode"], stdin=subprocess.DEVNULL,
+                                   capture_output=True, timeout=1800)
+                    ok = bool(M._achar("opencode"))
+                if ok:
+                    cfg = M.ler_config(verificar=False)
+                    if "opencode" not in cfg["ordem"]:
+                        cfg["ordem"].append("opencode")
+                    cfg["inativos"] = [a for a in cfg["inativos"] if a != "opencode"]
+                    M.gravar_config(cfg)
+                    M.modelos("opencode", atualizar=True)  # lista atual dos modelos grátis
+            except Exception:
+                ok = False
+            GLib.idle_add(self._gratis_pronto, ok)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _gratis_pronto(self, ok):
+        self.spinner_gratis.stop()
+        self.spinner_gratis.set_visible(False)
+        self.btn_gratis.set_sensitive(True)
+        self.lbl_btn_gratis.set_label(_t("Começar grátis"))
+        if not ok:
+            self._adicionar_sistema(_t("Não deu para preparar o modo grátis. Verifique a internet e tente de novo."))
+            return False
+        self._carregar_agentes()
+        self.text_input.grab_focus()
+        return False
 
     def _criar_composer(self):
         composer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -528,17 +705,12 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.btn_pasta.set_child(conteudo_pasta)
         rodape.append(self.btn_pasta)
 
-        # Modelo do agente selecionado, direto no rodapé (estilo OpenCode)
-        self.modelo_lista = Gtk.StringList()
-        self.modelo_dropdown = Gtk.DropDown(model=self.modelo_lista)
-        self.modelo_dropdown.add_css_class("model-chip")
-        self.modelo_dropdown.set_tooltip_text(_t("Modelo usado pela IA"))
-        self.modelo_dropdown.set_size_request(150, -1)
-        self.modelo_dropdown.set_visible(False)
-        self.modelo_handler_id = self.modelo_dropdown.connect(
-            "notify::selected", self._on_modelo_selecionado
-        )
+        # Modelo do agente selecionado, direto no rodapé (como o seletor do Claude/ChatGPT)
         self.modelo_opcoes = []
+        self.modelo_dropdown = Seletor(lambda: self.modelo_opcoes, self._on_modelo_selecionado,
+                                       cabecalho=_t("Modelo"), classe="model-chip", mostrar_icone=False)
+        self.modelo_dropdown.set_valign(Gtk.Align.CENTER)
+        self.modelo_dropdown.set_visible(False)
         rodape.append(self.modelo_dropdown)
 
         # Modo somente leitura: os agentes podem ler e responder, mas não editam
@@ -558,11 +730,24 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.btn_seguro.connect("toggled", self._on_seguro_alterado)
         rodape.append(self.btn_seguro)
 
-        # Uso do limite do agente (janelas de 5 h / 7 dias) e da última resposta
-        self.lbl_uso = Gtk.Label(label="")
-        self.lbl_uso.add_css_class("composer-hint")
+        # Uso do limite do agente (como no Claude): anel + porcentagem; clicado, abre as
+        # barras da sessão de 5 h e da semana com quanto falta para zerar.
+        self.lbl_uso = Gtk.MenuButton()
+        self.lbl_uso.add_css_class("flat")
+        self.lbl_uso.add_css_class("uso-chip")
         self.lbl_uso.set_valign(Gtk.Align.CENTER)
+        conteudo_uso = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.anel_uso = AnelUso()
+        conteudo_uso.append(self.anel_uso)
+        self.lbl_uso_pct = Gtk.Label()
+        conteudo_uso.append(self.lbl_uso_pct)
+        self.lbl_uso.set_child(conteudo_uso)
+        self.pop_uso = Gtk.Popover()
+        self.pop_uso.add_css_class("uso-pop")
+        self.pop_uso.connect("show", lambda *_: self._montar_pop_uso())
+        self.lbl_uso.set_popover(self.pop_uso)
         self.lbl_uso.set_visible(False)
+        self.uso_dados = None
         rodape.append(self.lbl_uso)
 
         self.lbl_dica = Gtk.Label(label=_t("Enter envia · Shift+Enter quebra linha · Ctrl+V cola prints"))
@@ -571,6 +756,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.lbl_dica.set_halign(Gtk.Align.START)
         self.lbl_dica.set_ellipsize(Pango.EllipsizeMode.END)
         rodape.append(self.lbl_dica)
+        espaco_rodape = Gtk.Box()
+        espaco_rodape.set_hexpand(True)
+        rodape.append(espaco_rodape)   # mic e enviar à direita mesmo sem a dica
 
         # Ditado por voz (mesma transcrição do Draco)
         self.btn_mic = Gtk.Button(icon_name="audio-input-microphone-symbolic")
@@ -615,21 +803,172 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         else:
             self._esconder_navegador()
 
+    def _abrir_lateral(self, fracao=0.4):
+        if not self.lateral.get_visible():
+            self.lateral.set_visible(True)
+            largura = self.get_width() or 1400
+            # conversa à esquerda com ~40 % da janela, painel com o resto
+            self.divisao.set_position(max(420, int(largura * fracao)))
+
+    def _fechar_lateral_se_vazia(self):
+        nav = self.navegador is not None and self.navegador.get_visible()
+        if not nav and not self.painel_codigo.get_visible():
+            self.lateral.set_visible(False)
+
     def _mostrar_navegador(self):
+        if self.painel_codigo.get_visible():
+            self.painel_codigo.set_visible(False)
         if not self.navegador.get_visible():
             self.navegador.set_visible(True)
-            largura = self.get_width() or 1400
-            # conversa à esquerda com ~40 % da janela, página com o resto
-            self.divisao.set_position(max(420, int(largura * 0.4)))
+            self._abrir_lateral(0.4)
+        self.lateral.set_visible(True)
         if not self.btn_navegador.get_active():
             self.btn_navegador.set_active(True)
 
     def _esconder_navegador(self):
         self.navegador.set_visible(False)
+        self._fechar_lateral_se_vazia()
         if self.btn_navegador.get_active():
             self.btn_navegador.set_active(False)
         # a conversa volta a ser o foco: cursor na caixa de mensagem
         self.text_input.grab_focus()
+
+    # ── painel de código (como os Artifacts do Claude / Canvas do ChatGPT) ──
+    def _preparar_painel_codigo(self):
+        if self.navegador is not None and self.navegador.get_visible():
+            self.navegador.set_visible(False)
+            if self.btn_navegador.get_active():
+                self.btn_navegador.set_active(False)
+        self.painel_codigo.set_visible(True)
+        self._abrir_lateral(0.5)
+        self.lateral.set_visible(True)
+
+    def _mostrar_codigo_lateral(self, lang, texto, titulo=""):
+        self._preparar_painel_codigo()
+        self.painel_codigo.mostrar_codigo(texto, lang, titulo)
+
+    def _mostrar_arquivo_lateral(self, caminho, linha=None):
+        erro = self.painel_codigo.mostrar_arquivo(caminho, linha)
+        if erro is None:
+            self._preparar_painel_codigo()
+        return erro
+
+    def _painel_codigo_fechado(self):
+        self._fechar_lateral_se_vazia()
+        self.text_input.grab_focus()
+
+    # ── simba-chat: pedidos dos agentes ──────────────────────────────────────
+    def _tratar_integracao(self, pedido, responder):
+        cmd = pedido.get("cmd")
+        if cmd == "estado":
+            responder({"ok": True, "respondendo": self._rodando(), "pasta": str(self.work_dir),
+                       "painel": self.painel_codigo.get_visible()})
+        elif cmd == "mostrar":
+            erro = self._mostrar_arquivo_lateral(pedido.get("arquivo", ""), pedido.get("linha"))
+            responder({"ok": erro is None, "erro": erro} if erro else
+                      {"ok": True, "msg": f"aberto no painel: {pedido.get('arquivo')}"})
+        elif cmd == "codigo":
+            self._mostrar_codigo_lateral(pedido.get("lang", ""), pedido.get("texto", ""), pedido.get("titulo", ""))
+            responder({"ok": True, "msg": "mostrado no painel"})
+        elif cmd == "fechar":
+            if self.painel_codigo.get_visible():
+                self.painel_codigo.fechar()
+            responder({"ok": True})
+        elif cmd == "notificar":
+            texto = str(pedido.get("texto") or "").strip()[:400]
+            if not texto:
+                responder({"ok": False, "erro": "texto vazio"})
+                return
+            self._adicionar_sistema(f"🔔 {texto}", registro=False)
+            if not self.is_active():
+                try:
+                    subprocess.Popen(["notify-send", "-a", _t("Agentes de IA"), "-i", "simba-agente",
+                                      _t("Agentes de IA"), texto], stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, start_new_session=True)
+                except OSError:
+                    pass
+            responder({"ok": True})
+        elif cmd == "perguntar":
+            self._adicionar_pergunta(str(pedido.get("pergunta") or "").strip(),
+                                     [str(o) for o in (pedido.get("opcoes") or []) if str(o).strip()][:8],
+                                     responder)
+        else:
+            responder({"ok": False, "erro": f"comando desconhecido: {cmd}"})
+
+    def _adicionar_pergunta(self, pergunta, opcoes, responder):
+        """Cartão com a pergunta do agente e botões; a escolha volta para o simba-chat."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card.add_css_class("pergunta-card")
+        rot = Gtk.Label(label=_t("O agente precisa da sua decisão"), xalign=0)
+        rot.add_css_class("pergunta-rotulo")
+        card.append(rot)
+        titulo = Gtk.Label(label=pergunta or _t("Como continuar?"), xalign=0, wrap=True, selectable=True)
+        titulo.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        titulo.add_css_class("pergunta-titulo")
+        card.append(titulo)
+        botoes = Gtk.FlowBox()
+        botoes.set_selection_mode(Gtk.SelectionMode.NONE)
+        botoes.set_max_children_per_line(4)
+        botoes.set_column_spacing(8)
+        botoes.set_row_spacing(8)
+        card.append(botoes)
+        livre = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        entrada = Gtk.Entry()
+        entrada.set_hexpand(True)
+        entrada.set_placeholder_text(_t("Ou escreva outra resposta…") if opcoes else _t("Sua resposta…"))
+        livre.append(entrada)
+        enviar = Gtk.Button(icon_name="go-up-symbolic")
+        enviar.add_css_class("send-button")
+        enviar.set_tooltip_text(_t("Responder"))
+        livre.append(enviar)
+        card.append(livre)
+        estado = {"feito": False}
+
+        def concluir(resposta, cancelada=False):
+            if estado["feito"]:
+                return
+            estado["feito"] = True
+            if p in self.perguntas:
+                self.perguntas.remove(p)
+            card.add_css_class("respondida")
+            botoes.set_sensitive(False)
+            livre.set_visible(False)
+            if cancelada:
+                rot.set_label(_t("Pergunta cancelada (a resposta terminou)"))
+                responder({"ok": False, "erro": "a resposta do agente terminou antes da escolha"})
+                return
+            rot.set_label(f"{_t('Você respondeu')}: {resposta}")
+            self.conversa_mensagens.append({"tipo": "sistema", "quando": time.time(),
+                                            "texto": f"{pergunta} → {resposta}"})
+            self._agendar_salvamento()
+            responder({"ok": True, "resposta": resposta})
+            self.ultimo_sinal = time.monotonic()
+
+        for o in opcoes:
+            b = Gtk.Button(label=o)
+            b.add_css_class("pergunta-opcao")
+            b.add_css_class("pill")
+            b.connect("clicked", lambda _b, o=o: concluir(o))
+            botoes.append(b)
+        botoes.set_visible(bool(opcoes))
+
+        def livre_enviar(*_a):
+            t = entrada.get_text().strip()
+            if t:
+                concluir(t)
+        entrada.connect("activate", livre_enviar)
+        enviar.connect("clicked", livre_enviar)
+        p = {"card": card, "concluir": concluir}
+        self.perguntas.append(p)
+        self.box_mensagens.append(card)
+        self._scroll_para_fim(forcar=True)
+        if not self.is_active():
+            self._trazer_janela()
+        GLib.idle_add(lambda: ((botoes.get_child_at_index(0) or entrada).grab_focus(), False)[1])
+
+    def _cancelar_perguntas(self):
+        for p in list(self.perguntas):
+            p["concluir"](None, cancelada=True)
 
     def _usar_sugestao(self, texto):
         self.text_input_buf.set_text(texto)
@@ -639,41 +978,13 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._on_input_text_changed(self.text_input_buf)
 
     # ── Seletor de agente com logos ──────────────────────────────────────────
-    def _fabrica_agentes(self, com_logo):
-        fabrica = Gtk.SignalListItemFactory()
-
-        def montar(_f, item):
-            linha = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            if com_logo:
-                linha.append(marcas.imagem(marcas.GENERICO, 18))
-            rotulo = Gtk.Label(xalign=0)
-            rotulo.set_ellipsize(Pango.EllipsizeMode.END)
-            rotulo.set_max_width_chars(48 if com_logo else 34)
-            linha.append(rotulo)
-            item.set_child(linha)
-
-        def ligar(_f, item):
-            linha = item.get_child()
-            pos = item.get_position()
-            dados = self.dropdown_items[pos] if 0 <= pos < len(self.dropdown_items) else {}
-            rotulo = linha.get_last_child()
-            rotulo.set_label(dados.get("nome") or item.get_item().get_string())
-            if com_logo:
-                linha.get_first_child().set_from_icon_name(self._icone_item(dados.get("id")))
-
-        fabrica.connect("setup", montar)
-        fabrica.connect("bind", ligar)
-        return fabrica
-
     def _icone_item(self, aid):
         if not aid or aid == "auto":
             return marcas.GENERICO
         return marcas.icone_agente(aid, M.modelo_escolhido(aid, M.ler_config(verificar=False)))
 
     def _atualizar_icone_seletor(self):
-        idx = self.dropdown.get_selected()
-        aid = self.dropdown_items[idx]["id"] if 0 <= idx < len(self.dropdown_items) else None
-        self.icone_seletor.set_from_icon_name(self._icone_item(aid))
+        self.dropdown.atualizar()
 
     # ── Anexos (prints colados, imagens e arquivos) ──────────────────────────
     def _on_colar(self, view):
@@ -890,107 +1201,86 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.btn_enviar.set_sensitive(tem_texto or bool(getattr(self, "anexos_pendentes", None)))
 
     def _carregar_agentes(self):
-        cfg = M.ler_config()
+        cfg = M.ler_config(verificar=False)
         self.candidatos = M.candidatos(cfg, verificar=False, seguro=bool(cfg.get("seguro")))
 
         # Preserva a escolha do usuário ao recarregar (ex.: depois de trocar o modelo)
-        anterior = None
-        idx = self.dropdown.get_selected()
-        if 0 <= idx < len(self.dropdown_items):
-            anterior = self.dropdown_items[idx]["id"]
+        anterior = self.dropdown.atual().get("id") if self.dropdown_items else None
 
-        self.dropdown_items = []
-        self.dropdown_items.append({"id": "auto", "nome": _t("Automático (Cascata)")})
-        for a in self.candidatos:
+        itens = [{"id": "auto", "nome": _t("Automático (Cascata)"), "curto": _t("Automático"),
+                  "sub": _t("Usa o primeiro disponível e troca sozinho quando o limite acaba")}]
+        for i, a in enumerate(self.candidatos):
             nome = M.AGENTES.get(a, {}).get("nome", a)
             modelo = M.modelo_escolhido(a, cfg)
-            if modelo:
-                nome += f" · {modelo}"
             ate = M.esgotado_ate(a)
-            status = f" ({_t('sem limite até')} {M.hora(ate)})" if ate else ""
-            self.dropdown_items.append({"id": a, "nome": f"{nome}{status}"})
+            it = {"id": a, "nome": nome, "curto": nome,
+                  "sub": modelo or _t("Modelo padrão do agente")}
+            if ate:
+                it["aviso"] = f"{_t('volta')} {M.hora(ate)}"
+            if i == 0:
+                it["separar"] = True
+            itens.append(it)
+        self.dropdown_items = itens
+        self.dropdown.atualizar(itens)
+        if not self.dropdown.selecionar_id(anterior):
+            self.dropdown.set_selected(0)
 
-        # Atualiza model do DropDown
-        while self.dropdown_model.get_n_items() > 0:
-            self.dropdown_model.remove(0)
-        for it in self.dropdown_items:
-            self.dropdown_model.append(it["nome"])
-
-        selecionado = 0
-        for i, it in enumerate(self.dropdown_items):
-            if it["id"] == anterior:
-                selecionado = i
-                break
-        self.dropdown.set_selected(selecionado)
-        if selecionado == 0 and not self._rodando():
-            self.agente_atual = None
-        self._atualizar_modelo_dropdown()
-        self._atualizar_icone_seletor()
-
-    def _on_agente_selecionado(self, dropdown, _param):
-        idx = dropdown.get_selected()
-        if 0 <= idx < len(self.dropdown_items):
-            escolhido = self.dropdown_items[idx]["id"]
-            # Durante uma resposta, agente_atual é quem está respondendo
-            if not self._rodando():
-                self.agente_atual = None if escolhido == "auto" else escolhido
+        if not self._rodando():
+            aid = self.dropdown.atual().get("id")
+            self.agente_atual = None if aid in (None, "auto") else aid
         self._atualizar_modelo_dropdown()
         self._atualizar_uso_ui()
-        self._atualizar_icone_seletor()
+        self._atualizar_estado_gratis()
+
+    def _on_agente_selecionado(self, _i, item):
+        # Durante uma resposta, agente_atual é quem está respondendo
+        if not self._rodando():
+            escolhido = item.get("id")
+            self.agente_atual = None if escolhido == "auto" else escolhido
+        self._atualizar_modelo_dropdown()
+        self._atualizar_uso_ui()
 
     def _atualizar_modelo_dropdown(self):
         if not hasattr(self, "modelo_dropdown"):
             return
-        idx = self.dropdown.get_selected()
-        if not (0 <= idx < len(self.dropdown_items)):
-            self.modelo_dropdown.set_visible(False)
-            return
-        agente = self.dropdown_items[idx]["id"]
-        if agente == "auto" or agente not in M.AGENTES:
+        agente = self.dropdown.atual().get("id")
+        if not agente or agente == "auto" or agente not in M.AGENTES:
             self.modelo_dropdown.set_visible(False)
             return
 
-        cfg = M.ler_config()
+        cfg = M.ler_config(verificar=False)
         atual = M.modelo_escolhido(agente, cfg)
-        opcoes = [{"valor": "", "rotulo": _t("Padrão do agente")}]
+        nome = M.AGENTES.get(agente, {}).get("nome", agente)
+        opcoes = [{"id": "", "valor": "", "nome": _t("Padrão do agente"), "curto": _t("Modelo padrão"),
+                   "sub": _t("O que o %1 escolher", nome)}]
         vistos = {""}
         for o in M.modelos(agente):
             valor = str(o.get("valor", "")).strip()
             if valor and valor not in vistos:
                 vistos.add(valor)
-                opcoes.append({"valor": valor, "rotulo": o.get("rotulo") or valor})
+                rot = o.get("rotulo") or valor
+                opcoes.append({"id": valor, "valor": valor, "nome": rot, "curto": rot,
+                               "sub": valor if valor != rot else ""})
         if atual and atual not in vistos:
-            opcoes.append({"valor": atual, "rotulo": atual})
+            opcoes.append({"id": atual, "valor": atual, "nome": atual, "curto": atual})
 
         self.modelo_opcoes = opcoes
-        self.modelo_dropdown.handler_block(self.modelo_handler_id)
-        while self.modelo_lista.get_n_items() > 0:
-            self.modelo_lista.remove(0)
-        selecionado = 0
-        for i, o in enumerate(opcoes):
-            self.modelo_lista.append(o["rotulo"])
-            if o["valor"] == atual:
-                selecionado = i
-        self.modelo_dropdown.set_selected(selecionado)
-        self.modelo_dropdown.handler_unblock(self.modelo_handler_id)
+        self.modelo_dropdown.atualizar(opcoes)
+        if not self.modelo_dropdown.selecionar_id(atual or ""):
+            self.modelo_dropdown.set_selected(0)
         self.modelo_dropdown.set_visible(len(opcoes) > 1)
-        nome = M.AGENTES.get(agente, {}).get("nome", agente)
-        self.modelo_dropdown.set_tooltip_text(f"{_t('Modelo de')} {nome}")
 
-    def _on_modelo_selecionado(self, dropdown, _param):
-        idx = dropdown.get_selected()
-        if not (0 <= idx < len(self.modelo_opcoes)):
+    def _on_modelo_selecionado(self, _i, item):
+        agente = self.dropdown.atual().get("id")
+        if not agente or agente == "auto":
             return
-        selec = self.dropdown.get_selected()
-        if not (0 <= selec < len(self.dropdown_items)):
-            return
-        agente = self.dropdown_items[selec]["id"]
-        if agente == "auto":
-            return
-        self._definir_modelo(agente, self.modelo_opcoes[idx]["valor"])
+        self._definir_modelo(agente, item.get("valor", ""))
 
     def _definir_modelo(self, agente, valor):
-        cfg = M.ler_config()
+        cfg = M.ler_config(verificar=False)
+        atual = M.modelo_escolhido(agente, cfg)
+        if (valor or "") == (atual or ""):
+            return False
         mods = cfg.get("modelos")
         if not isinstance(mods, dict):
             mods = {}
@@ -1001,6 +1291,15 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             mods.pop(agente, None)
         M.gravar_config(cfg)
         self._carregar_agentes()
+        # Conversa em andamento: o modelo novo relê tudo no próximo pedido (sem o cache
+        # do anterior) e pode ter de resumir a conversa — avisa, para a demora não parecer travamento.
+        if self.sessoes.get(agente) and agente in self.conversas_iniciadas:
+            nome = M.AGENTES.get(agente, {}).get("nome", agente)
+            self._adicionar_sistema(
+                f"{nome}: {_t('modelo trocado para')} {valor or _t('o padrão do agente')}. "
+                + _t("Ele vai reler a conversa inteira no próximo pedido; a primeira resposta pode demorar mais."),
+                registro=False)
+        return False
 
     def _escolher_pasta(self, _btn):
         dialog = Gtk.FileDialog(title=_t("Selecionar Pasta de Trabalho"))
@@ -1050,15 +1349,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.anterior_passagem = None
         self.agente_atual = None
         self.ativo_mensagem = None
-        self.ativo_status_box = None
-        self.ativo_status_spinner = None
-        self.ativo_status_check = None
-        self.ativo_status_lbl = None
+        self.ativo_bloco = None
+        self.ativo_digitando = None
         self.ativo_modelo = None
-        self.ativo_status_toggle = None
-        self.ativo_status_revealer = None
-        self.ativo_status_log_buf = None
-        self.ativo_status_historico = []
         self.ativo_parser = None
         self.ativo_renderizado = False
         self.ativo_registro = None
@@ -1213,8 +1506,10 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             partes.append(anexos.texto_para_agente(texto, arquivos))
         pedido = "\n\n".join(partes)
         if self.interrompido:
+            quem = ("cancelada automaticamente pelo chat (" + self.interrompido + ")"
+                    if isinstance(self.interrompido, str) else "interrompida pelo usuário")
             pedido = (
-                "(A sua resposta anterior foi interrompida pelo usuário antes de terminar. "
+                f"(A sua resposta anterior foi {quem} antes de terminar. "
                 "Considere o que já tinha sido feito e siga com o pedido abaixo.)\n\n" + pedido
             )
             self.interrompido = False
@@ -1244,13 +1539,11 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.text_input_buf.place_cursor(self.text_input_buf.get_end_iter())
 
     def _agente_escolhido(self):
-        idx = self.dropdown.get_selected()
-        if 0 < idx < len(self.dropdown_items):
-            return self.dropdown_items[idx]["id"]
-        return None
+        aid = self.dropdown.atual().get("id")
+        return None if aid in (None, "auto") else aid
 
     def _iniciar_execucao(self, pedido, agente_forcado=None, arq_passagem=None):
-        cfg = M.ler_config()
+        cfg = M.ler_config(verificar=False)
         seguro = bool(cfg.get("seguro"))
         agente = agente_forcado or self._agente_escolhido()
         if agente and not agente_forcado and seguro and not M.suporta_seguro(agente):
@@ -1282,8 +1575,16 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         if not agente_forcado and not sessao and not continuar:
             pedido = self._pedido_com_contexto(pedido)
         # sessão nova de um agente: ele fica sabendo do navegador embutido
-        if self.navegador and self.navegador.socket and not sessao and not continuar:
-            pedido = navegador.INSTRUCAO_AGENTE + "\n\n" + pedido
+        if not sessao and not continuar:
+            extras = []
+            if self.navegador and self.navegador.socket:
+                extras.append(navegador.INSTRUCAO_AGENTE)
+            if getattr(self, "integracoes", None) and self.integracoes.socket:
+                extras.append(integracoes.INSTRUCAO_AGENTE)
+            if not seguro:
+                extras.append(integracoes.INSTRUCAO_LIVRE)
+            if extras:
+                pedido = "\n\n".join(extras) + "\n\n" + pedido
         self.precisa_contexto = False
 
         cmd = M.montar_comando(agente, pedido, cfg, sessao=sessao, continuar=continuar, seguro=seguro)
@@ -1321,6 +1622,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                    COLUMNS="240", LINES="60")
         if self.navegador and self.navegador.socket:
             env["SIMBA_NAVEGADOR"] = self.navegador.socket
+        if getattr(self, "integracoes", None) and self.integracoes.socket:
+            env["SIMBA_CHAT"] = self.integracoes.socket
         try:
             proc = subprocess.Popen(
                 cmd, stdin=escravo, stdout=escravo, stderr=escravo, cwd=str(self.work_dir),
@@ -1348,14 +1651,76 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             on_done=lambda _d: None,
             agente=agente,
             on_meta=lambda m: na_gui(self._meta_recebida, agente, m),
+            on_evento=lambda e: na_gui(self._evento_ativo, e),
         )
         self.ativo_parser = parser
 
         self.btn_parar.set_visible(True)
         self.btn_enviar.set_visible(True)
         self._atualizar_uso_ui()
+        self.ultimo_sinal = time.monotonic()
+        self.vigia_cfg = cfg
+        GLib.timeout_add_seconds(VIGIA_PASSO, self._vigiar, eid)
         threading.Thread(target=self._loop_leitura, args=(mestre, proc, eid, parser, cfg),
                          daemon=True).start()
+
+    # ── vigia: nenhuma execução fica presa para sempre ───────────────────────
+    # O processo do agente pode continuar vivo depois da resposta (subagentes e
+    # comandos em segundo plano) — isso é trabalho, e o status mostra. Travado é:
+    # ficar sem dar NENHUM sinal por muito tempo, repetir a mesma ação sem parar,
+    # ou não sair depois de responder. Nesses casos o chat cancela sozinho.
+    def _vigiar(self, eid):
+        if self.exec_atual != eid or self.finalizado or self.proc is None:
+            return False
+        parser, cfg = self.ativo_parser, self.vigia_cfg or {}
+        if self.perguntas:
+            self.ultimo_sinal = time.monotonic()   # esperando a pessoa responder não é travamento
+        parado = time.monotonic() - self.ultimo_sinal
+        pendentes = parser.tarefas_pendentes() if parser else []
+        comandos = [d for d in pendentes if d not in parser.tarefas_pendentes("local_agent")] if parser else []
+        if parser and parser.fim_rodada and not pendentes and parado >= VIGIA_SAIDA:
+            self._encerrar_execucao()  # já respondeu; só o processo não saiu
+            self._finalizar_resposta()
+            self._proximo_da_fila()
+            return False
+        if parser and parser.repeticoes >= VIGIA_REPETICOES:
+            self._cancelar_sozinho(_t("repetiu a mesma ação %1 vezes seguidas", parser.repeticoes))
+            return False
+        # um comando em segundo plano (compilação, download) pode ficar calado por muito tempo
+        minutos = cfg.get("semSinalFundoMin", 150) if comandos else cfg.get("semSinalMin", 20)
+        try:
+            limite = max(VIGIA_MINIMO, float(minutos) * 60)
+        except (TypeError, ValueError):
+            limite = 20 * 60
+        if parado >= limite:
+            self._cancelar_sozinho(_t("ficou %1 min sem dar nenhum sinal", int(parado // 60)))
+            return False
+        if parado >= VIGIA_AVISO and self.ativo_bloco is not None:
+            falta = max(1, int((limite - parado) // 60))
+            self.ativo_bloco.aviso(
+                _t("sem novidade há %1 min (cancela sozinho em %2 min)", int(parado // 60), falta))
+        return True
+
+    def _encerrar_execucao(self):
+        """Solta a execução atual e encerra o processo dela em segundo plano."""
+        proc, self.proc = self.proc, None
+        self.exec_atual = 0  # eventos atrasados desta execução passam a ser ignorados
+        if proc is not None:
+            threading.Thread(target=self._encerrar_proc, args=(proc,), daemon=True).start()
+
+    def _cancelar_sozinho(self, motivo):
+        nome = M.AGENTES.get(self.agente_atual, {}).get("nome", _t("Agente de IA"))
+        self._encerrar_execucao()
+        self.interrompido = motivo
+        self._finalizar_resposta(interrompida=True, motivo=f"{_t('Cancelado automaticamente:')} {nome} {motivo}")
+        self._devolver_fila()
+        if not self.is_active():
+            try:
+                subprocess.Popen(["notify-send", "-a", _t("Agentes de IA"), "-i", "simba-agente",
+                                  _t("Resposta cancelada automaticamente"), f"{nome} {motivo}"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
 
     def _loop_leitura(self, mestre, proc, eid, parser, cfg):
         """Lê o pty até o processo acabar (e esvazia o que sobrou). Roda numa thread.
@@ -1378,6 +1743,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                     break
                 if not dados:
                     break
+                self.ultimo_sinal = time.monotonic()
                 tela += dados
                 if len(tela) > 400000:
                     del tela[:100000]
@@ -1476,13 +1842,14 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             self.janelas_uso[agente] = meta["janelas"]
             self._atualizar_uso_ui()
 
-    def _atualizar_uso_ui(self):
-        if not hasattr(self, "lbl_uso"):
-            return
+    def _dados_uso(self):
+        """(agente, {"5h": fração, "7d": fração}, {"5h": epoch de quando zera, ...})."""
         agente = (self.agente_atual if self._rodando() else None) or self._agente_escolhido()
         if not agente:
-            self.lbl_uso.set_visible(False)
-            return
+            # Automático: o limite que importa é o de quem vai responder agora
+            agente = next((a for a in getattr(self, "candidatos", []) if not M.esgotado_ate(a)), None)
+        if not agente:
+            return None, {}, {}
         janelas = dict(self.janelas_uso.get(agente) or {})
         voltas = dict(self.janelas_volta.get(agente) or {})
         agora = time.time()
@@ -1498,30 +1865,102 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 if chave in u and volta:
                     janelas[rotulo] = u[chave]
                     voltas[rotulo] = _epoch_iso(volta)
+        return agente, janelas, voltas
+
+    def _atualizar_uso_ui(self):
+        if not hasattr(self, "lbl_uso"):
+            return
+        agente, janelas, voltas = self._dados_uso()
+        self.uso_dados = (agente, janelas, voltas)
         if not janelas:
             self.lbl_uso.set_visible(False)
             return
-        partes, dicas = [], []
-        nomes_jan = {"5h": _t("sessão de 5 horas"), "7d": _t("semana")}
+        agora = time.time()
+        nome = M.AGENTES.get(agente, {}).get("nome", agente)
+        nomes_jan = {"5h": _t("Sessão atual (5 h)"), "7d": _t("Semana (7 dias)")}
+        dicas = []
+        for k in ("5h", "7d"):
+            if k in janelas:
+                d = f"{nomes_jan[k]}: {round(janelas[k] * 100)}% {_t('usado')}"
+                if voltas.get(k):
+                    d += f" · {_t('zera em')} {_falta(voltas[k] - agora)}"
+                dicas.append(d)
+        # o anel mostra a janela mais apertada
+        maior = max(janelas.values())
+        chave = max(janelas, key=janelas.get)
+        self.anel_uso.definir(maior)
+        texto = f"{round(maior * 100)}% {_t('usado')}"
+        if voltas.get(chave) and maior >= 0.5:
+            texto += f" · {_t('zera em')} {_falta(voltas[chave] - agora)}"
+        self.lbl_uso_pct.set_label(texto)
+        self.lbl_uso.set_tooltip_text(f"{_t('Limite de uso de')} {nome}\n" + "\n".join(dicas))
+        for c in ("uso-alto", "uso-critico"):
+            self.lbl_uso.remove_css_class(c)
+        if maior >= 0.9:
+            self.lbl_uso.add_css_class("uso-critico")
+        elif maior >= 0.75:
+            self.lbl_uso.add_css_class("uso-alto")
+        self.lbl_uso.set_visible(True)
+
+    def _montar_pop_uso(self):
+        """Popover estilo Claude › Configurações › Uso: uma barra por janela, com contagem."""
+        agente, janelas, voltas = self._dados_uso()
+        agora = time.time()
+        caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        caixa.set_size_request(320, -1)
+        nome = M.AGENTES.get(agente, {}).get("nome", agente or "")
+        cab = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        if agente:
+            cab.append(marcas.imagem(self._icone_item(agente), 20))
+        t = Gtk.Label(label=f"{_t('Limites de uso')} · {nome}", xalign=0)
+        t.add_css_class("uso-pop-titulo")
+        cab.append(t)
+        caixa.append(cab)
+        titulos = {"5h": _t("Sessão atual"), "7d": _t("Limite semanal")}
+        subs = {"5h": _t("janela de 5 horas"), "7d": _t("todos os modelos · 7 dias")}
         for k in ("5h", "7d"):
             if k not in janelas:
                 continue
-            texto = f"{k} {round(janelas[k] * 100)}%"
-            dica = f"{k} ({nomes_jan[k]}): {round(janelas[k] * 100)}% {_t('usado')}"
+            frac = max(0.0, min(1.0, float(janelas[k])))
+            linha = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            topo = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            tt = Gtk.Label(label=titulos[k], xalign=0)
+            tt.add_css_class("uso-pop-linha-titulo")
+            topo.append(tt)
+            st = Gtk.Label(label=subs[k], xalign=0, hexpand=True)
+            st.add_css_class("uso-pop-sub")
+            topo.append(st)
+            pct = Gtk.Label(label=f"{round(frac * 100)}% {_t('usado')}")
+            pct.add_css_class("uso-pop-pct")
+            topo.append(pct)
+            linha.append(topo)
+            barra = Gtk.LevelBar(min_value=0, max_value=1, value=frac)
+            barra.set_mode(Gtk.LevelBarMode.CONTINUOUS)
+            for nome_off in ("low", "high", "full"):
+                barra.remove_offset_value(nome_off)
+            barra.add_css_class("uso-medidor")
+            barra.add_offset_value("uso-ok", 0.75)
+            barra.add_offset_value("uso-alto", 0.9)
+            barra.add_offset_value("uso-critico", 1.0)
+            linha.append(barra)
             if voltas.get(k):
-                texto += f" ↻{_quando(voltas[k])}"
-                dica += f" — {_t('zera')} {_quando(voltas[k], longo=True)} ({_t('em')} {_falta(voltas[k] - agora)})"
-            partes.append(texto)
-            dicas.append(dica)
-        self.lbl_uso.set_label("◔ " + " · ".join(partes))
-        nome = M.AGENTES.get(agente, {}).get("nome", agente)
-        self.lbl_uso.set_tooltip_text(f"{_t('Limite de uso de')} {nome}\n" + "\n".join(dicas))
-        alto = max(janelas.values()) >= 0.8
-        if alto:
-            self.lbl_uso.add_css_class("uso-alto")
-        else:
-            self.lbl_uso.remove_css_class("uso-alto")
-        self.lbl_uso.set_visible(bool(partes))
+                nota = Gtk.Label(label=f"{_t('Zera em')} {_falta(voltas[k] - agora)} · {_quando(voltas[k], longo=True)}",
+                                 xalign=0)
+            else:
+                nota = Gtk.Label(label=_t("Começa a contar no próximo pedido"), xalign=0)
+            nota.add_css_class("uso-pop-nota")
+            linha.append(nota)
+            caixa.append(linha)
+        if not janelas:
+            vazio = Gtk.Label(label=_t("Este agente ainda não informou os limites."), xalign=0)
+            vazio.add_css_class("uso-pop-sub")
+            caixa.append(vazio)
+        btn = Gtk.Button(label=_t("Ver uso e custo detalhados"))
+        btn.add_css_class("flat")
+        btn.add_css_class("uso-pop-link")
+        btn.connect("clicked", lambda _b: (self.pop_uso.popdown(), self._abrir_painel_uso()))
+        caixa.append(btn)
+        self.pop_uso.set_child(caixa)
 
     def _atualizar_seguro_ui(self):
         ativo = self.btn_seguro.get_active()
@@ -1545,32 +1984,28 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._carregar_agentes()
 
     def _atualizar_status_ativo(self, status_texto):
-        if not self.ativo_status_box:
+        """Status em texto do agente: vira o passo atual no cabeçalho do bloco "Pensando"."""
+        bloco = self.ativo_bloco
+        if bloco is None or not status_texto or not status_texto.strip():
             return
-        if status_texto:
-            status_texto = status_texto.strip()
-            historico = self.ativo_status_historico
-            if status_texto and (not historico or historico[-1] != status_texto):
-                historico.append(status_texto)
-                if self.ativo_status_log_buf:
-                    self.ativo_status_log_buf.set_text("\n".join(historico))
-                if self.ativo_registro is not None:
-                    atividade = self.ativo_registro.setdefault("atividade", [])
-                    if not atividade or atividade[-1] != status_texto:
-                        atividade.append(status_texto)
-                self._agendar_salvamento()
-            if getattr(self, "ativo_status_lbl", None):
-                self.ativo_status_lbl.set_label(status_texto)
-                self.ativo_status_lbl.set_visible(True)
-            self.ativo_status_box.set_visible(True)
-            if self.ativo_status_spinner:
-                self.ativo_status_spinner.set_visible(True)
-                self.ativo_status_spinner.start()
-            if self.ativo_status_toggle:
-                self.ativo_status_toggle.set_visible(True)
-        else:
-            self.ativo_status_box.set_visible(False)
+        bloco.status(status_texto)
+        if self.ativo_digitando is not None and self.ativo_digitando.get_visible():
+            self.ativo_digitando.mostrar(bloco.status_atual())
+        self._agendar_salvamento()
         self._scroll_para_fim()
+
+    def _evento_ativo(self, ev):
+        """Evento estruturado do parser: passo (com entrada, saída, estado) ou raciocínio."""
+        bloco = self.ativo_bloco
+        if bloco is None:
+            return
+        if ev.get("ev") == "raciocinio":
+            bloco.raciocinar(ev.get("texto"))
+        elif ev.get("ev") == "passo":
+            bloco.passo(ev)
+            if bloco.aberto():
+                self._scroll_para_fim()
+        self._agendar_salvamento()
 
     def _anexar_texto_ativo(self, texto):
         self.ativo_texto += texto
@@ -1583,23 +2018,21 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.render_fonte = 0
         if self.finalizado or self.ativo_mensagem is None:
             return False
-        self.ativo_mensagem.definir(self.ativo_texto)
+        self.ativo_mensagem.definir(self.ativo_texto, ao_vivo=self.seguir_fim)
+        # com texto na tela o cabeçalho do bloco sobe com a conversa: o indicador de
+        # digitação, no fim, continua dizendo o que o agente faz
+        if self.ativo_digitando is not None and not self.ativo_digitando.get_visible():
+            self.ativo_digitando.mostrar(self.ativo_bloco.status_atual() if self.ativo_bloco else "")
         self._scroll_para_fim()
         return False
 
-    def _concluir_status_ativo(self, _resultado=None):
-        if self.ativo_status_box and self.ativo_status_spinner:
-            self.ativo_status_spinner.stop()
-            self.ativo_status_spinner.set_visible(False)
-        if getattr(self, "ativo_status_lbl", None):
-            self.ativo_status_lbl.set_visible(False)
-        # O botão continua disponível para consultar o histórico em paz.
-        if self.ativo_status_box and self.ativo_status_historico:
-            self.ativo_status_box.set_visible(True)
-            if self.ativo_status_toggle:
-                self.ativo_status_toggle.set_visible(True)
-        elif self.ativo_status_box:
-            self.ativo_status_box.set_visible(False)
+    def _concluir_status_ativo(self, interrompida=False):
+        if self.ativo_digitando is not None:
+            self.ativo_digitando.parar()
+        if self.ativo_bloco is not None:
+            self.ativo_bloco.concluir(
+                segundos=(time.time() - self.inicio_agente) if self.inicio_agente > 0 else None,
+                interrompida=interrompida)
         self._agendar_salvamento(400)
         self._scroll_para_fim()
 
@@ -1621,6 +2054,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         seguro = bool(cfg.get("seguro"))
         seguintes = [a for a in M.candidatos(cfg, pular=self.usados, verificar=False, seguro=seguro)
                      if not M.esgotado_ate(a)]
+        # Modo grátis: o mesmo agente segue com o próximo modelo grátis.
+        if not seguintes and M.modo_gratis(agente_antigo) and not M.esgotado_ate(agente_antigo):
+            seguintes = [agente_antigo]
         if not seguintes:
             self._adicionar_sistema(
                 f"⚡ {_t('Limite de uso atingido para')} {nome_antigo}. "
@@ -1651,21 +2087,20 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             self._ditado_ui("parado")
         if not self._rodando():
             return
-        proc, self.proc = self.proc, None
-        self.exec_atual = 0  # eventos atrasados desta execução passam a ser ignorados
-        threading.Thread(target=self._encerrar_proc, args=(proc,), daemon=True).start()
+        self._encerrar_execucao()
         self.interrompido = True
         self._finalizar_resposta(interrompida=True)
         self._devolver_fila()
 
-    def _finalizar_resposta(self, interrompida=False, notificar=True):
+    def _finalizar_resposta(self, interrompida=False, notificar=True, motivo=None):
         if self.finalizado:
             return
         self.finalizado = True
         if self.render_fonte:
             GLib.source_remove(self.render_fonte)
             self.render_fonte = 0
-        self._concluir_status_ativo()
+        self._cancelar_perguntas()
+        self._concluir_status_ativo(interrompida)
 
         tempo_fmt = None
         if self.inicio_agente > 0:
@@ -1679,6 +2114,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         parser = self.ativo_parser
         uso = dict(parser.uso) if parser is not None and parser.uso else {}
+        if parser is not None and parser.uso_tarefas:
+            uso["subagentes"] = sum(parser.uso_tarefas.values())
         rotulo = f"⏱ {tempo_fmt}" if tempo_fmt else ""
         extra = formatar_uso(uso)
         if extra:
@@ -1694,7 +2131,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             elif not interrompida:
                 texto = _t("(Concluído sem texto adicional)")
         if interrompida:
-            texto = texto.rstrip() + ("\n\n" if texto.strip() else "") + f"_⏹ {_t('Interrompido pelo usuário')}_"
+            texto = texto.rstrip() + ("\n\n" if texto.strip() else "") + f"_⏹ {motivo or _t('Interrompido pelo usuário')}_"
         self.ativo_texto = texto
 
         if self.ativo_registro is not None:
@@ -1707,11 +2144,19 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 self.ativo_registro["interrompida"] = True
         if self.ativo_mensagem is not None:
             self.ativo_mensagem.definir(texto)
+            self.ativo_mensagem.concluir(recolher=self.seguir_fim)
             self.ativo_renderizado = True
 
         if notificar and not interrompida and not self.is_active():
             nome = M.AGENTES.get(self.agente_atual, {}).get("nome", _t("Agente de IA"))
             self._notificar_conclusao(nome)
+
+        card = getattr(self, "ativo_card", None)
+        if card is not None:
+            card.remove_css_class("ativo")
+            card.acoes.set_visible(True)
+            if self.ativo_bloco is not None:
+                card.atualizar_acoes(self.ativo_bloco.passos)
 
         self.proc = None
         self._salvar_conversa()
@@ -1851,8 +2296,31 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         lbl_fila.set_visible(na_fila)
         bubble.append(lbl_fila)
 
-        box_linha.append(bubble)
+        coluna = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        coluna.set_halign(Gtk.Align.END)
+        coluna.append(bubble)
+        # Ações ao passar o mouse: copiar e editar (volta o texto para a caixa)
+        acoes = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        acoes.add_css_class("msg-user-acoes")
+        acoes.set_halign(Gtk.Align.END)
+        b_copiar = Gtk.Button(icon_name="edit-copy-symbolic")
+        b_copiar.add_css_class("flat")
+        b_copiar.add_css_class("action-button")
+        b_copiar.set_tooltip_text(_t("Copiar"))
+        b_copiar.connect("clicked", lambda b: self._copiar_icone(texto, b))
+        acoes.append(b_copiar)
+        b_editar = Gtk.Button(icon_name="document-edit-symbolic")
+        b_editar.add_css_class("flat")
+        b_editar.add_css_class("action-button")
+        b_editar.set_tooltip_text(_t("Editar e enviar de novo"))
+        b_editar.connect("clicked", lambda _b: self._usar_sugestao(texto))
+        acoes.append(b_editar)
+        acoes.set_visible(bool(texto))
+        coluna.append(acoes)
+        box_linha.append(coluna)
         self.box_mensagens.append(box_linha)
+        if registro or na_fila:
+            self._animar_entrada(box_linha)
         self._scroll_para_fim(forcar=True)
         return {"linha": box_linha, "fila": lbl_fila}
 
@@ -1862,7 +2330,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         info = M.AGENTES.get(agente, {})
         nome = info.get("nome", agente)
         if modelo is None:
-            modelo = M.modelo_escolhido(agente, M.ler_config()) or info.get("modelo", "")
+            modelo = M.modelo_escolhido(agente, M.ler_config(verificar=False)) or info.get("modelo", "")
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("assistant-card")
@@ -1920,7 +2388,35 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         lbl_duracao.add_css_class("duration-badge")
         lbl_duracao.set_valign(Gtk.Align.CENTER)
         lbl_duracao.set_visible(bool(duracao))
-        header_row.append(lbl_duracao)
+
+        # Modo livre: quantos comandos a IA rodou sozinha no computador (e se usou root)
+        lbl_acoes = Gtk.Label()
+        lbl_acoes.add_css_class("acoes-pc")
+        lbl_acoes.set_valign(Gtk.Align.CENTER)
+        lbl_acoes.set_visible(False)
+        header_row.append(lbl_acoes)
+
+        def atualizar_acoes(passos):
+            cmds = [p for p in passos or [] if p.get("tipo") == "comando" and p.get("estado") != "negado"
+                    and not p.get("simples")]
+            edits = [p for p in passos or [] if p.get("tipo") == "edicao" and p.get("estado") != "negado"
+                     and not p.get("simples")]
+            root = any(re.search(r"(^|[\s;&|(])(sudo|pkexec|doas)\s", str((p.get("entrada") or {}).get("comando", "")))
+                       for p in cmds)
+            partes = []
+            if cmds:
+                partes.append(f"{len(cmds)} {_t('comando') if len(cmds) == 1 else _t('comandos')}")
+            if edits:
+                partes.append(f"{len(edits)} {_t('edição') if len(edits) == 1 else _t('edições')}")
+            if not partes:
+                lbl_acoes.set_visible(False)
+                return
+            lbl_acoes.set_label(("⚡ " if root else "⌘ ") + " · ".join(partes))
+            lbl_acoes.set_tooltip_text(
+                (_t("Inclui comando de administrador (root). ") if root else "")
+                + _t("Ações que a IA executou no computador. Abra o bloco Pensando para ver cada uma."))
+            (lbl_acoes.add_css_class if root else lbl_acoes.remove_css_class)("root")
+            lbl_acoes.set_visible(True)
 
         espaco = Gtk.Box()
         espaco.set_hexpand(True)
@@ -1932,85 +2428,49 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         header_row.append(lbl_hora)
         card.append(header_row)
 
-        # Atividade discreta: spinner minúsculo e botão para ver os detalhes
-        status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        status_row.add_css_class("activity-row")
-        status_row.set_halign(Gtk.Align.FILL)
-        status_row.set_visible(False)
-
-        spinner = Gtk.Spinner()
-        spinner.set_size_request(12, 12)
-        spinner.set_valign(Gtk.Align.CENTER)
-        spinner.start()
-        status_row.append(spinner)
-
-        # O que a IA está fazendo agora (ferramenta, comando, arquivo)
-        lbl_status = Gtk.Label(label="", xalign=0)
-        lbl_status.add_css_class("activity-now")
-        lbl_status.set_ellipsize(Pango.EllipsizeMode.END)
-        lbl_status.set_hexpand(True)
-        lbl_status.set_visible(False)
-        status_row.append(lbl_status)
-
-        btn_detalhes = Gtk.ToggleButton()
-        btn_detalhes.add_css_class("flat")
-        btn_detalhes.add_css_class("activity-toggle")
-        btn_detalhes.set_valign(Gtk.Align.CENTER)
-        btn_detalhes.set_tooltip_text(_t("Ver o que a IA pensou e executou"))
-        btn_detalhes.set_visible(False)
-        conteudo_detalhes = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        icone_detalhes = Gtk.Image.new_from_icon_name("pan-end-symbolic")
-        icone_detalhes.set_pixel_size(10)
-        rotulo_detalhes = Gtk.Label(label=_t("Detalhes"))
-        conteudo_detalhes.append(icone_detalhes)
-        conteudo_detalhes.append(rotulo_detalhes)
-        btn_detalhes.set_child(conteudo_detalhes)
-        status_row.append(btn_detalhes)
-
-        # Painel expansível com o histórico de pensamento/ações (oculto por padrão)
-        revealer = Gtk.Revealer()
-        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        revealer.set_transition_duration(180)
-        revealer.set_reveal_child(False)
-        log_view = Gtk.TextView()
-        log_view.set_editable(False)
-        log_view.set_cursor_visible(False)
-        log_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        log_view.set_top_margin(2)
-        log_view.set_bottom_margin(2)
-        log_view.set_left_margin(2)
-        log_view.set_right_margin(2)
-        log_view.add_css_class("activity-log")
-        log_buf = log_view.get_buffer()
-        revealer.set_child(log_view)
+        # Bloco "Pensando": passo atual + cronômetro; clicado, abre a linha do tempo
+        # (raciocínio, passos, cartões de comando). Fica acima do texto, como um resumo
+        # do trabalho; o indicador de digitação fica DEPOIS do texto, no fim da conversa.
+        seguro = bool(M.ler_config(verificar=False).get("seguro")) if ativo else False
+        bloco = atividade.BlocoPensando(seguro=seguro, vivo=ativo,
+                                        ao_abrir=lambda: GLib.idle_add(self._do_scroll) if self.seguir_fim else None)
+        bloco.set_visible(ativo)
+        card.append(bloco)
 
         # Corpo da resposta: blocos de texto, código e tabela (markdown.MensagemView)
         mensagem = self._criar_mensagem()
         card.append(mensagem)
 
-        # O status fica DEPOIS do texto: enquanto a resposta cresce ele continua no
-        # fim da conversa, à vista, em vez de subir junto com o começo da mensagem.
-        card.append(status_row)
-        card.append(revealer)
+        digitando = atividade.Digitando()
+        card.append(digitando)
 
-        # Ações da resposta
-        act_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # Ações da resposta (aparecem por inteiro ao passar o mouse): copiar, tentar de novo
+        act_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         act_row.add_css_class("msg-actions")
-        btn_copiar = Gtk.Button()
-        btn_copiar.set_child(Adw.ButtonContent(icon_name="edit-copy-symbolic", label=_t("Copiar")))
+        btn_copiar = Gtk.Button(icon_name="edit-copy-symbolic")
         btn_copiar.add_css_class("flat")
         btn_copiar.add_css_class("action-button")
-        btn_copiar.set_halign(Gtk.Align.START)
-        btn_copiar.connect("clicked", lambda b: self._copiar_texto(mensagem.texto, b))
+        btn_copiar.set_tooltip_text(_t("Copiar resposta"))
+        btn_copiar.connect("clicked", lambda b: self._copiar_icone(mensagem.texto, b))
         act_row.append(btn_copiar)
+        pedido_ant = next((m for m in reversed(self.conversa_mensagens) if m.get("tipo") == "user"), None)
+        if pedido_ant is not None:
+            btn_repetir = Gtk.Button(icon_name="view-refresh-symbolic")
+            btn_repetir.add_css_class("flat")
+            btn_repetir.add_css_class("action-button")
+            btn_repetir.set_tooltip_text(_t("Tentar de novo (reenvia o mesmo pedido)"))
+            btn_repetir.connect("clicked", lambda _b, m=pedido_ant: self._repetir_pedido(m))
+            act_row.append(btn_repetir)
+        act_row.append(lbl_duracao)
         card.append(act_row)
+        card.atualizar_acoes = atualizar_acoes
+        card.acoes = act_row
+        act_row.set_visible(not ativo)   # copiar/tentar de novo só depois que a resposta termina
 
         self.box_mensagens.append(card)
-
-        btn_detalhes.connect(
-            "toggled",
-            lambda b, rev=revealer, ico=icone_detalhes: self._alternar_detalhes(b, rev, ico),
-        )
+        if ativo:
+            card.add_css_class("ativo")
+            self._animar_entrada(card)
 
         if registro:
             novo = {
@@ -2020,24 +2480,22 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 "hora": lbl_hora.get_label(),
                 "quando": time.time(),
                 "texto": "",
-                "atividade": [],
+                "passos": [],
             }
             self.conversa_mensagens.append(novo)
             if ativo:
                 self.ativo_registro = novo
+                # os passos são guardados na própria conversa, à medida que chegam
+                bloco.registro = novo
+                novo["passos"] = bloco.passos
 
         if ativo:
             self.ativo_mensagem = mensagem
-            self.ativo_status_box = status_row
-            self.ativo_status_spinner = spinner
-            self.ativo_status_lbl = lbl_status
+            self.ativo_bloco = bloco
+            self.ativo_digitando = digitando
             self.ativo_modelo = mostrar_modelo
-            self.ativo_status_check = None
-            self.ativo_status_toggle = btn_detalhes
-            self.ativo_status_revealer = revealer
-            self.ativo_status_log_buf = log_buf
-            self.ativo_status_historico = []
             self.ativo_duracao_lbl = lbl_duracao
+            self.ativo_card = card
             self.ativo_renderizado = False
 
         if registro:
@@ -2047,25 +2505,17 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         return {
             "card": card,
             "mensagem": mensagem,
-            "status_row": status_row,
-            "spinner": spinner,
-            "toggle": btn_detalhes,
-            "revealer": revealer,
-            "log_buf": log_buf,
-            "icone": icone_detalhes,
+            "bloco": bloco,
+            "digitando": digitando,
             "duracao_lbl": lbl_duracao,
         }
 
-    def _alternar_detalhes(self, btn, revealer=None, icone=None):
-        revealer = revealer or self.ativo_status_revealer
-        if not revealer:
+    def _animar_entrada(self, widget):
+        """Entrada suave de uma mensagem nova (não nas conversas reabertas)."""
+        if not atividade.animacoes():
             return
-        aberto = btn.get_active()
-        revealer.set_reveal_child(aberto)
-        alvo = icone or btn
-        alvo.set_from_icon_name("pan-down-symbolic" if aberto else "pan-end-symbolic")
-        if aberto:
-            GLib.idle_add(self._do_scroll)
+        widget.add_css_class("msg-entrada")
+        GLib.timeout_add(450, lambda: (widget.remove_css_class("msg-entrada"), False)[1])
 
     def _adicionar_aviso_handover(self, nome_antigo, nome_proximo, registro=True):
         if registro:
@@ -2125,6 +2575,29 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.box_mensagens.append(box_linha)
         self._scroll_para_fim(forcar=True)
 
+
+    def _copiar_icone(self, texto, btn):
+        """Copiar com botão só de ícone: vira um ✓ verde por 2 s."""
+        if not texto:
+            return
+        Gdk.Display.get_default().get_clipboard().set(texto)
+        btn.set_icon_name("object-select-symbolic")
+        btn.add_css_class("copiado")
+
+        def voltar():
+            btn.set_icon_name("edit-copy-symbolic")
+            btn.remove_css_class("copiado")
+            return False
+        GLib.timeout_add_seconds(2, voltar)
+
+    def _repetir_pedido(self, msg):
+        """Reenvia um pedido anterior (botão "Tentar de novo" de uma resposta)."""
+        if self._rodando():
+            self._adicionar_sistema(_t("Espere a resposta atual terminar (ou pare com Esc) para tentar de novo."),
+                                    registro=False)
+            return
+        anexos_ok = [a for a in (msg.get("anexos") or []) if Path(a).exists()]
+        self._enviar_pedido([{"texto": msg.get("texto", ""), "anexos": anexos_ok}])
 
     def _copiar_texto(self, texto, btn):
         if texto:
@@ -2193,6 +2666,7 @@ class App(Adw.Application):
         )
         marcas.registrar()
         threading.Thread(target=anexos.limpar_antigos, daemon=True).start()
+        _vigiar_interface()
 
     def do_activate(self):
         win = self.props.active_window

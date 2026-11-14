@@ -374,7 +374,7 @@ class CentralMixin:
 
     def _modelo_linha(self, aid, opcoes, indice):
         if 0 <= indice < len(opcoes):
-            self._definir_modelo(aid, opcoes[indice]["valor"])
+            GLib.idle_add(self._definir_modelo, aid, opcoes[indice]["valor"])
             self._toast_central(_t("Modelo atualizado"))
 
     def _atualizar_linhas_central(self, instalados):

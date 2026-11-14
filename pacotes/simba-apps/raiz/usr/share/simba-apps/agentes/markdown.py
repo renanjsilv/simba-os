@@ -12,6 +12,7 @@ import shlex
 import subprocess
 import sys
 import uuid
+import weakref
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -43,6 +44,60 @@ LANG_ALIASES = {
     "dockerfile": "dockerfile", "docker": "dockerfile", "diff": "diff", "patch": "diff",
 }
 EXECUTAVEIS = ("bash", "sh", "zsh", "shell", "python", "py", "python3")
+CODIGO_LONGO = 32     # linhas a partir das quais um bloco de código pronto fica recolhido
+CODIGO_PREVIA = 14    # linhas à vista no bloco recolhido
+
+_mensagens = weakref.WeakSet()   # MensagemViews vivas: repintadas ao trocar claro/escuro
+_tema_ligado = False
+
+
+def cores_markdown():
+    """Cores do texto que dependem do tema (as tags do TextView não leem o CSS)."""
+    estilo = Adw.StyleManager.get_default()
+    escuro = estilo.get_dark()
+    destaque = "#78aeed" if escuro else "#1c71d8"
+    try:  # cor de destaque do sistema, na variante legível sobre o fundo
+        destaque = Adw.AccentColor.to_standalone_rgba(estilo.get_accent_color(), escuro).to_string()
+    except Exception:  # noqa: BLE001 — libadwaita antiga
+        pass
+    return {
+        "destaque": destaque,
+        "cinza": "rgba(255,255,255,0.62)" if escuro else "rgba(0,0,0,0.60)",
+        "codigo": "#f2a98a" if escuro else "#9c3a14",
+        "codigo_fundo": "rgba(255,255,255,0.10)" if escuro else "rgba(0,0,0,0.07)",
+    }
+
+
+def _rgba(texto):
+    c = Gdk.RGBA()
+    c.parse(texto)
+    return c
+
+
+def pintar_tags(tabela):
+    """Aplica as cores do tema atual às tags de markdown de um buffer."""
+    cor = cores_markdown()
+    for nome, props in (("md-code", {"foreground-rgba": cor["codigo"], "background-rgba": cor["codigo_fundo"]}),
+                        ("md-marcador", {"foreground-rgba": cor["destaque"]}),
+                        ("md-link", {"foreground-rgba": cor["destaque"]}),
+                        ("md-quote", {"foreground-rgba": cor["cinza"]}),
+                        ("md-dim", {"foreground-rgba": cor["cinza"]})):
+        tag = tabela.lookup(nome)
+        if tag is not None:
+            for chave, valor in props.items():
+                tag.set_property(chave, _rgba(valor))
+    destaque = _rgba(cor["destaque"])
+    tabela.foreach(lambda t: t.set_property("foreground-rgba", destaque) if getattr(t, "url", None) else None)
+
+
+def _tema_mudou(*_a):
+    for msg in list(_mensagens):
+        for it in msg.itens:
+            w = it["widget"]
+            if it["tipo"] == "texto":
+                pintar_tags(w.get_buffer().get_tag_table())
+            elif it["tipo"] == "codigo":
+                w.aplicar_tema()
 
 # Sequências ANSI (cores, cursor, limpeza de linha) que alguns CLIs ainda emitem
 # mesmo no modo de impressão. Elas não podem chegar ao texto do chat.
@@ -173,8 +228,15 @@ class MensagemView(Gtk.Box):
         self.itens = []  # [{"tipo", "lang", "conteudo", "widget"}]
         self.set_hexpand(True)
         self.add_css_class("msg-corpo")
+        global _tema_ligado
+        _mensagens.add(self)
+        if not _tema_ligado:
+            _tema_ligado = True
+            Adw.StyleManager.get_default().connect("notify::dark", _tema_mudou)
 
-    def definir(self, texto):
+    def definir(self, texto, ao_vivo=False):
+        """Atualiza a mensagem. `ao_vivo`: a resposta está chegando e a pessoa acompanha o
+        fim da conversa; aí um bloco de código longo é recolhido assim que fica pronto."""
         if texto == self.texto:
             return
         self.texto = texto
@@ -186,6 +248,10 @@ class MensagemView(Gtk.Box):
                     if it["tipo"] == b["tipo"] and (b["tipo"] != "codigo" or it["lang"] == b["lang"]):
                         if it["conteudo"] != b["conteudo"]:
                             self._atualizar(it, b)
+                        if it.get("aberto") and not b["aberto"]:
+                            it["aberto"] = False
+                            if ao_vivo:
+                                it["widget"].pronto()
                         continue
                     self._remover_de(i)
                 self._criar(b)
@@ -194,6 +260,14 @@ class MensagemView(Gtk.Box):
             sys.stderr.write(f"markdown: {exc}\n")
             self._remover_de(0)
             self._criar({"tipo": "texto", "conteudo": texto, "lang": "", "aberto": False}, cru=True)
+
+    def concluir(self, recolher=True):
+        """Resposta pronta (ou conversa reaberta): os blocos de código longos ficam recolhidos
+        (`recolher=False`: a pessoa está lendo mais acima; nada muda de tamanho sob os olhos dela)."""
+        for it in self.itens:
+            if it["tipo"] == "codigo":
+                it["aberto"] = False
+                it["widget"].pronto(recolher)
 
     def _remover_de(self, i):
         for it in self.itens[i:]:
@@ -213,7 +287,8 @@ class MensagemView(Gtk.Box):
             else:
                 j._render_texto(w.get_buffer(), b["conteudo"])
         self.append(w)
-        self.itens.append({"tipo": b["tipo"], "lang": b["lang"], "conteudo": b["conteudo"], "widget": w})
+        self.itens.append({"tipo": b["tipo"], "lang": b["lang"], "conteudo": b["conteudo"], "widget": w,
+                           "aberto": b.get("aberto", False)})
 
     def _atualizar(self, it, b):
         w = it["widget"]
@@ -249,31 +324,29 @@ class MarkdownMixin:
             tabela.add(t)
             return t
 
-        neutro = Gdk.RGBA()
-        neutro.parse("rgba(127,127,127,0.20)")
-        cinza = Gdk.RGBA()
-        cinza.parse("rgba(127,127,127,0.85)")
-        accent = Gdk.RGBA()
-        accent.parse("rgba(98,160,234,1)")
-
-        return {
-            "base": tag("md-base", pixels_below_lines=3, pixels_inside_wrap=3),
+        novas = tabela.lookup("md-base") is None
+        tags = {
+            "base": tag("md-base", pixels_below_lines=4, pixels_inside_wrap=4),
             "bold": tag("md-bold", weight=Pango.Weight.BOLD),
             "italic": tag("md-italic", style=Pango.Style.ITALIC),
             "strike": tag("md-strike", strikethrough=True),
-            "code": tag("md-code", family="monospace", scale=0.92, background_rgba=neutro),
-            "h1": tag("md-h1", weight=Pango.Weight.BOLD, scale=1.45, pixels_above_lines=10, pixels_below_lines=6),
-            "h2": tag("md-h2", weight=Pango.Weight.BOLD, scale=1.25, pixels_above_lines=10, pixels_below_lines=4),
-            "h3": tag("md-h3", weight=Pango.Weight.BOLD, scale=1.1, pixels_above_lines=8, pixels_below_lines=3),
-            "lista0": tag("md-lista0", left_margin=26, indent=-18, pixels_below_lines=3),
-            "lista1": tag("md-lista1", left_margin=50, indent=-18, pixels_below_lines=3),
-            "lista2": tag("md-lista2", left_margin=74, indent=-18, pixels_below_lines=3),
-            "marcador": tag("md-marcador", foreground_rgba=accent, weight=Pango.Weight.BOLD),
-            "quote": tag("md-quote", left_margin=20, foreground_rgba=cinza, style=Pango.Style.ITALIC,
+            "code": tag("md-code", family="monospace", scale=0.9),
+            "h1": tag("md-h1", weight=Pango.Weight.BOLD, scale=1.5, pixels_above_lines=14, pixels_below_lines=6),
+            "h2": tag("md-h2", weight=Pango.Weight.BOLD, scale=1.28, pixels_above_lines=14, pixels_below_lines=5),
+            "h3": tag("md-h3", weight=Pango.Weight.BOLD, scale=1.12, pixels_above_lines=10, pixels_below_lines=3),
+            "h4": tag("md-h4", weight=Pango.Weight.BOLD, pixels_above_lines=8, pixels_below_lines=2),
+            "lista0": tag("md-lista0", left_margin=28, indent=-18, pixels_below_lines=4),
+            "lista1": tag("md-lista1", left_margin=52, indent=-18, pixels_below_lines=4),
+            "lista2": tag("md-lista2", left_margin=76, indent=-18, pixels_below_lines=4),
+            "marcador": tag("md-marcador", weight=Pango.Weight.BOLD),
+            "quote": tag("md-quote", left_margin=18, style=Pango.Style.ITALIC,
                          pixels_above_lines=2, pixels_below_lines=2),
-            "link": tag("md-link", underline=Pango.Underline.SINGLE, foreground_rgba=accent),
-            "dim": tag("md-dim", foreground_rgba=cinza),
+            "link": tag("md-link", underline=Pango.Underline.SINGLE),
+            "dim": tag("md-dim"),
         }
+        if novas:
+            pintar_tags(tabela)
+        return tags
 
     def _inserir(self, buf, texto, tags):
         if texto:
@@ -346,7 +419,8 @@ class MarkdownMixin:
                 flush()
                 nova_linha(1 if primeiro[0] else 2)
                 n = len(titulo.group(1))
-                self._inserir_inline(buf, titulo.group(2), tags, extra=[tags["h1" if n == 1 else "h2" if n == 2 else "h3"]])
+                self._inserir_inline(buf, titulo.group(2), tags,
+                                     extra=[tags["h1" if n == 1 else "h2" if n == 2 else "h3" if n == 3 else "h4"]])
                 anterior[0] = "titulo"
             elif item and not re.match(r"^([-*_])\1{2,}$", s):
                 flush()
@@ -462,14 +536,22 @@ class MarkdownMixin:
 
     def _feedback_botao(self, btn, icone, rotulo, icone_volta, rotulo_volta):
         btn.set_child(Adw.ButtonContent(icon_name=icone, label=rotulo))
-        GLib.timeout_add_seconds(2, lambda: (btn.set_child(Adw.ButtonContent(icon_name=icone_volta,
-                                                                             label=rotulo_volta)), False)[1])
+        btn.add_css_class("copiado")
+
+        def voltar():
+            btn.set_child(Adw.ButtonContent(icon_name=icone_volta, label=rotulo_volta))
+            btn.remove_css_class("copiado")
+            return False
+        GLib.timeout_add_seconds(2, voltar)
 
     def _criar_widget_codigo(self, lang, codigo):
         lang = (lang or "").lower()
         code_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         code_box.add_css_class("code-block-box")
         code_box.set_hexpand(True)
+        code_box.set_overflow(Gtk.Overflow.HIDDEN)   # cantos arredondados de verdade
+        # O código inteiro fica aqui; o buffer pode mostrar só o começo (bloco recolhido).
+        estado = {"codigo": codigo, "recolhido": False, "decidido": False}
 
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         header.add_css_class("code-block-header")
@@ -485,15 +567,20 @@ class MarkdownMixin:
             lm = GtkSource.LanguageManager.get_default()
             language = lm.get_language(lang_real) if lang_real else None
             buf = GtkSource.Buffer.new_with_language(language) if language else GtkSource.Buffer()
-            sm = GtkSource.StyleSchemeManager.get_default()
-            escuro = Adw.StyleManager.get_default().get_dark()
-            scheme = sm.get_scheme("Adwaita-dark" if escuro else "Adwaita") or sm.get_scheme("classic")
-            if scheme:
-                buf.set_style_scheme(scheme)
             view = GtkSource.View.new_with_buffer(buf)
         else:
             view = Gtk.TextView()
             buf = view.get_buffer()
+
+        def aplicar_tema():
+            if HAS_GTKSOURCE:
+                sm = GtkSource.StyleSchemeManager.get_default()
+                # o bloco de código é sempre escuro (separado da conversa), nos dois temas
+                scheme = sm.get_scheme("Adwaita-dark") or sm.get_scheme("oblivion") or sm.get_scheme("classic")
+                if scheme:
+                    buf.set_style_scheme(scheme)
+        aplicar_tema()
+        code_box.aplicar_tema = aplicar_tema
         view.set_editable(False)
         view.set_cursor_visible(False)
         view.set_monospace(True)
@@ -506,11 +593,17 @@ class MarkdownMixin:
         buf.set_text(codigo)
 
         def texto_atual():
-            return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), True)
+            return estado["codigo"]
 
         if lang in EXECUTAVEIS:
-            btn_exec = self._botao_codigo("media-playback-start-symbolic", _t("Executar"),
-                                          _t("Executar comando no terminal do Simba"))
+            btn_exec = Gtk.Button(icon_name="media-playback-start-symbolic")
+            btn_exec.add_css_class("flat")
+            btn_exec.add_css_class("code-copy-btn")
+            btn_exec.add_css_class("icone")
+            btn_exec.set_tooltip_text(_t("Executar no terminal do Simba"))
+            if re.search(r"(^|[\s;&|(])(sudo|pkexec|rm\s+-[a-z]*r)", codigo):
+                btn_exec.add_css_class("perigo")
+                btn_exec.set_tooltip_text(_t("Executar no terminal do Simba (comando de administrador ou que apaga arquivos: confira antes)"))
 
             def _exec_codigo(_b, l=lang):
                 c = texto_atual()
@@ -564,11 +657,20 @@ class MarkdownMixin:
         btn_salvar.connect("clicked", _salvar_bloco)
         header.append(btn_salvar)
 
-        btn_copiar = self._botao_codigo("edit-copy-symbolic", _t("Copiar"), _t("Copiar"))
+        if hasattr(self, "_mostrar_codigo_lateral"):
+            btn_lado = Gtk.Button(icon_name="view-dual-symbolic")
+            btn_lado.add_css_class("flat")
+            btn_lado.add_css_class("code-copy-btn")
+            btn_lado.add_css_class("icone")
+            btn_lado.set_tooltip_text(_t("Abrir ao lado (painel de código)"))
+            btn_lado.connect("clicked", lambda _b, l=lang: self._mostrar_codigo_lateral(l, texto_atual()))
+            header.append(btn_lado)
+
+        btn_copiar = self._botao_codigo("edit-copy-symbolic", _t("Copiar"), _t("Copiar o código"))
 
         def _copiar_codigo(_b):
             Gdk.Display.get_default().get_clipboard().set(texto_atual())
-            self._feedback_botao(btn_copiar, "emblem-ok-symbolic", _t("Copiado!"), "edit-copy-symbolic", _t("Copiar"))
+            self._feedback_botao(btn_copiar, "object-select-symbolic", _t("Copiado"), "edit-copy-symbolic", _t("Copiar"))
         btn_copiar.connect("clicked", _copiar_codigo)
         header.append(btn_copiar)
         code_box.append(header)
@@ -581,5 +683,60 @@ class MarkdownMixin:
         rolagem.set_child(view)
         code_box.append(rolagem)
 
-        code_box.definir_codigo = lambda novo: buf.set_text(novo)
+        # Bloco longo e pronto: mostra só o começo, com "Mostrar tudo" (o código inteiro
+        # continua em estado["codigo"] para copiar, salvar, executar e para a busca).
+        btn_tudo = Gtk.Button()
+        btn_tudo.add_css_class("flat")
+        btn_tudo.add_css_class("code-block-mais")
+        btn_tudo.set_visible(False)
+        code_box.append(btn_tudo)
+        recolhidos = getattr(self, "codigos_recolhidos", None)
+        if recolhidos is None:
+            recolhidos = self.codigos_recolhidos = weakref.WeakSet()
+
+        def n_linhas():
+            return estado["codigo"].count("\n") + 1
+
+        def mostrar(recolhido):
+            estado["recolhido"] = recolhido
+            if recolhido:
+                buf.set_text("\n".join(estado["codigo"].split("\n")[:CODIGO_PREVIA]))
+                btn_tudo.set_label(_t("Mostrar tudo · %1 linhas", n_linhas()))
+                btn_tudo.set_tooltip_text(_t("Mostrar o código inteiro"))
+                recolhidos.add(code_box)
+            else:
+                buf.set_text(estado["codigo"])
+                btn_tudo.set_label(_t("Recolher"))
+                btn_tudo.set_tooltip_text(_t("Mostrar só o começo do código"))
+                recolhidos.discard(code_box)
+            btn_tudo.update_state([Gtk.AccessibleState.EXPANDED], [int(not recolhido)])
+
+        def alternar(_b):
+            mostrar(not estado["recolhido"])
+        btn_tudo.connect("clicked", alternar)
+
+        def definir_codigo(novo):
+            antigo = estado["codigo"]
+            estado["codigo"] = novo
+            if estado["recolhido"]:
+                mostrar(True)
+            elif novo.startswith(antigo):   # resposta chegando: só o trecho novo entra
+                buf.insert(buf.get_end_iter(), novo[len(antigo):])
+            else:
+                buf.set_text(novo)
+
+        def pronto(recolher=True):
+            """O bloco não muda mais: se for longo, ganha o botão e (em geral) fica recolhido."""
+            if estado["decidido"]:
+                return
+            estado["decidido"] = True
+            if n_linhas() >= CODIGO_LONGO:
+                btn_tudo.set_visible(True)
+                mostrar(bool(recolher))
+
+        code_box.definir_codigo = definir_codigo
+        code_box.pronto = pronto
+        code_box.recolhido = lambda: estado["recolhido"]
+        code_box.codigo_oculto = lambda: "\n".join(estado["codigo"].split("\n")[CODIGO_PREVIA:]) if estado["recolhido"] else ""
+        code_box.expandir = lambda: mostrar(False)
         return code_box

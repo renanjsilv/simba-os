@@ -46,15 +46,16 @@ atraso = float(sys.argv[2])
 for l in linhas:
     print(l, flush=True)
     time.sleep(atraso)
+time.sleep(float(sys.argv[3]) if len(sys.argv) > 3 else 0)  # processo que não sai
 ''')
 chamadas = []
 roteiro = []  # fixture e atraso de cada execução, na ordem
 
 
 def montar_falso(a, pedido, cfg, sessao=None, continuar=False, seguro=False):
-    fixture, atraso = roteiro.pop(0)
+    fixture, atraso, *resto = roteiro.pop(0)
     chamadas.append({"agente": a, "pedido": pedido, "sessao": sessao, "continuar": continuar, "seguro": seguro})
-    return [sys.executable, str(FALSO), str(AQUI / "fixtures" / fixture), str(atraso)]
+    return [sys.executable, str(FALSO), str(AQUI / "fixtures" / fixture), str(atraso)] + [str(x) for x in resto]
 
 
 M.montar_comando = montar_falso
@@ -121,14 +122,14 @@ class Teste:
         roteiro.append(("claude-ferramenta.ndjson", 0.15))
         self.enviar("o que tem nesta pasta?")
         yield 0.4
-        # o status (spinner/pensando) fica abaixo do texto da resposta, no fim da conversa
-        st, msg = self.win.ativo_status_box, self.win.ativo_mensagem
-        filhos, f = [], (st.get_parent().get_first_child() if st and st.get_parent() else None)
+        # bloco "Pensando" acima do texto; indicador de digitação abaixo, no fim da conversa
+        bl, msg, dg = self.win.ativo_bloco, self.win.ativo_mensagem, self.win.ativo_digitando
+        filhos, f = [], (msg.get_parent().get_first_child() if msg and msg.get_parent() else None)
         while f is not None:
             filhos.append(f)
             f = f.get_next_sibling()
-        checar(st in filhos and msg in filhos and filhos.index(st) > filhos.index(msg),
-               "status de pensamento fica abaixo do texto da resposta")
+        checar(bl in filhos and dg in filhos and filhos.index(bl) < filhos.index(msg) < filhos.index(dg),
+               "Pensando acima do texto, digitando abaixo")
         print("2) mensagem enviada durante a resposta vai para a fila")
         roteiro.append(("claude-ferramenta.ndjson", 0.05))
         self.enviar("e o tamanho?")
@@ -234,7 +235,7 @@ class Teste:
         roteiro.append(("claude-ferramenta.ndjson", 0.2))
         self.enviar("pedido longo")
         yield 0.2
-        w.dropdown.set_selected(0)
+        w.dropdown.escolher(0)
         checar(w.agente_atual == "claude", "agente_atual continua sendo o que responde")
         yield from self.esperar_fim()
 
@@ -290,6 +291,181 @@ class Teste:
         checar(any(a.endswith("screenshot-teste.png") for a in w.anexos_pendentes), "print capturado virou anexo")
         checar(w.get_visible(), "janela voltou depois da captura")
         w._limpar_anexos()
+
+        print("15) subagente em segundo plano aparece na atividade (não parece travado)")
+        roteiro.append(("claude-subagente-fundo.ndjson", 0.01))
+        self.enviar("lance um subagente")
+        yield from self.esperar_fim()
+        ultima = [m for m in w.conversa_mensagens if m["tipo"] == "assistant"][-1]
+        checar(any(p.get("tipo") == "subagente" for p in ultima.get("passos", [])), "subagente na linha do tempo")
+        checar(any(p.get("pai") for p in ultima.get("passos", [])), "ações do subagente aninhadas nele")
+        checar(ultima["texto"].rstrip().endswith("terminou") and not ultima.get("interrompida"),
+               "as rodadas seguintes entram na mesma resposta")
+        checar(ultima.get("uso", {}).get("subagentes", 0) > 20000, "tokens do subagente contados")
+
+        print("16) vigia: respondeu mas o processo não sai → conclui sozinho, sem erro")
+        A.VIGIA_PASSO, A.VIGIA_SAIDA, A.VIGIA_AVISO, A.VIGIA_MINIMO = 1, 2, 1, 3
+        roteiro.append(("claude-ferramenta.ndjson", 0.01, 600))
+        self.enviar("responda e fique pendurado")
+        yield 1.0
+        pid = w.proc.pid if w.proc else None
+        checar(w._rodando(), "ainda rodando logo depois da resposta")
+        yield 4.5
+        ultima = [m for m in w.conversa_mensagens if m["tipo"] == "assistant"][-1]
+        checar(not w._rodando() and not ultima.get("interrompida"), "concluída normalmente pelo vigia")
+        checar(ultima["texto"] == "Há um único arquivo: `a.txt` (3 bytes).", "texto preservado")
+        yield 2.5
+        checar(pid is not None and not os.path.exists(f"/proc/{pid}"), "processo pendurado foi encerrado")
+
+        print("17) vigia: agente sem dar sinal → cancela sozinho e avisa o próximo pedido")
+        mudo = home / "mudo.ndjson"
+        mudo.write_text('{"type":"system","subtype":"init","model":"claude-haiku-5-5","session_id":"s-mudo"}\n')
+        A.M.montar_comando = lambda a, pedido, cfg, **k: (
+            chamadas.append({"agente": a, "pedido": pedido}) or [sys.executable, str(FALSO), str(mudo), "0", "600"])
+        cfg_arq = home / ".config/agentes/config.json"
+        cfg = json.loads(cfg_arq.read_text())
+        cfg["semSinalMin"] = 0.01
+        cfg_arq.write_text(json.dumps(cfg))
+        self.enviar("trave")
+        yield 2.2
+        checar(w._rodando(), "dentro do limite ainda roda")
+        checar("sem novidade" in (w.ativo_bloco.texto_cabecalho() or ""), "status conta o tempo sem novidade")
+        pid = w.proc.pid if w.proc else None
+        yield 3.0
+        ultima = [m for m in w.conversa_mensagens if m["tipo"] == "assistant"][-1]
+        checar(not w._rodando() and ultima.get("interrompida") and "Cancelado automaticamente" in ultima["texto"],
+               "cancelada automaticamente e marcada na conversa")
+        yield 2.5
+        checar(pid is not None and not os.path.exists(f"/proc/{pid}"), "processo travado foi encerrado")
+        A.M.montar_comando = montar_falso
+        roteiro.append(("claude-ferramenta.ndjson", 0.01))
+        self.enviar("continue")
+        checar("cancelada automaticamente pelo chat" in chamadas[-1]["pedido"], "próximo pedido avisa o agente")
+        yield from self.esperar_fim()
+
+        print("18) vigia: mesma ação repetida sem parar → cancela sozinho")
+        laco = home / "laco.ndjson"
+        laco.write_text('{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash",'
+                        '"input":{"command":"ls"}}]}}\n' * 400)
+        A.M.montar_comando = lambda a, pedido, cfg, **k: [sys.executable, str(FALSO), str(laco), "0.02"]
+        self.enviar("entre em laço")
+        yield 3.5
+        ultima = [m for m in w.conversa_mensagens if m["tipo"] == "assistant"][-1]
+        checar(not w._rodando() and "repetiu a mesma ação" in ultima["texto"], "laço cancelado")
+        A.M.montar_comando = montar_falso
+        w.interrompido = False
+
+        print("19) trocar o modelo não congela a janela (nem durante uma resposta)")
+        import time as tm
+        A.M.modelos = lambda a, atualizar=False: [{"valor": "claude-fable-5-2", "rotulo": "Fable 5.2"},
+                                                  {"valor": "claude-opus-5-5", "rotulo": "Opus 5.5"}]
+        w.dropdown.selecionar_id("claude")
+        w._carregar_agentes()
+        checar(w.modelo_dropdown.get_visible() and len(w.modelo_opcoes) == 3, "seletor de modelo com as opções")
+        pior = 0.0
+        for i in range(12):
+            t0 = tm.monotonic()
+            w.modelo_dropdown.escolher(1 + i % 2)
+            pior = max(pior, tm.monotonic() - t0)
+            yield 0.05
+        cfg = json.loads((home / ".config/agentes/config.json").read_text())
+        checar(cfg["modelos"].get("claude") == "claude-opus-5-5", "modelo gravado na configuração")
+        checar(pior < 0.5, f"cada troca leva pouco ({pior * 1000:.0f} ms no pior caso)")
+        checar(w.dropdown.atual().get("id") == "claude", "agente escolhido continua o mesmo")
+        checar(w.modelo_dropdown.rotulo.get_label() == "Opus 5.5", "botão mostra o modelo novo")
+        roteiro.append(("claude-ferramenta.ndjson", 0.2))
+        self.enviar("pedido durante a troca")
+        yield 0.3
+        w.modelo_dropdown.escolher(1)
+        w.modelo_dropdown.popup()
+        yield 0.2
+        w.modelo_dropdown.popdown()
+        yield 0.2
+        checar(w._rodando() and w.agente_atual == "claude", "trocar modelo no meio da resposta não a derruba")
+        yield from self.esperar_fim()
+        w.modelo_dropdown.escolher(0)
+        w.dropdown.escolher(0)
+
+        print("20) simba-chat: pergunta com botões, painel de código, notificar")
+        import json as js2
+        import socket as sk2
+
+        def pedir_chat(dados, espera_ms=6000, durante=None):
+            with sk2.socket(sk2.AF_UNIX, sk2.SOCK_STREAM) as s:
+                s.setblocking(False)
+                s.connect(w.integracoes.socket)
+                s.sendall((js2.dumps(dados) + "\n").encode())
+                buf, t0 = b"", tm.monotonic()
+                while tm.monotonic() - t0 < espera_ms / 1000:
+                    try:
+                        buf += s.recv(65536)
+                    except BlockingIOError:
+                        pass
+                    if buf.endswith(b"\n"):
+                        break
+                    ctx = A.GLib.MainContext.default()
+                    while ctx.pending():
+                        ctx.iteration(False)
+                    if durante:
+                        durante()
+                return js2.loads(buf or b"{}")
+
+        checar(bool(w.integracoes.socket) and os.path.exists(w.integracoes.socket), "socket do simba-chat aberto")
+        roteiro.append(("claude-ferramenta.ndjson", 0.3, 5))
+        self.enviar("faça e me pergunte")
+        yield 0.2
+
+        def clicar_opcao():
+            if w.perguntas:
+                card = w.perguntas[0]["card"]
+                fb = card.get_first_child().get_next_sibling().get_next_sibling()
+                fb.get_child_at_index(1).get_child().emit("clicked")
+        r = pedir_chat({"cmd": "perguntar", "pergunta": "Apagar os temporários?", "opcoes": ["Sim", "Não"]},
+                       durante=clicar_opcao)
+        checar(r.get("ok") and r.get("resposta") == "Não", f"resposta do botão volta ao agente ({r})")
+        checar(any("Apagar os temporários? → Não" in str(m.get("texto")) for m in w.conversa_mensagens),
+               "pergunta e resposta ficam na conversa")
+        # pergunta sem resposta é cancelada quando a resposta do agente termina
+        w._interromper()
+        yield 0.3
+        roteiro.append(("claude-ferramenta.ndjson", 0.1))
+        self.enviar("outra")
+        yield 0.2
+        r = pedir_chat({"cmd": "perguntar", "pergunta": "Continuar?", "opcoes": ["Sim"]}, espera_ms=8000)
+        checar(not r.get("ok") and "terminou" in r.get("erro", ""), f"pergunta pendente cancelada no fim da resposta ({r}, rodando={w._rodando()}, fila={len(w.fila)})")
+        yield from self.esperar_fim()
+
+        arq = home / "Work" / "exemplo.py"
+        arq.write_text("print('oi')\n")
+        r = pedir_chat({"cmd": "mostrar", "arquivo": str(arq), "linha": 1})
+        yield 0.2
+        checar(r.get("ok") and w.painel_codigo.get_visible() and w.lateral.get_visible(), "arquivo aberto no painel")
+        checar(w.painel_codigo.texto() == "print('oi')\n", "conteúdo do arquivo no painel")
+        arq.write_text("print('mudou')\n")
+        yield 1.5
+        checar(w.painel_codigo.texto() == "print('mudou')\n", "painel acompanha o arquivo alterado")
+        r = pedir_chat({"cmd": "mostrar", "arquivo": str(home / "nao-existe.py")})
+        checar(not r.get("ok") and r.get("erro"), "arquivo inexistente devolve erro")
+        r = pedir_chat({"cmd": "codigo", "lang": "python", "titulo": "Trecho", "texto": "x = 1"})
+        checar(r.get("ok") and w.painel_codigo.texto() == "x = 1", "texto mostrado no painel")
+        if w.navegador:
+            w.navegador.mostrar()
+            yield 0.2
+            checar(w.navegador.get_visible() and not w.painel_codigo.get_visible(), "navegador substitui o painel")
+            w.navegador.esconder()
+            yield 0.2
+            checar(not w.lateral.get_visible(), "lado direito some quando os dois fecham")
+            w._mostrar_codigo_lateral("python", "y = 2")
+        r = pedir_chat({"cmd": "fechar"})
+        yield 0.2
+        checar(r.get("ok") and not w.painel_codigo.get_visible() and not w.lateral.get_visible(), "painel fechado")
+        r = pedir_chat({"cmd": "notificar", "texto": "Compilação terminou"})
+        checar(r.get("ok"), "notificar respondeu ok")
+        r = pedir_chat({"cmd": "xyz"})
+        checar(not r.get("ok") and "comandos" in r, "comando desconhecido lista os comandos")
+        import integracoes as I
+        checar("simba-chat perguntar" in I.INSTRUCAO_AGENTE and "sudo -A" in I.INSTRUCAO_LIVRE,
+               "instruções explicam as ferramentas e o modo livre")
 
         if w.navegador and w.navegador.socket:
             print("14) agente fecha o navegador e o chat volta ao foco")

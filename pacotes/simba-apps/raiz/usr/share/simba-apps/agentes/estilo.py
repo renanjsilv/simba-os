@@ -388,3 +388,333 @@ levelbar.uso-medidor > trough > block.uso-critico { background-color: @error_col
   border-radius: 999px; padding: 6px 14px; font-weight: 600; font-size: 0.9em;
 }
 """
+
+# ── Visual 2026-11: inspirado no Claude/ChatGPT (sem cartão nas respostas, bloco
+# "Pensando" com linha do tempo, código separado da conversa, animações leves).
+CSS += """
+/* ---------- animações ---------- */
+@keyframes surgir { from { opacity: 0; margin-top: 8px; } to { opacity: 1; margin-top: 0; } }
+@keyframes surgir-suave { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pulsar { 0% { opacity: .25; } 50% { opacity: 1; } 100% { opacity: .25; } }
+@keyframes respirar { 0% { opacity: .55; } 50% { opacity: 1; } 100% { opacity: .55; } }
+@keyframes girar-brilho { from { -gtk-icon-transform: rotate(0deg); } to { -gtk-icon-transform: rotate(360deg); } }
+.msg-entrada { animation: surgir 320ms cubic-bezier(.2,.8,.2,1); }
+.surgir { animation: surgir-suave 220ms ease-out; }
+
+/* ---------- coluna de leitura ---------- */
+.coluna-chat { margin: 0; }
+
+/* Resposta da IA: sem cartão, texto direto na página (como Claude/ChatGPT) */
+.assistant-card {
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 2px 2px 0 2px;
+  margin: 6px 0 10px 0;
+}
+.assistant-avatar {
+  min-width: 26px; min-height: 26px;
+  background-color: alpha(@window_fg_color, 0.06);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+}
+.assistant-card.ativo .assistant-avatar { animation: respirar 1.6s ease-in-out infinite; }
+.assistant-name { font-weight: 650; font-size: 13.5px; }
+.model-badge {
+  background-color: alpha(@window_fg_color, 0.06);
+  color: alpha(@window_fg_color, 0.70);
+  font-weight: 500;
+}
+.msg-time { opacity: 0.45; }
+.msg-body { font-size: 15px; }
+.msg-actions {
+  border-top: none;
+  margin-top: 2px;
+  padding-top: 0;
+  opacity: 0.55;
+  transition: opacity 180ms ease;
+}
+.assistant-card:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
+.action-button {
+  min-height: 28px; min-width: 28px;
+  padding: 0 7px;
+  border-radius: 8px;
+  color: alpha(@window_fg_color, 0.75);
+}
+.action-button:hover { background-color: alpha(@window_fg_color, 0.08); color: @window_fg_color; }
+.action-button.copiado { color: @success_color; }
+.duration-badge {
+  background: none;
+  color: alpha(@window_fg_color, 0.50);
+  font-weight: 500;
+  font-size: 11.5px;
+  padding: 0 4px;
+}
+
+/* Mensagem do usuário: bolha suave à direita, ações aparecem ao passar o mouse */
+.user-bubble {
+  background-color: alpha(@window_fg_color, 0.065);
+  border: none;
+  border-radius: 20px 20px 6px 20px;
+  padding: 11px 17px;
+  box-shadow: none;
+}
+.msg-user-acoes { opacity: 0; transition: opacity 180ms ease; }
+.msg-user-row:hover .msg-user-acoes, .msg-user-acoes:focus-within { opacity: 1; }
+
+/* ---------- bloco "Pensando" ---------- */
+.pensando { margin: 2px 0 6px 0; }
+.pensando-cabecalho {
+  background: none;
+  padding: 4px 10px 4px 4px;
+  border-radius: 10px;
+  min-height: 28px;
+  color: alpha(@window_fg_color, 0.62);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.pensando-cabecalho:hover { background-color: alpha(@window_fg_color, 0.055); color: @window_fg_color; }
+.pensando-cabecalho:checked { background: none; color: @window_fg_color; }
+.pensando-atual { font-size: 14px; font-weight: 500; }
+.pensando-tempo { font-size: 12.5px; color: alpha(@window_fg_color, 0.48); margin-left: 2px; }
+.pensando-tempo.aviso { color: @warning_color; }
+.pensando-icone { color: alpha(@window_fg_color, 0.55); }
+.pensando-seta { opacity: 0.6; transition: opacity 150ms ease; }
+.pensando-corpo {
+  margin: 4px 0 6px 11px;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid alpha(@window_fg_color, 0.10);
+}
+.pensando-raciocinio-caixa { background: none; }
+.pensando-raciocinio, .pensando-raciocinio text {
+  background: none;
+  color: alpha(@window_fg_color, 0.66);
+  font-size: 14px;
+}
+
+/* passos da linha do tempo */
+.passo-linha, .passo-cartao { animation: surgir-suave 220ms ease-out; }
+.passo-linha { padding: 3px 0; }
+.passo-cab { min-height: 26px; }
+.passo-icone {
+  min-width: 24px; min-height: 24px;
+  border-radius: 999px;
+  background-color: alpha(@window_fg_color, 0.06);
+  color: alpha(@window_fg_color, 0.65);
+}
+.passo-titulo { font-size: 13.5px; color: alpha(@window_fg_color, 0.85); }
+.passo-info { font-size: 12.5px; color: alpha(@window_fg_color, 0.50); }
+.passo-dur { font-size: 11.5px; color: alpha(@window_fg_color, 0.42); font-feature-settings: "tnum"; }
+.passo-linha.erro .passo-icone { background-color: alpha(@error_color, 0.14); color: @error_color; }
+.passo-linha.negado .passo-titulo { text-decoration-line: line-through; opacity: .6; }
+.passo-filhos { margin: 2px 0 2px 11px; padding-left: 14px; border-left: 1px dashed alpha(@window_fg_color, 0.14); }
+.passo-mais {
+  font-size: 12px; padding: 1px 8px; min-height: 22px;
+  border-radius: 7px;
+  color: alpha(@window_fg_color, 0.60);
+}
+.passo-mais:hover { color: @accent_color; background-color: alpha(@accent_bg_color, 0.08); }
+
+/* cartão de ação no computador (comando / edição): parece um terminal */
+.passo-cartao {
+  margin: 4px 0;
+  border-radius: 12px;
+  border: 1px solid alpha(@window_fg_color, 0.10);
+  background-color: alpha(@window_fg_color, 0.025);
+  padding: 6px 8px 6px 6px;
+}
+.passo-cartao .passo-icone { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
+.passo-cartao.erro { border-color: alpha(@error_color, 0.35); }
+.passo-cartao.erro .passo-icone { background-color: alpha(@error_color, 0.14); color: @error_color; }
+.passo-codigo {
+  font-family: monospace;
+  font-size: 12.5px;
+  margin: 6px 0 2px 0;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background-color: alpha(@window_fg_color, 0.055);
+}
+.passo-estado {
+  font-size: 11px; font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.passo-estado.rodando { color: @accent_color; background-color: alpha(@accent_bg_color, 0.12); }
+.passo-estado.auto { color: alpha(@window_fg_color, 0.62); background-color: alpha(@window_fg_color, 0.06); }
+.passo-estado.ok { color: @success_color; background-color: alpha(@success_color, 0.12); }
+.passo-estado.erro { color: @error_color; background-color: alpha(@error_color, 0.12); }
+.passo-estado.negado, .passo-estado.parado { color: @warning_color; background-color: alpha(@warning_color, 0.12); }
+.passo-botao { min-width: 26px; min-height: 26px; padding: 0; border-radius: 8px; }
+.passo-botao.copiado { color: @success_color; }
+.passo-saida-btn { font-size: 12px; padding: 1px 6px; min-height: 22px; border-radius: 7px; color: alpha(@window_fg_color, 0.60); }
+.passo-saida {
+  margin-top: 4px;
+  border-radius: 9px;
+  background-color: alpha(#000, 0.80);
+  padding: 8px 12px;
+}
+.passo-saida-texto { font-family: monospace; font-size: 12px; color: #e6e6e6; }
+
+/* trecho do raciocínio entre os passos */
+.passo-pensamento { padding: 2px 0 6px 0; animation: surgir-suave 260ms ease-out; }
+.pensamento-texto { font-size: 14px; color: alpha(@window_fg_color, 0.66); }
+.pensamento-texto:selected { color: @window_fg_color; }
+
+/* revisão de UI/UX: hierarquia, contraste e um só estilo de terminal */
+.pensando-cabecalho label, .suggestion label, .pergunta-opcao label, .code-copy-btn label { font-weight: 500; }
+.pensando-tempo { font-weight: 400; }
+.pensando-cabecalho { padding-left: 6px; }
+.msg-actions { opacity: 1; }
+.msg-actions .action-button { opacity: .55; transition: opacity 180ms ease; }
+.assistant-card:hover .action-button, .msg-actions .action-button:focus { opacity: 1; }
+.duration-badge { color: alpha(@window_fg_color, 0.60); }
+.passo-codigo { background-color: #1f2229; color: #e6e6e6; border-radius: 9px; }
+.passo-saida { background-color: #1a1d23; border: 1px solid alpha(#fff, .06); }
+.code-block-box { border: 1px solid alpha(@window_fg_color, 0.10); box-shadow: none; }
+.code-copy-btn.icone { min-width: 28px; padding: 0 6px; }
+.code-copy-btn.perigo:hover { color: #ffbe6f; }
+.painel-codigo-view, .painel-codigo-view text { background-color: #1f2229; color: #e6e6e6; }
+.pergunta-opcao { background: @view_bg_color; border: 1px solid alpha(@accent_bg_color, .35); padding: 6px 16px; }
+.pergunta-opcao:hover { background-color: alpha(@accent_bg_color, .10); }
+.pergunta-card entry { background: @view_bg_color; border: 1px solid alpha(@window_fg_color, .12); border-radius: 12px; }
+.pergunta-card { margin-left: 2px; margin-right: 2px; }
+.composer-hint { color: alpha(@window_fg_color, .55); }
+.uso-pop-link { color: @accent_color; font-size: 13px; font-weight: 600; margin-top: 4px; }
+levelbar.uso-medidor > trough { background-color: alpha(@window_fg_color, .08); }
+levelbar.uso-medidor > trough > block.empty { background-color: transparent; }
+.pensamento-texto { animation: surgir-suave 260ms ease-out; }
+
+/* indicador de digitação, no fim da resposta */
+.digitando { margin: 4px 0 2px 2px; min-height: 22px; }
+.digitando-ponto {
+  min-width: 6px; min-height: 6px;
+  border-radius: 999px;
+  background-color: @accent_bg_color;
+  animation: pulsar 1.2s ease-in-out infinite;
+}
+.digitando-ponto.p2 { animation-delay: 160ms; }
+.digitando-ponto.p3 { animation-delay: 320ms; }
+.digitando-texto { font-size: 13px; color: alpha(@window_fg_color, 0.55); }
+
+/* ---------- código: separado da conversa ---------- */
+.code-block-box {
+  background-color: #1f2229;
+  border: 1px solid alpha(#000, 0.25);
+  border-radius: 12px;
+  margin: 6px 0;
+  box-shadow: 0 1px 3px alpha(#000, 0.10);
+}
+.code-block-header {
+  background-color: #2a2e37;
+  border-bottom: 1px solid alpha(#fff, 0.06);
+  border-radius: 11px 11px 0 0;
+  padding: 2px 6px 2px 14px;
+  min-height: 32px;
+}
+.code-block-lang { color: alpha(#fff, 0.62); font-size: 11.5px; font-weight: 600; }
+.code-copy-btn { color: alpha(#fff, 0.70); font-size: 11.5px; min-height: 26px; }
+.code-copy-btn:hover { background-color: alpha(#fff, 0.10); color: #fff; }
+.code-copy-btn.copiado { color: #8ff0a4; }
+.code-block-view, .code-block-view text { background-color: transparent; color: #e6e6e6; font-size: 13px; }
+.code-block-mais {
+  color: alpha(#fff, 0.70);
+  border-top: 1px solid alpha(#fff, 0.06);
+  border-radius: 0 0 11px 11px;
+  font-size: 12px;
+  min-height: 30px;
+}
+.code-block-mais:hover { background-color: alpha(#fff, 0.06); color: #fff; }
+
+/* ---------- composer ---------- */
+.composer-shell {
+  background-color: @view_bg_color;
+  border: 1px solid alpha(@window_fg_color, 0.12);
+  border-radius: 24px;
+  padding: 10px 12px 8px 12px;
+  box-shadow: 0 4px 18px alpha(#000, 0.07), 0 1px 3px alpha(#000, 0.05);
+  transition: border-color 160ms ease, box-shadow 200ms ease;
+}
+.composer-shell.focado {
+  border-color: alpha(@accent_bg_color, 0.55);
+  box-shadow: 0 0 0 3px alpha(@accent_bg_color, 0.14), 0 6px 22px alpha(#000, 0.08);
+}
+.send-button { transition: background-color 150ms ease, opacity 150ms ease; }
+.send-button:not(:disabled):hover { background-color: shade(@accent_bg_color, 1.08); }
+
+/* ---------- seletores (agente/modelo) ---------- */
+menubutton.agent-pill > button, menubutton.model-chip > button {
+  background: none; border: none; box-shadow: none;
+  min-height: 30px; padding: 2px 10px; border-radius: 10px;
+  font-weight: 600;
+}
+menubutton.agent-pill > button { font-size: 14px; }
+menubutton.model-chip > button { font-size: 12.5px; color: alpha(@window_fg_color, 0.80); padding: 1px 8px; min-height: 28px; }
+menubutton.agent-pill > button:hover, menubutton.model-chip > button:hover,
+menubutton.agent-pill > button:checked, menubutton.model-chip > button:checked { background-color: alpha(@window_fg_color, 0.07); }
+.agent-pill { background: none; border: none; padding: 0; margin: 0; }
+.seletor-seta { opacity: 0.55; }
+popover.seletor-pop > contents { padding: 6px; border-radius: 14px; }
+.seletor-titulo { font-size: 11.5px; font-weight: 700; color: alpha(@window_fg_color, 0.50); margin: 4px 8px 2px 8px; }
+.seletor-busca { margin: 2px 2px 4px 2px; }
+.seletor-lista { background: none; }
+.seletor-linha { border-radius: 10px; padding: 7px 10px; transition: background-color 120ms ease; }
+.seletor-linha:hover { background-color: alpha(@window_fg_color, 0.06); }
+.seletor-linha.atual { background-color: alpha(@accent_bg_color, 0.10); }
+.seletor-linha.separar { margin-top: 2px; }
+.seletor-nome { font-weight: 600; font-size: 13.5px; }
+.seletor-sub { font-size: 12px; color: alpha(@window_fg_color, 0.55); }
+.seletor-marca { color: @accent_color; }
+.seletor-aviso {
+  font-size: 11px; font-weight: 600; color: @warning_color;
+  background-color: alpha(@warning_color, 0.12);
+  border-radius: 999px; padding: 1px 8px;
+}
+
+/* ---------- uso do limite (estilo Claude: anel + barras com contagem) ---------- */
+.uso-chip { border-radius: 10px; padding: 1px 8px; min-height: 28px; font-size: 12px; font-weight: 600; color: alpha(@window_fg_color, 0.70); }
+.uso-chip:hover { background-color: alpha(@window_fg_color, 0.07); }
+.uso-chip.uso-alto { color: @warning_color; }
+.uso-chip.uso-critico { color: @error_color; }
+popover.uso-pop > contents { padding: 14px 16px; border-radius: 16px; }
+.uso-pop-titulo { font-weight: 700; font-size: 14px; }
+.uso-pop-linha-titulo { font-weight: 600; font-size: 13px; }
+.uso-pop-sub { font-size: 12px; color: alpha(@window_fg_color, 0.58); }
+.uso-pop-pct { font-size: 12.5px; font-weight: 700; font-feature-settings: "tnum"; }
+.uso-pop-nota { font-size: 11.5px; color: alpha(@window_fg_color, 0.50); }
+
+/* ---------- pergunta do agente (botões de resposta) ---------- */
+.pergunta-card {
+  border: 1px solid alpha(@accent_bg_color, 0.35);
+  background-color: alpha(@accent_bg_color, 0.06);
+  border-radius: 16px;
+  padding: 14px 16px;
+  margin: 4px 0 8px 0;
+  animation: surgir 320ms cubic-bezier(.2,.8,.2,1);
+}
+.pergunta-titulo { font-weight: 650; font-size: 14.5px; }
+.pergunta-rotulo { font-size: 11.5px; font-weight: 700; color: @accent_color; }
+.pergunta-opcao { border-radius: 999px; padding: 4px 14px; }
+.pergunta-card.respondida { border-color: alpha(@window_fg_color, 0.10); background-color: alpha(@window_fg_color, 0.03); }
+
+/* ---------- painel lateral de código (canvas) ---------- */
+.painel-codigo { border-left: 1px solid alpha(@window_fg_color, 0.10); background-color: @view_bg_color; }
+.painel-codigo-barra { padding: 6px 8px 6px 14px; border-bottom: 1px solid alpha(@window_fg_color, 0.08); }
+.painel-codigo-titulo { font-weight: 700; font-size: 13.5px; }
+.painel-codigo-sub { font-size: 11.5px; color: alpha(@window_fg_color, 0.55); }
+.painel-codigo-view, .painel-codigo-view text { font-family: monospace; font-size: 13px; }
+.painel-abas { padding: 4px 8px; border-bottom: 1px solid alpha(@window_fg_color, 0.06); }
+.painel-aba { font-size: 12px; border-radius: 8px; padding: 2px 10px; min-height: 26px; }
+.painel-aba:checked { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
+
+/* estado vazio com entrada suave */
+.empty-state { animation: surgir 420ms cubic-bezier(.2,.8,.2,1); }
+.empty-title { font-size: 28px; font-weight: 750; letter-spacing: -0.3px; }
+.suggestion { transition: background-color 150ms ease, border-color 150ms ease; border-radius: 14px; padding: 9px 16px; }
+
+/* modo livre: comandos rodaram no computador */
+.acoes-pc {
+  font-size: 11.5px; font-weight: 600;
+  color: alpha(@window_fg_color, 0.62);
+  background-color: alpha(@window_fg_color, 0.05);
+  border-radius: 999px; padding: 1px 9px;
+}
+.acoes-pc.root { color: @warning_color; background-color: alpha(@warning_color, 0.12); }
+"""

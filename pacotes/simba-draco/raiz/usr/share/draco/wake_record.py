@@ -77,7 +77,7 @@ def beep(freq=880, ms=140):
 
 
 def record(seconds):
-    proc = subprocess.Popen(["pw-record", "--rate", str(RATE), "--channels", "1", "--format", "s16", "-"],
+    proc = subprocess.Popen(["pw-record", "--raw", "--rate", str(RATE), "--channels", "1", "--format", "s16", "-"],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     raw, need = bytearray(), int(seconds * RATE) * 2
     t0 = time.monotonic()

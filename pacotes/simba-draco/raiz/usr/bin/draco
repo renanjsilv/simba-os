@@ -111,8 +111,15 @@ stop_speaking() { killpidfile speak; }
 # Opus per request). Helper commands (dr-*) live in $DATA/bin. Extra args go last.
 brain() {
   local cenv=()
-  eval "cenv=($DRACO_CLAUDE_ENV)"
   cd "$DATA/workdir" || return
+  # Free brain (config "gratis"): OpenCode's free models, no account; lib/opencode_brain.py
+  # speaks the same stream-json as Claude Code, so the rest of Draco doesn't change.
+  if [[ $DRACO_MOTOR == opencode ]]; then
+    sed "s/{USUARIO}/$(nome_usuario)/g" "$(prompt_file)" >"$RUN/prompt-opencode.md"
+    exec env DRACO_PROMPT_FILE="$RUN/prompt-opencode.md" DRACO_MODELO="$DRACO_MODELO" \
+      PATH="$CODIGO/bin:$PATH" python3 "$CODIGO/lib/opencode_brain.py" "$@"
+  fi
+  eval "cenv=($DRACO_CLAUDE_ENV)"
   exec env "${cenv[@]}" PATH="$CODIGO/bin:$PATH" "$CLAUDE" -p \
     --dangerously-skip-permissions \
     --effort low --strict-mcp-config --exclude-dynamic-system-prompt-sections \
@@ -133,6 +140,7 @@ continue_flag() { # --continue within the conversation memory window (always for
 # brain-hold keeps the FIFO open until process() writes the request (or 90 s pass).
 brain_warm() {
   brain_kill
+  [[ $DRACO_MOTOR == opencode ]] && return # OpenCode takes the request on the command line
   rm -f "$RUN/brain.in" "$RUN/brain.out"
   mkfifo "$RUN/brain.in" || return
   # shellcheck disable=SC2046

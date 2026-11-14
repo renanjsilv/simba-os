@@ -31,13 +31,25 @@ DATA = os.path.join(HOME, ".local", "share", "draco")
 CODIGO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # /usr/share/draco
 CLAUDE = os.path.join(HOME, ".local", "share", "mise", "installs", "claude", "latest", "claude")
 CACHE = os.path.join(HOME, ".cache", "draco", "modelos")
+OPENCODE = os.path.join(HOME, ".local", "share", "mise", "installs", "opencode", "latest",
+                        "node_modules", ".bin", "opencode")
+FREE_OUT = os.path.join(HOME, ".cache", "draco", "gratis-esgotados.json")  # model -> until (epoch)
+# Free models that handled Draco's tools best, in order; any other "-free" one comes after.
+FREE_PREFERRED = ["deepseek-v4.1-flash-free", "glm-5.3-flash-free", "minimax-m3.1-flash-free",
+                  "mimo-v2.6-flash-free", "nemotron-3.5-super-vl-free"]
 PROXY_PORT = 47821  # lib/anthropic_proxy.py: OpenAI-only services behind Claude Code
 
 # The brain is Claude Code; besides Anthropic itself it runs on any service with an
 # Anthropic-compatible endpoint (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN).
 BRAINS = [
+    # Free models through OpenCode (lib/opencode_brain.py runs it instead of Claude Code):
+    # no account and no key, so it is the one-click start on a new install.
+    {"id": "gratis", "nome": "Grátis", "desc": "Modelos abertos gratuitos via OpenCode, sem conta nem chave",
+     "gratis": True, "semConta": True, "recomendado": True, "motor": "opencode",
+     "aviso": "No modo grátis o provedor pode usar suas conversas para melhorar os modelos. "
+              "Para mais privacidade e respostas melhores, conecte sua conta."},
     {"id": "assinatura", "nome": "Assinatura Claude", "desc": "Pro ou Max: entra com a sua conta, sem chave",
-     "login": True, "recomendado": True},
+     "login": True},
     {"id": "anthropic", "nome": "API da Anthropic", "desc": "Claude pago por uso",
      "url_chave": "https://console.anthropic.com/settings/keys"},
     {"id": "openrouter", "nome": "OpenRouter", "desc": "Claude e outros modelos com uma chave só",
@@ -191,11 +203,86 @@ def claude_login():
     return False, "falta entrar na conta"
 
 
+def opencode_bin():
+    if os.path.exists(OPENCODE):
+        return OPENCODE
+    import shutil
+    return shutil.which("opencode") or ""
+
+
+def free_models(refresh=False):
+    """The free OpenCode models right now ("opencode/<id>-free"), best first; cached 6 h."""
+    path = os.path.join(CACHE, "gratis-lista.json")
+    if not refresh:
+        try:
+            if time.time() - os.path.getmtime(path) < 6 * 3600:
+                with open(path) as f:
+                    return json.load(f)
+        except (OSError, ValueError):
+            pass
+    oc = opencode_bin()
+    if not oc:
+        return []
+    try:
+        out = subprocess.run([oc, "models", "--standalone"], capture_output=True, text=True, timeout=60).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    ids = [l.strip() for l in out.splitlines() if l.strip().startswith("opencode/") and l.strip().endswith("-free")]
+    rank = lambda m: (FREE_PREFERRED.index(m.split("/", 1)[1]) if m.split("/", 1)[1] in FREE_PREFERRED
+                      else len(FREE_PREFERRED), m)
+    ids.sort(key=rank)
+    if ids:
+        os.makedirs(CACHE, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(ids, f)
+    return ids
+
+
+def _free_out():
+    try:
+        with open(FREE_OUT) as f:
+            return {m: t for m, t in json.load(f).items() if t > time.time()}
+    except (OSError, ValueError):
+        return {}
+
+
+def free_mark_out(model, seconds=3600):
+    """A free model hit its limit: skip it for a while (lib/opencode_brain.py)."""
+    out = _free_out()
+    out[model] = time.time() + seconds
+    os.makedirs(os.path.dirname(FREE_OUT), exist_ok=True)
+    with open(FREE_OUT, "w") as f:
+        json.dump(out, f)
+
+
+def free_model(skip=()):
+    """The best free model not out of quota (nor in skip); "" if none."""
+    out = _free_out()
+    lst = free_models()
+    for m in lst:
+        if m not in out and m not in skip:
+            return m
+    return next((m for m in lst if m not in skip), "")
+
+
+def install_opencode():
+    if opencode_bin():
+        return True
+    try:
+        subprocess.run(["agentes", "instalar", "opencode"], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=900)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return bool(opencode_bin())
+
+
 def brain_state(cfg, check_login=True):
     pid = cfg.get("CEREBRO", "")
     p = provider(pid)
     if not p or p not in BRAINS:
         return False, "nenhuma IA escolhida"
+    if p.get("motor") == "opencode":
+        return (True, "grátis, sem conta") if opencode_bin() else (False, "falta instalar o OpenCode")
     if p.get("login"):
         return claude_login() if check_login else (True, "")
     return (True, "chave salva") if get_key(pid) else (False, "falta a chave")
@@ -284,7 +371,7 @@ def status():
         c = {k: v for k, v in p.items()}
         c["tipo"] = kind
         c["tem_chave"] = bool(get_key(p["id"]))
-        c["precisa_chave"] = not p.get("login") and p["id"] != "local"
+        c["precisa_chave"] = not p.get("login") and not p.get("semConta") and p["id"] != "local"
         c["modelo"] = model_of(cfg, p["id"])
         c["tem_modelos"] = p["id"] != "local"
         return c
@@ -297,6 +384,7 @@ def status():
         "voz": cfg.get(VOZ_KEY) or DEFAULTS.get(VOZ_KEY, ""), "vozes": voices(), "lingua": LING,
         "escuta": not os.path.exists(os.path.join(DATA, "wake.disabled")),
         "espera": number(cfg, "ESPERA"), "silencio": number(cfg, "SILENCIO"), "memoria": number(cfg, "MEMORIA"),
+        "limiar": cfg.get("LIMIAR", ""),  # "" = o padrão do modelo da palavra de ativação
     }
 
 
@@ -309,6 +397,7 @@ def env():
         out.update(DRACO_STT_URL="", DRACO_STT_KEY="", DRACO_STT_MODELO="")
     out["DRACO_CLAUDE_ENV"] = " ".join(f"{k}={shlex.quote(v)}" for k, v in brain_env(cfg).items())
     out["DRACO_MODELO"] = model_of(cfg, cfg.get("CEREBRO", ""))
+    out["DRACO_MOTOR"] = (provider(cfg.get("CEREBRO", "")) or {}).get("motor", "claude")
     for k, v in out.items():
         print(f"{k}={shlex.quote(v)}")
 
@@ -375,6 +464,13 @@ def openrouter_all():
 def fetch_models(pid):
     """(models, source, error) for one provider, live from its API."""
     key = get_key(pid)
+    if pid == "gratis":
+        ids = free_models(refresh=True)
+        if not ids:
+            return [], "", "não consegui ver os modelos grátis (o OpenCode está instalado?)"
+        out = [{"id": "", "nome": "Automático (o melhor disponível)", "tags": ["recomendado"]}]
+        out += [{"id": m, "nome": m.split("/", 1)[1].removesuffix("-free"), "tags": ["grátis"]} for m in ids]
+        return out, "OpenCode (grátis)", None
     if pid == "assinatura":
         try:
             with open(os.path.join(HOME, ".claude", ".credentials.json")) as f:
@@ -473,6 +569,19 @@ def test(pid):
     if p.get("login"):
         ok, msg = claude_login()
         return {"ok": ok, "msg": f"conectado ({msg})" if ok else msg}
+    if p.get("motor") == "opencode":
+        if not install_opencode():
+            return {"ok": False, "msg": "não consegui instalar o OpenCode; verifique a internet"}
+        env = {**os.environ, "DRACO_MODELO": model_of(load(), pid)}
+        try:
+            r = subprocess.run([sys.executable, os.path.join(CODIGO, "lib", "opencode_brain.py"), "Responda apenas: ok"],
+                               capture_output=True, text=True, timeout=120, env=env, cwd=DATA if os.path.isdir(DATA) else HOME)
+            res = json.loads(r.stdout.strip().splitlines()[-1])
+        except (subprocess.SubprocessError, ValueError, IndexError, OSError):
+            return {"ok": False, "msg": "o modelo grátis não respondeu"}
+        if res.get("is_error"):
+            return {"ok": False, "msg": (res.get("result") or "falhou")[:160]}
+        return {"ok": True, "msg": "funcionando, grátis"}
     key = get_key(pid)
     if not key:
         return {"ok": False, "msg": "falta a chave"}
@@ -612,6 +721,8 @@ def main():
         save({k: v, **({VOZ_LOCAL_KEY: v} if k == VOZ_KEY and not v.startswith("edge:") else {})})
         if k == VOZ_KEY:
             restart_voice()
+        if k == "LIMIAR":  # wake.py só lê o limiar ao iniciar
+            subprocess.run(["systemctl", "--user", "try-restart", "draco-wake.service"], capture_output=True)
     elif cmd == "chave":
         if not provider(args[1]):
             sys.exit("provedor desconhecido")

@@ -75,6 +75,48 @@ class Claude(unittest.TestCase):
         self.assertEqual(p.texto, "Vou ler o arquivo.\n\nPronto.")
 
 
+class ClaudeSegundoPlano(unittest.TestCase):
+    """Subagente em segundo plano: o processo segue vivo depois da resposta e emite
+    várias rodadas (um "result" cada). Saída real gravada do Claude Code."""
+
+    def test_atividade_do_subagente_aparece(self):
+        p, ev = rodar("claude-subagente-fundo.ndjson", "claude")
+        self.assertTrue(any(a.startswith("Subagente:") for a in p.actions), p.actions)
+        self.assertTrue(any(a.startswith("↳ Executando:") for a in p.actions), p.actions)
+        self.assertTrue(any("tokens" in s and "Subagente" in s for s in ev["status"]), "progresso com tokens")
+
+    def test_texto_do_subagente_fica_fora_da_resposta(self):
+        p, _ = rodar("claude-subagente-fundo.ndjson", "claude")
+        self.assertNotIn("O comando de espera", p.texto)
+        self.assertTrue(p.texto.startswith("lancado"), p.texto)
+        self.assertTrue(p.texto.rstrip().endswith("terminou"), p.texto)
+
+    def test_espera_em_segundo_plano_e_fim(self):
+        """Depois do 1º "result" ainda há tarefa pendente (não é travamento); no fim, nenhuma."""
+        pendencias = []
+        p = AgentStreamParser(lambda s: None, lambda t: None,
+                              lambda d: pendencias.append(len(p.tarefas_pendentes())), agente="claude")
+        p.feed((AQUI / "fixtures" / "claude-subagente-fundo.ndjson").read_text())
+        self.assertGreater(pendencias[0], 0)
+        self.assertEqual(p.tarefas_pendentes(), [])
+        self.assertTrue(p.fim_rodada)
+        self.assertGreaterEqual(p.resultados, 3)
+
+    def test_uso_soma_as_rodadas(self):
+        p, _ = rodar("claude-subagente-fundo.ndjson", "claude")
+        self.assertGreater(p.uso["saida"], 500, "a última rodada (vazia) não pode zerar o uso")
+        self.assertAlmostEqual(p.uso["custo"], 0.008804065, places=6)
+        self.assertGreater(sum(p.uso_tarefas.values()), 20000)
+
+    def test_repeticao_da_mesma_acao(self):
+        p = AgentStreamParser(lambda s: None, lambda t: None, lambda d: None, agente="claude")
+        linha = '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}\n'
+        p.feed(linha * 12)
+        self.assertEqual(p.repeticoes, 12)
+        p.feed(linha.replace('"ls"', '"pwd"'))
+        self.assertEqual(p.repeticoes, 1)
+
+
 class Codex(unittest.TestCase):
     def test_resposta_e_comando(self):
         p, ev = rodar("codex-ferramenta.sintetico.ndjson", "codex")

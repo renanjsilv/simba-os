@@ -60,7 +60,7 @@ FOLLOWUP = os.path.join(RUN, "wake.followup" + (".teste" if "--teste" in sys.arg
 MODEL = os.path.join(DATA, "models", "draco_wake.npz")
 if not os.path.exists(MODEL):
     MODEL = os.path.join(CODIGO, "models", "draco_wake.npz")
-TRANSCRIPT = os.path.join(DATA, "lib", "transcript.py")
+TRANSCRIPT = os.path.join(CODIGO, "lib", "transcript.py")
 sys.path.insert(0, os.path.join(CODIGO, "lib"))
 import config as settings  # noqa: E402  (~/.config/draco: transcription service, timings)
 
@@ -240,8 +240,11 @@ class Mic:
     HIGHPASS = butter(4, 80, "highpass", fs=RATE, output="sos")
 
     def __init__(self):
+        # --raw: sem ele o pw-record (PipeWire >= 1.6.10) escreve na saída padrão um arquivo
+        # AU (cabeçalho ".snd" + amostras big-endian), que lido como s16 little-endian é só
+        # chiado: o detector ficava surdo sem dar erro nenhum.
         self.proc = subprocess.Popen(
-            ["pw-record", "--rate", str(RATE), "--channels", "1", "--format", "s16", "-"],
+            ["pw-record", "--raw", "--rate", str(RATE), "--channels", "1", "--format", "s16", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.zi = np.zeros((len(self.HIGHPASS), 2))
 
@@ -479,7 +482,7 @@ def listen(clf, verifier, feats, vad, mic):
 
 def record_samples():
     """Moved: the guided session (wake_record.py, `draco treinar`) records and retrains."""
-    os.execv(sys.executable, [sys.executable, "-I", os.path.join(DATA, "wake_record.py")])
+    os.execv(sys.executable, [sys.executable, "-I", os.path.join(CODIGO, "wake_record.py")])
 
 
 def main():

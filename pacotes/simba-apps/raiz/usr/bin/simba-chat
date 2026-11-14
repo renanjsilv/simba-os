@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""simba-chat — ferramentas do chat dos Agentes de IA para os próprios agentes.
+
+Usado pelos agentes (o chat passa SIMBA_CHAT com o socket). Sem a variável, usa o
+chat aberto mais recente deste usuário.
+
+  simba-chat perguntar "Pergunta?" "Opção 1" "Opção 2" ...   (espera a resposta; imprime a escolha)
+  simba-chat mostrar <arquivo> [--linha N]                   (painel de código ao lado da conversa)
+  simba-chat codigo <linguagem> [título] < arquivo           (mostra um texto no painel)
+  simba-chat notificar "texto"
+  simba-chat fechar                                           (fecha o painel de código)
+  --json   resposta crua em JSON
+"""
+import json
+import os
+import signal
+import socket
+import sys
+from pathlib import Path
+
+
+def achar_socket():
+    s = os.environ.get("SIMBA_CHAT")
+    if s and os.path.exists(s):
+        return s
+    base = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/simba-{os.getuid()}") / "simba-chat"
+    vivos = []
+    for p in base.glob("*.sock"):
+        try:
+            os.kill(int(p.stem.rsplit("-", 1)[1]), 0)
+            vivos.append(p)
+        except (ValueError, IndexError, ProcessLookupError, PermissionError):
+            continue
+    return str(max(vivos, key=lambda p: p.stat().st_mtime)) if vivos else None
+
+
+def pedir(dados, espera=60):
+    caminho = achar_socket()
+    if not caminho:
+        sys.exit("simba-chat: o chat dos Agentes de IA não está aberto.")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(espera)
+        s.connect(caminho)
+        s.sendall((json.dumps(dados) + "\n").encode())
+        buf = b""
+        while not buf.endswith(b"\n"):
+            parte = s.recv(65536)
+            if not parte:
+                break
+            buf += parte
+    return json.loads(buf.decode() or "{}")
+
+
+def main(args):
+    crua = "--json" in args
+    args = [a for a in args if a != "--json"]
+    if not args or args[0] in ("-h", "--help", "ajuda"):
+        print(__doc__.strip())
+        return 0
+    cmd, resto = args[0], args[1:]
+    espera = 60
+    if cmd == "perguntar":
+        if not resto:
+            sys.exit('uso: simba-chat perguntar "Pergunta?" "Opção 1" "Opção 2" ...')
+        dados = {"cmd": "perguntar", "pergunta": resto[0], "opcoes": resto[1:]}
+        espera = 3600
+    elif cmd == "mostrar":
+        if not resto:
+            sys.exit("uso: simba-chat mostrar <arquivo> [--linha N]")
+        linha = None
+        if "--linha" in resto:
+            i = resto.index("--linha")
+            linha = int(resto[i + 1]) if i + 1 < len(resto) else None
+            resto = resto[:i] + resto[i + 2:]
+        dados = {"cmd": "mostrar", "arquivo": os.path.abspath(resto[0]), "linha": linha}
+    elif cmd == "codigo":
+        texto = sys.stdin.read() if not sys.stdin.isatty() else ""
+        dados = {"cmd": "codigo", "lang": resto[0] if resto else "", "titulo": resto[1] if len(resto) > 1 else "",
+                 "texto": texto}
+    elif cmd == "notificar":
+        dados = {"cmd": "notificar", "texto": " ".join(resto)}
+    elif cmd in ("fechar", "estado"):
+        dados = {"cmd": cmd}
+    else:
+        sys.exit(f"simba-chat: comando desconhecido: {cmd} (veja simba-chat --help)")
+    try:
+        r = pedir(dados, espera)
+    except (OSError, socket.timeout) as e:
+        sys.exit(f"simba-chat: sem resposta do chat ({e})")
+    if crua:
+        print(json.dumps(r, ensure_ascii=False))
+        return 0 if r.get("ok") else 1
+    if not r.get("ok"):
+        print(f"simba-chat: {r.get('erro', 'falhou')}", file=sys.stderr)
+        return 1
+    if cmd == "perguntar":
+        print(r.get("resposta", ""))
+    elif r.get("msg"):
+        print(r["msg"])
+    return 0
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    sys.exit(main(sys.argv[1:]))

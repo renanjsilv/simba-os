@@ -157,6 +157,10 @@ class BuscaMixin:
         if not termo:
             self.busca_contagem.set_label("")
             return
+        # blocos de código recolhidos: abre os que têm o termo na parte escondida
+        for caixa in list(getattr(self, "codigos_recolhidos", ())):
+            if caixa.get_root() is self and ocorrencias(caixa.codigo_oculto(), termo):
+                caixa.expandir()
         for alvo in self._alvos(self.box_mensagens):
             if not alvo.get_mapped() and not self._visivel_na_conversa(alvo):
                 continue

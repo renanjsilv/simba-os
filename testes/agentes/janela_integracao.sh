@@ -8,4 +8,4 @@ gtk4-broadwayd --port "$porta" "$tela" >/dev/null 2>&1 &
 broadway=$!
 trap 'kill $broadway 2>/dev/null' EXIT
 sleep 0.5
-GDK_BACKEND=broadway BROADWAY_DISPLAY="$tela" timeout 90 python3 "$aqui/janela_integracao.py"
+GDK_BACKEND=broadway BROADWAY_DISPLAY="$tela" timeout 180 python3 "$aqui/janela_integracao.py"

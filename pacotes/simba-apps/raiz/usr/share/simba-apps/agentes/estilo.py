@@ -1076,6 +1076,18 @@ levelbar.detalhes-ctx-barra.critico > trough > block.filled { background-color: 
 }
 .passo-estado.rodando .detalhes-ponto { animation: ponto-vivo 1.6s ease-out infinite; }
 .detalhes-sem-sub { margin: 2px 6px; }
+.detalhes-agente.clicavel { transition: border-color 300ms ease, background-color 150ms ease; }
+.detalhes-agente.clicavel:hover { background-color: alpha(@window_fg_color, 0.05); border-color: alpha(@window_fg_color, 0.14); }
+.detalhes-agente.clicavel:focus-visible { outline: 2px solid alpha(@accent_bg_color, 0.6); outline-offset: -2px; }
+.detalhes-agente-seta { opacity: 0.35; transition: opacity 150ms ease; }
+.detalhes-agente.clicavel:hover .detalhes-agente-seta { opacity: 0.8; }
+/* tela de um agente: pedido + execução + resultado */
+.detalhes-agente-cab { padding: 6px 12px 10px 8px; }
+.detalhes-voltar { min-width: 30px; min-height: 30px; border-radius: 999px; padding: 0; }
+.detalhes-tela-agente.rodando .detalhes-agente-avatar { background-color: alpha(@accent_bg_color, 0.14); }
+.detalhes-pedido { padding: 10px 12px 8px 12px; }
+.detalhes-pedido-texto { font-size: 12.5px; line-height: 1.35; }
+.detalhes-pedido .passo-mais { margin: 4px -6px -2px -6px; }
 .detalhes-vazio {
   padding: 12px 14px;
   border-radius: 14px;

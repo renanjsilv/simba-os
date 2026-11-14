@@ -401,7 +401,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.btn_detalhes = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic")
         self.btn_detalhes.add_css_class("flat")
         self.btn_detalhes.add_css_class("icon-button")
-        self.btn_detalhes.set_tooltip_text(f"{_t('Detalhes: ambiente, contexto, agentes e atividade')} (Ctrl+Shift+D)")
+        self.btn_detalhes.set_tooltip_text(f"{_t('Detalhes: ambiente, contexto e agentes')} (Ctrl+Shift+D)")
         acoes.append(self.btn_detalhes)
 
         header.pack_end(acoes)
@@ -1057,6 +1057,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.detalhes.mostrar_bloco(bloco, agente=nome, icone=icone)
         if abrir:
             self.split_detalhes.set_show_sidebar(True)
+            # "Ver todos os passos" abre direto a tela do agente principal
+            self.detalhes.abrir_agente("principal")
 
     def _tratar_integracao(self, pedido, responder):
         cmd = pedido.get("cmd")
@@ -2753,6 +2755,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         btn_copiar.connect("clicked", lambda b: self._copiar_icone(getattr(card, "texto_total", None) or mensagem.texto, b))
         act_row.append(btn_copiar)
         pedido_ant = next((m for m in reversed(self.conversa_mensagens) if m.get("tipo") == "user"), None)
+        bloco.pedido = str((pedido_ant or {}).get("texto") or "")   # Detalhes › agente principal
         if pedido_ant is not None:
             btn_repetir = Gtk.Button(icon_name="view-refresh-symbolic")
             btn_repetir.add_css_class("flat")

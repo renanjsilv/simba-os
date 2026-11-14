@@ -466,11 +466,12 @@ class Digitando(Gtk.Box):
 class ListaPassos(Gtk.Box):
     """Um nível da linha do tempo; mostra os últimos passos e guarda os anteriores sob demanda."""
 
-    def __init__(self, bloco, dados, aninhada=False):
+    def __init__(self, bloco, dados, aninhada=False, sem_filhos=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.bloco = bloco
         self.dados = dados          # a mesma lista do bloco (não é cópia)
         self.aninhada = aninhada
+        self.sem_filhos = sem_filhos  # subagente numa linha só (o que ele fez tem tela própria)
         self.limite = LIMITE_LINHAS
         self.linhas = {}
         self.primeiro = max(0, len(dados) - self.limite)
@@ -485,7 +486,7 @@ class ListaPassos(Gtk.Box):
         self._atualizar_botao()
 
     def _criar(self, passo, depois_de=None):
-        linha = LinhaPasso(self.bloco, passo)
+        linha = LinhaPasso(self.bloco, passo, sem_filhos=self.sem_filhos)
         self.linhas[passo["id"]] = linha
         if depois_de is None:
             self.append(linha)
@@ -978,6 +979,8 @@ class BlocoPensando(Gtk.Box):
         self._aviso = ""
         self._relogio = 0
         self.lista = None
+        self.listas_agente = {}     # id do subagente (ou "" = principal) → ListaPassos do painel
+        self.pedido = ""            # o que a pessoa pediu nesta resposta (painel Detalhes)
         self.racio_view = None
         if registro is not None:
             registro["passos"] = self.passos
@@ -1229,6 +1232,23 @@ class BlocoPensando(Gtk.Box):
         lista, self.lista = self.lista, None
         if lista is not None and lista.get_parent() is not None:
             lista.get_parent().remove(lista)
+        self.soltar_listas_agente()
+
+    def lista_agente(self, pid):
+        """Os passos de um agente só ("" = o principal, sem o que os subagentes fizeram),
+        atualizados ao vivo — a tela de um agente no painel Detalhes."""
+        lista = self.listas_agente.get(pid)
+        if lista is None:
+            dados = self.raiz if not pid else self.filhos.setdefault(pid, [])
+            lista = ListaPassos(self, dados, aninhada=bool(pid), sem_filhos=True)
+            self.listas_agente[pid] = lista
+        return lista
+
+    def soltar_listas_agente(self):
+        for lista in self.listas_agente.values():
+            if lista.get_parent() is not None:
+                lista.get_parent().remove(lista)
+        self.listas_agente = {}
 
     def raciocinio_sem_trechos(self):
         """Conversas antigas guardam o raciocínio num texto só (sem os trechos entre passos)."""
@@ -1261,7 +1281,7 @@ class BlocoPensando(Gtk.Box):
                 p["pai"] = pai
             self.por_id[pid] = p
             self.passos.append(p)
-        for k in ("tipo", "nome", "texto", "fundo", "acoes", "tokens", "detalhe", "nota", "linhas"):
+        for k in ("tipo", "nome", "texto", "fundo", "acoes", "tokens", "detalhe", "nota", "linhas", "resultado"):
             if ev.get(k) is not None:
                 p[k] = ev[k]
         if isinstance(ev.get("entrada"), dict):
@@ -1282,6 +1302,8 @@ class BlocoPensando(Gtk.Box):
             if p.get("pai"):
                 irmaos = self.filhos.setdefault(p["pai"], [])
                 irmaos.append(p)
+                if p["pai"] in self.listas_agente:
+                    self.listas_agente[p["pai"]].acrescentado(p)
                 dono = self._linha(p["pai"])
                 if dono is not None:
                     if dono.filhos is None:
@@ -1292,6 +1314,8 @@ class BlocoPensando(Gtk.Box):
                 self.raiz.append(p)
                 if self.lista is not None:
                     self.lista.acrescentado(p)
+                if "" in self.listas_agente:
+                    self.listas_agente[""].acrescentado(p)
             if len(self.passos) == 1:
                 self._atualizar_cabecalho()   # passa a ser clicável
                 if self.tem_conteudo() and not self.get_visible():
@@ -1300,6 +1324,9 @@ class BlocoPensando(Gtk.Box):
             linha = self._linha(pid)
             if linha is not None:
                 linha.atualizar()
+            lista = self.listas_agente.get(p.get("pai") or "")
+            if lista is not None:
+                lista.atualizar(p)
         self._ultimo_mudou(p)
         # O agente começou a ler uma imagem: abre o bloco uma vez para a prévia
         # aparecer (se o usuário já tiver aberto/fechado à mão, respeita a escolha).

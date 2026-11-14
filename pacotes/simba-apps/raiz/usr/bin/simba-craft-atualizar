@@ -14,16 +14,21 @@ mkdir -p "$CACHE" 2>/dev/null || true
 falhas=0
 for app in "${APPS[@]}"; do
   pkg="ai.storyteller.$app"
-  json=$(curl -fsSL --max-time 30 -H 'Accept: application/vnd.github+json' \
-    "https://api.github.com/repos/storytold/$app/releases/latest") || { log "$app: sem acesso ao GitHub"; falhas=1; continue; }
-  read -r url digest ver < <(python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-for a in d.get("assets", []):
-    if a["name"].endswith("-linux-x86_64.pkg.tar.zst"):
-        print(a["browser_download_url"], a.get("digest", "").removeprefix("sha256:"), d["tag_name"].lstrip("v"))
-        break' <<<"$json")
-  [ -n "${url:-}" ] && [ -n "${digest:-}" ] || { log "$app: release sem pacote/sha256"; falhas=1; continue; }
+  # Sem a API do GitHub (60 consultas/hora por IP sem login; esgota fácil e dá 403):
+  # o redirecionamento de releases/latest dá a versão e o SHA256SUMS.txt da release dá o hash.
+  base="https://github.com/storytold/$app/releases"
+  tag=$(curl -fsS --max-time 30 -o /dev/null -w '%{redirect_url}' "$base/latest" 2>/dev/null)
+  tag=${tag##*/tag/}
+  if [ -z "$tag" ] || [[ "$tag" == http* ]]; then
+    # sem rede / GitHub fora do ar: não é falha do sistema, tenta de novo na próxima rodada
+    log "$app: sem acesso ao GitHub, fica para a próxima"; continue
+  fi
+  ver=${tag#v}
+  nome="$app-$ver-linux-x86_64.pkg.tar.zst"
+  url="$base/download/$tag/$nome"
+  digest=$(curl -fsSL --max-time 30 "$base/download/$tag/SHA256SUMS.txt" 2>/dev/null \
+    | awk -v n="$nome" '$2 == n || $2 == "*" n {print $1; exit}')
+  [ -n "$digest" ] || { log "$app: release $ver sem pacote/sha256"; falhas=1; continue; }
   atual=$(pacman -Q "$pkg" 2>/dev/null | awk '{print $2}' | sed 's/-[0-9]*$//')
   if [ "$atual" = "$ver" ]; then log "$app $ver: em dia"; continue; fi
   log "$app: ${atual:-não instalado} → $ver"

@@ -1,17 +1,17 @@
 """Painel de detalhes à direita da conversa (como o "session rail" do Claude Code e o
 "Activity" do ChatGPT).
 
-Cartões, de cima para baixo:
+Página geral, de cima para baixo:
   Ambiente   pasta de trabalho, agente e modelo, modo (livre / somente leitura)
   Contexto   quanto da janela de contexto do modelo a conversa ocupa (barra + %)
   Agentes    o agente principal e cada subagente/tarefa em segundo plano, com o
              estado individual (trabalhando, concluído, falhou) e a última ação
-  Atividade  contagem do que foi executado e a linha do tempo inteira da resposta
-             (raciocínio, comandos, edições, leituras), atualizada ao vivo
 
-O bloco "Pensando" da conversa mostra só o último passo; o histórico completo é aqui.
-Leve: os cartões de agentes são remontados no máximo a cada 250 ms e a linha do
-tempo só é montada quando o painel está na tela.
+Clicar num agente abre a tela dele (padrão do Claude Code/Codex/Cursor): o pedido que
+ele recebeu e, embaixo, só os comandos/edições/leituras que ELE executou, ao vivo; no
+fim, o resultado que devolveu. Cada agente fica legível sozinho, sem misturar com os outros.
+Leve: os cartões são atualizados no lugar no máximo a cada 250 ms, e a lista de passos
+de um agente só existe enquanto a tela dele está aberta.
 """
 from pathlib import Path
 import sys
@@ -19,7 +19,7 @@ import sys
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk, Pango  # noqa: E402
 
 sys.path.insert(0, "/usr/share/simba-apps/idiomas")
 from simba_i18n import t as _t  # noqa: E402
@@ -106,7 +106,6 @@ class PainelDetalhes(Gtk.Box):
         self.pasta = None
         self._fonte = 0
         self._ctx = (None, None)
-        self.seguir = True
 
         cab = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         cab.add_css_class("detalhes-cab")
@@ -121,28 +120,23 @@ class PainelDetalhes(Gtk.Box):
         cab.append(fechar)
         self.append(cab)
 
-        # em cima (rola sozinho se crescer): ambiente, contexto e agentes
-        topo = Gtk.ScrolledWindow()
-        topo.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.AUTOMATIC)
-        topo.set_propagate_natural_height(True)
-        topo.set_max_content_height(460)
+        # duas telas: a geral (ambiente, contexto, agentes) e a de um agente
+        self.telas = Gtk.Stack()
+        self.telas.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.telas.set_transition_duration(220)
+        self.telas.set_vexpand(True)
+        self.append(self.telas)
+        geral = Gtk.ScrolledWindow()
+        geral.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        geral.set_vexpand(True)
         conteudo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         conteudo.add_css_class("detalhes-conteudo")
-        topo.set_child(conteudo)
-        topo.get_child().set_scroll_to_focus(False)  # clicar num texto não rola o painel
-        self.append(topo)
-        # embaixo, ocupando o resto: a linha do tempo, que acompanha o fim
-        self.rolagem = Gtk.ScrolledWindow()
-        self.rolagem.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.AUTOMATIC)
-        self.rolagem.set_vexpand(True)
-        baixo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        baixo.add_css_class("detalhes-conteudo")
-        self.rolagem.set_child(baixo)
-        self.rolagem.get_child().set_scroll_to_focus(False)  # clicar num texto não rola o painel
-        self.append(self.rolagem)
-        adj = self.rolagem.get_vadjustment()
-        adj.connect("value-changed", self._rolagem_mudou)
-        adj.connect("notify::upper", lambda *_: self.seguir and GLib.idle_add(self._rolar_fim))
+        geral.set_child(conteudo)
+        geral.get_child().set_scroll_to_focus(False)  # clicar num texto não rola o painel
+        self.telas.add_named(geral, "geral")
+        self.tela_agente = TelaAgente(self._voltar)
+        self.telas.add_named(self.tela_agente, "agente")
+        self.agente_aberto = None   # chave do cartão cuja tela está aberta
 
         # ── Ambiente ──
         conteudo.append(self._secao(_t("Ambiente")))
@@ -211,36 +205,10 @@ class PainelDetalhes(Gtk.Box):
         self.sem_sub = _rotulo(_t("Nenhum subagente nesta resposta."), ("detalhes-dica", "detalhes-sem-sub"))
         self.sem_sub.set_wrap(True)
         self.caixa_agentes.append(self.sem_sub)
-        sep = self._separador()
-        self.append(sep)
-
-        # ── Atividade ──
-        conteudo = baixo
-        linha_at = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        linha_at.add_css_class("detalhes-secao")
-        t_at = _rotulo(_t("Atividade"), ("detalhes-secao-titulo",))
-        t_at.set_hexpand(True)
-        linha_at.append(t_at)
-        conteudo.append(linha_at)
         self.lbl_resumo = _rotulo("", ("detalhes-resumo",))
         self.lbl_resumo.set_wrap(True)
         conteudo.append(self.lbl_resumo)
-        self.vazio_atividade = self._vazio("view-list-bullet-symbolic",
-                                           _t("Os comandos, edições e subagentes de cada resposta aparecem aqui."))
-        conteudo.append(self.vazio_atividade)
-        self.lbl_racio = Gtk.Label(xalign=0)
-        self.lbl_racio.set_wrap(True)
-        self.lbl_racio.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self.lbl_racio.set_selectable(True)
-        self.lbl_racio.add_css_class("pensamento-texto")
-        self.lbl_racio.add_css_class("detalhes-racio")
-        self.lbl_racio.set_visible(False)
-        conteudo.append(self.lbl_racio)
-        self.caixa_linha = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        self.caixa_linha.add_css_class("detalhes-linha-do-tempo")
-        conteudo.append(self.caixa_linha)
 
-        self.connect("map", lambda *_: self._montar_linha_do_tempo())
         self.contexto(None, None)
         self._remontar()
 
@@ -355,27 +323,51 @@ class PainelDetalhes(Gtk.Box):
         self.bloco = bloco
         if bloco is not None:
             bloco.observador = self._mudou
-        self.seguir = True
-        self._montar_linha_do_tempo()
+        self._voltar(animar=False)
         self._remontar()
 
     def limpar(self):
         self.mostrar_bloco(None)
         self.contexto(None, None)
 
-    def _montar_linha_do_tempo(self):
+    # ── tela de um agente ────────────────────────────────────────────────────
+    def abrir_agente(self, chave):
+        """Mostra o pedido e os passos de um agente ("principal" ou o id do subagente)."""
         b = self.bloco
-        racio = b.raciocinio_sem_trechos() if b is not None else ""
-        self.lbl_racio.set_visible(bool(racio))
-        if racio:
-            self.lbl_racio.set_markup(atividade.markup_pensamento(racio))
-        if b is None or not self.get_mapped():
+        if b is None or chave not in self._cartoes:
             return
-        lista = b.linha_do_tempo()
-        if lista.get_parent() is not self.caixa_linha:
-            if lista.get_parent() is not None:
-                lista.get_parent().remove(lista)
-            self.caixa_linha.append(lista)
+        self.agente_aberto = chave
+        pid = "" if chave == "principal" else chave
+        self.tela_agente.mostrar(b, pid, b.lista_agente(pid))
+        self._atualizar_tela_agente()
+        self.telas.set_visible_child_name("agente")
+
+    def _voltar(self, animar=True):
+        if not animar:
+            self.telas.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.telas.set_visible_child_name("geral")
+        self.telas.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self.agente_aberto = None
+        self.tela_agente.soltar()
+        if self.bloco is not None:
+            self.bloco.soltar_listas_agente()
+
+    def _atualizar_tela_agente(self):
+        c = self._cartoes.get(self.agente_aberto)
+        if c is None:
+            return
+        self.tela_agente.cabecalho(c.nome, c.papel, c.estado, c._classe, c.img.get_icon_name())
+        b = self.bloco
+        if self.agente_aberto == "principal":
+            pedido, resultado = b.pedido, ""
+            passos = [p for p in b.raiz if p.get("tipo") != "pensamento"]
+        else:
+            p = b.por_id.get(self.agente_aberto) or {}
+            e = p.get("entrada") or {}
+            pedido = e.get("pedido") or e.get("comando") or e.get("descricao") or p.get("detalhe") or ""
+            resultado = p.get("resultado") or ""
+            passos = [f for f in b.filhos.get(self.agente_aberto) or [] if f.get("tipo") != "pensamento"]
+        self.tela_agente.conteudo(pedido, resultado, contar_acoes(passos), len(passos), b.vivo)
 
     # ── atualização ──────────────────────────────────────────────────────────
     def _mudou(self, _bloco, _passo):
@@ -390,7 +382,6 @@ class PainelDetalhes(Gtk.Box):
         self._fonte = 0
         b = self.bloco
         self.vazio_agentes.set_visible(b is None)
-        self.vazio_atividade.set_visible(b is None)
         self.lbl_resumo.set_visible(b is not None)
         if b is None:
             for cartao in self._cartoes.values():
@@ -451,13 +442,18 @@ class PainelDetalhes(Gtk.Box):
             self.caixa_agentes.reorder_child_after(self.sem_sub, ant)
         resumo = contar_acoes(b.passos)
         self.lbl_resumo.set_label(resumo or (_t("Ainda nada executado.") if b.vivo else _t("Nenhuma ação executada.")))
+        if self.agente_aberto is not None:
+            if self.agente_aberto in self._cartoes:
+                self._atualizar_tela_agente()
+            else:
+                self._voltar()
         return False
 
     def _cartao(self, chave, vistos):
         vistos.append(chave)
         c = self._cartoes.get(chave)
         if c is None:
-            c = CartaoAgente()
+            c = CartaoAgente(lambda chave=chave: self.abrir_agente(chave))
             self._cartoes[chave] = c
             self.caixa_agentes.append(c)
         return c
@@ -472,25 +468,29 @@ class PainelDetalhes(Gtk.Box):
             f = f.get_next_sibling()
         return saida
 
-    # ── rolagem: acompanha o fim enquanto a pessoa não rola para cima ───────
-    def _rolagem_mudou(self, adj):
-        self.seguir = adj.get_value() + adj.get_page_size() >= adj.get_upper() - 40
-
-    def _rolar_fim(self):
-        adj = self.rolagem.get_vadjustment()
-        adj.set_value(adj.get_upper() - adj.get_page_size())
-        return False
-
 
 class CartaoAgente(Gtk.Box):
     """Cartão de um agente/subagente; atualizar() troca só o que mudou."""
 
     CLASSES = ("rodando", "ok", "erro", "parado")
 
-    def __init__(self):
+    def __init__(self, ao_clicar=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=3)
         self.add_css_class("detalhes-agente")
-        self.nome = self.estado = None
+        self.nome = self.estado = self.papel = None
+        self.ao_clicar = ao_clicar
+        if ao_clicar:
+            # o cartão inteiro abre a tela do agente (mouse, Enter ou espaço)
+            self.add_css_class("clicavel")
+            self.set_focusable(True)
+            self.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+            self.set_tooltip_text(_t("Ver o pedido e os comandos deste agente"))
+            clique = Gtk.GestureClick()
+            clique.connect("released", lambda g, *_: (g.set_state(Gtk.EventSequenceState.CLAIMED), self.ao_clicar()))
+            self.add_controller(clique)
+            teclas = Gtk.EventControllerKey()
+            teclas.connect("key-pressed", self._tecla)
+            self.add_controller(teclas)
         self._classe = None
         topo = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.avatar = Gtk.Box()
@@ -515,6 +515,12 @@ class CartaoAgente(Gtk.Box):
         linha2.append(self.lbl_papel)
         textos.append(linha2)
         topo.append(textos)
+        if ao_clicar:
+            seta = Gtk.Image.new_from_icon_name("go-next-symbolic")
+            seta.set_pixel_size(12)
+            seta.set_valign(Gtk.Align.CENTER)
+            seta.add_css_class("detalhes-agente-seta")
+            topo.append(seta)
         self.selo = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
         self.selo.add_css_class("passo-estado")
         self.selo.set_valign(Gtk.Align.CENTER)
@@ -538,7 +544,7 @@ class CartaoAgente(Gtk.Box):
         if nome != self.nome:
             self.lbl_nome.set_label(nome)
             self.lbl_nome.set_tooltip_text(nome)
-        self.nome, self.estado = nome, estado
+        self.nome, self.estado, self.papel = nome, estado, papel
         if self.lbl_papel.get_label() != papel:
             self.lbl_papel.set_label(papel)
         if self.lbl_estado.get_label() != estado:
@@ -556,3 +562,215 @@ class CartaoAgente(Gtk.Box):
             self.add_css_class(classe)
             self.selo.add_css_class(classe)
             self._classe = classe
+
+    def _tecla(self, _c, keyval, _codigo, _estado):
+        if keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space):
+            self.ao_clicar()
+            return True
+        return False
+
+
+class TelaAgente(Gtk.Box):
+    """A tela de um agente: cabeçalho com voltar, o pedido que ele recebeu, os passos
+    dele (ao vivo, acompanhando o fim) e o resultado que devolveu."""
+
+    LINHAS_PEDIDO = 8
+
+    def __init__(self, ao_voltar):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.add_css_class("detalhes-tela-agente")
+        self.lista = None
+        self.seguir = True
+        self._pedido = None
+        self._pedido_aberto = False
+
+        cab = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        cab.add_css_class("detalhes-agente-cab")
+        voltar = Gtk.Button(icon_name="go-previous-symbolic")
+        voltar.add_css_class("flat")
+        voltar.add_css_class("detalhes-voltar")
+        voltar.set_valign(Gtk.Align.CENTER)
+        voltar.set_tooltip_text(_t("Voltar para a lista de agentes"))
+        voltar.connect("clicked", lambda _b: ao_voltar())
+        cab.append(voltar)
+        self.avatar = Gtk.Box()
+        self.avatar.add_css_class("detalhes-agente-avatar")
+        self.avatar.set_valign(Gtk.Align.CENTER)
+        self.img = Gtk.Image.new_from_icon_name("simba-agente")
+        self.img.set_pixel_size(16)
+        self.avatar.append(self.img)
+        cab.append(self.avatar)
+        textos = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        textos.set_hexpand(True)
+        textos.set_valign(Gtk.Align.CENTER)
+        self.lbl_nome = _rotulo("", ("detalhes-agente-nome",))
+        self.lbl_nome.set_ellipsize(Pango.EllipsizeMode.END)
+        textos.append(self.lbl_nome)
+        linha2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.lbl_papel = _rotulo("", ("detalhes-agente-papel",))
+        linha2.append(self.lbl_papel)
+        self.selo = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        self.selo.add_css_class("passo-estado")
+        self.selo.set_valign(Gtk.Align.CENTER)
+        ponto = Gtk.Box()
+        ponto.add_css_class("detalhes-ponto")
+        ponto.set_valign(Gtk.Align.CENTER)
+        self.selo.append(ponto)
+        self.lbl_estado = Gtk.Label()
+        self.selo.append(self.lbl_estado)
+        linha2.append(self.selo)
+        textos.append(linha2)
+        cab.append(textos)
+        self.append(cab)
+        sep = Gtk.Separator()
+        sep.add_css_class("detalhes-sep")
+        self.append(sep)
+
+        self.rolagem = Gtk.ScrolledWindow()
+        self.rolagem.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.rolagem.set_vexpand(True)
+        corpo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        corpo.add_css_class("detalhes-conteudo")
+        self.rolagem.set_child(corpo)
+        self.rolagem.get_child().set_scroll_to_focus(False)
+        self.append(self.rolagem)
+        adj = self.rolagem.get_vadjustment()
+        adj.connect("value-changed", self._rolagem_mudou)
+        adj.connect("notify::upper", lambda *_: self.seguir and GLib.idle_add(self._rolar_fim))
+
+        # ── Pedido ──
+        corpo.append(_rotulo(_t("Pedido"), ("detalhes-secao", "detalhes-secao-titulo")))
+        cartao = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        cartao.add_css_class("detalhes-cartao")
+        cartao.add_css_class("detalhes-pedido")
+        self.lbl_pedido = Gtk.Label(xalign=0)
+        self.lbl_pedido.set_wrap(True)
+        self.lbl_pedido.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.lbl_pedido.set_selectable(True)
+        self.lbl_pedido.add_css_class("detalhes-pedido-texto")
+        cartao.append(self.lbl_pedido)
+        self.btn_pedido = Gtk.Button()
+        self.btn_pedido.add_css_class("flat")
+        self.btn_pedido.add_css_class("passo-mais")
+        self.btn_pedido.set_halign(Gtk.Align.START)
+        self.btn_pedido.connect("clicked", self._alternar_pedido)
+        cartao.append(self.btn_pedido)
+        corpo.append(cartao)
+
+        # ── Execução ──
+        linha = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        linha.add_css_class("detalhes-secao")
+        t = _rotulo(_t("Execução"), ("detalhes-secao-titulo",))
+        t.set_hexpand(True)
+        linha.append(t)
+        self.lbl_n = _rotulo("", ("detalhes-ctx-pct",))
+        linha.append(self.lbl_n)
+        corpo.append(linha)
+        self.lbl_resumo = _rotulo("", ("detalhes-resumo",))
+        self.lbl_resumo.set_wrap(True)
+        corpo.append(self.lbl_resumo)
+        self.caixa_passos = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.caixa_passos.add_css_class("detalhes-linha-do-tempo")
+        corpo.append(self.caixa_passos)
+        self.vazio = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        self.vazio.add_css_class("detalhes-vazio")
+        self.lbl_vazio = _rotulo("")
+        self.lbl_vazio.set_wrap(True)
+        self.vazio.append(self.lbl_vazio)
+        corpo.append(self.vazio)
+
+        # ── Resultado ──
+        self.tit_resultado = _rotulo(_t("Resultado"), ("detalhes-secao", "detalhes-secao-titulo"))
+        corpo.append(self.tit_resultado)
+        self.cartao_resultado = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.cartao_resultado.add_css_class("detalhes-cartao")
+        self.cartao_resultado.add_css_class("detalhes-pedido")
+        self.lbl_resultado = Gtk.Label(xalign=0)
+        self.lbl_resultado.set_wrap(True)
+        self.lbl_resultado.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.lbl_resultado.set_selectable(True)
+        self.lbl_resultado.add_css_class("detalhes-pedido-texto")
+        self.cartao_resultado.append(self.lbl_resultado)
+        corpo.append(self.cartao_resultado)
+
+    def mostrar(self, bloco, pid, lista):
+        """Troca para outro agente: a lista de passos é a do bloco (atualizada por ele)."""
+        self.soltar()
+        self.lista = lista
+        if lista.get_parent() is not None:
+            lista.get_parent().remove(lista)
+        self.caixa_passos.append(lista)
+        self._pedido = None
+        self._pedido_aberto = False
+        self.seguir = True
+        GLib.idle_add(self._rolar_inicio)
+
+    def soltar(self):
+        if self.lista is not None and self.lista.get_parent() is self.caixa_passos:
+            self.caixa_passos.remove(self.lista)
+        self.lista = None
+
+    def cabecalho(self, nome, papel, estado, classe, icone):
+        if self.lbl_nome.get_label() != (nome or ""):
+            self.lbl_nome.set_label(nome or "")
+            self.lbl_nome.set_tooltip_text(nome or "")
+        self.lbl_papel.set_label(papel or "")
+        self.lbl_estado.set_label(estado or "")
+        for c in CartaoAgente.CLASSES:
+            (self.selo.add_css_class if c == classe else self.selo.remove_css_class)(c)
+            (self.add_css_class if c == classe else self.remove_css_class)(c)
+        if icone and self.img.get_icon_name() != icone:
+            self.img.set_from_icon_name(icone)
+
+    def conteudo(self, pedido, resultado, resumo, n, vivo):
+        pedido = (pedido or "").strip()
+        if pedido != self._pedido:
+            self._pedido = pedido
+            self._mostrar_pedido()
+        self.lbl_n.set_label(str(n) if n else "")
+        self.lbl_resumo.set_label(resumo)
+        self.lbl_resumo.set_visible(bool(resumo))
+        self.vazio.set_visible(not n)
+        self.lbl_vazio.set_label(_t("Ainda nenhum comando — está pensando.") if vivo
+                                 else _t("Este agente não executou comandos."))
+        resultado = (resultado or "").strip()
+        self.tit_resultado.set_visible(bool(resultado))
+        self.cartao_resultado.set_visible(bool(resultado))
+        if resultado and self.lbl_resultado.get_label() != resultado:
+            self.lbl_resultado.set_label(resultado)
+
+    def _mostrar_pedido(self):
+        texto = self._pedido or _t("(o pedido não ficou registrado nesta resposta)")
+        linhas = texto.split("\n")
+        longo = len(linhas) > self.LINHAS_PEDIDO or len(texto) > 700
+        if longo and not self._pedido_aberto:
+            curto = "\n".join(linhas[:self.LINHAS_PEDIDO])[:700].rstrip() + " …"
+            self.lbl_pedido.set_label(curto)
+            self.btn_pedido.set_label(_t("Mostrar o pedido inteiro"))
+        else:
+            self.lbl_pedido.set_label(texto)
+            self.btn_pedido.set_label(_t("Mostrar menos"))
+        self.btn_pedido.set_visible(longo)
+        self.lbl_pedido.set_opacity(1.0 if self._pedido else 0.6)
+
+    def _alternar_pedido(self, _b):
+        self._pedido_aberto = not self._pedido_aberto
+        self._mostrar_pedido()
+
+    # ── rolagem: acompanha o fim enquanto a pessoa não rola para cima ───────
+    def _rolagem_mudou(self, adj):
+        self.seguir = adj.get_value() + adj.get_page_size() >= adj.get_upper() - 40
+
+    def _rolar_fim(self):
+        adj = self.rolagem.get_vadjustment()
+        adj.set_value(adj.get_upper() - adj.get_page_size())
+        return False
+
+    def _rolar_inicio(self):
+        # ao abrir: o pedido em cima, à vista. Se a lista já não cabe, só passa a acompanhar
+        # o fim quando a pessoa rolar até lá; se cabe, acompanha conforme for crescendo.
+        adj = self.rolagem.get_vadjustment()
+        adj.set_value(0)
+        self.seguir = adj.get_upper() <= adj.get_page_size() + 1
+        return False
+

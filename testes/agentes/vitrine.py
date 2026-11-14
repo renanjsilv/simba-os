@@ -95,6 +95,14 @@ class Vitrine(A.App):
                 w._buscar()
             elif acao == "painel":
                 w._abrir_painel_uso()
+            elif acao.startswith("agente"):  # "agente" = tela do principal; "agente:<id>" = de um subagente
+                w.split_detalhes.set_show_sidebar(True)
+                if w.ultimo_bloco is not None:
+                    w._detalhes_bloco(w.ultimo_bloco, abrir=False)
+                    alvo = acao.split(":", 1)[1] if ":" in acao else "principal"
+                    if alvo == "1":   # o primeiro subagente que aparecer
+                        alvo = next((c for c in w.detalhes._cartoes if c != "principal"), "principal")
+                    w.detalhes.abrir_agente(alvo)
             elif acao == "pergunta":
                 w._adicionar_pergunta("Posso apagar os 3 arquivos temporários em ~/Work/build?",
                                       ["Sim, pode apagar", "Não, mantenha", "Mostre a lista antes"], lambda r: None)

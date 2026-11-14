@@ -513,6 +513,47 @@ class Teste:
         checar(w.detalhes.lbl_modo.get_label() != "", "ambiente: modo livre/leitura exibido")
         agentes_lst = w.detalhes.agentes_listados()
         checar(len(agentes_lst) >= 1, "painel de detalhes lista o agente principal")
+        # clicar num agente: tela com o pedido dele e só os comandos dele, ao vivo
+        import atividade as _at
+        bl = _at.BlocoPensando(vivo=True, base=str(home))
+        bl.pedido = "Arrume o build"
+        w.detalhes.mostrar_bloco(bl, agente="Claude")
+        bl.passo({"id": "c0", "tipo": "comando", "nome": "Bash", "texto": "Rodando: make",
+                  "entrada": {"comando": "make"}, "estado": "ok"})
+        bl.passo({"id": "s1", "tipo": "subagente", "nome": "Agent", "texto": "Subagente: Procurar erros",
+                  "entrada": {"pedido": "Procure os erros de compilação em src/", "descricao": "Procurar erros"},
+                  "estado": "rodando"})
+        bl.passo({"id": "s1a", "pai": "s1", "tipo": "comando", "nome": "Bash", "texto": "Rodando: grep",
+                  "entrada": {"comando": "grep -rn error src"}, "estado": "ok"})
+        yield 0.4
+        checar([n for n, _e in w.detalhes.agentes_listados()][1:] == ["Procurar erros"], "subagente listado nos agentes")
+        w.detalhes.abrir_agente("s1")
+        yield 0.4
+        tela = w.detalhes.tela_agente
+        checar(w.detalhes.telas.get_visible_child_name() == "agente", "clicar no agente abre a tela dele")
+        checar("erros de compilação" in tela.lbl_pedido.get_label(), "tela do subagente mostra o pedido que ele recebeu")
+        checar(list(tela.lista.linhas) == ["s1a"], "tela do subagente mostra só os comandos dele")
+        bl.passo({"id": "s1b", "pai": "s1", "tipo": "comando", "nome": "Bash", "texto": "Rodando: ls",
+                  "entrada": {"comando": "ls src"}, "estado": "rodando"})
+        bl.passo({"id": "c1", "tipo": "comando", "nome": "Bash", "texto": "Rodando: git status",
+                  "entrada": {"comando": "git status"}, "estado": "rodando"})
+        yield 0.4
+        checar(list(tela.lista.linhas) == ["s1a", "s1b"], "comando novo do subagente entra ao vivo (e o do principal não)")
+        bl.passo({"id": "s1", "estado": "ok", "resultado": "Achei 2 erros em src/main.c"})
+        yield 0.4
+        checar(tela.cartao_resultado.get_visible() and "2 erros" in tela.lbl_resultado.get_label(),
+               "resultado do subagente aparece no fim")
+        w.detalhes._voltar()
+        w.detalhes.abrir_agente("principal")
+        yield 0.4
+        checar(tela.lbl_pedido.get_label() == "Arrume o build", "agente principal mostra o pedido da pessoa")
+        checar(list(tela.lista.linhas) == ["c0", "s1", "c1"], "principal: comandos dele e o subagente numa linha só")
+        checar(tela.lista.linhas["s1"].filhos is None, "principal não repete os comandos do subagente")
+        w.detalhes._voltar()
+        yield 0.3
+        checar(w.detalhes.telas.get_visible_child_name() == "geral" and not bl.listas_agente,
+               "voltar mostra a lista de agentes e solta a tela")
+        w.detalhes.mostrar_bloco(None)
         w.btn_barra.set_active(True)
         yield 0.2
         checar(w.split_barra.get_show_sidebar(), "painel de conversas abre pelo botão")

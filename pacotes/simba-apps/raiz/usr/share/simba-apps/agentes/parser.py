@@ -104,6 +104,16 @@ def resumir_entrada(tipo, entrada):
             r["comando"] = str(cmd)[:8000]
         if isinstance(entrada.get("description"), str) and entrada["description"].strip():
             r["descricao"] = _curto(entrada["description"], 120)
+    elif tipo == "subagente":
+        # o pedido que o agente principal mandou para o subagente (painel Detalhes › agente)
+        pedido = entrada.get("prompt") or entrada.get("message") or entrada.get("instructions") or ""
+        if isinstance(pedido, str) and pedido.strip():
+            pedido = pedido.strip()
+            r["pedido"] = pedido[:6000] + ("\n⋯" if len(pedido) > 6000 else "")
+        if isinstance(entrada.get("description"), str) and entrada["description"].strip():
+            r["descricao"] = _curto(entrada["description"], 120)
+        if isinstance(entrada.get("subagent_type"), str) and entrada["subagent_type"].strip():
+            r["perfil"] = entrada["subagent_type"].strip()[:60]
     elif tipo == "leitura":
         # Guardar o caminho (e não só o nome): o chat mostra a imagem lida e, com
         # um clique, abre o visualizador para ver o que o agente está vendo.
@@ -336,6 +346,9 @@ class AgentStreamParser:
             ev["saida"] = _cortar_meio(saida)
         elif saida and erro:
             ev["nota"] = _curto(saida, 300)
+        if saida and not erro and pid not in self._fundo and self._tipos.get(pid) == "subagente":
+            # o relatório do subagente (painel Detalhes › agente › Resultado)
+            ev["resultado"] = saida[:6000] + ("\n⋯" if len(saida) > 6000 else "")
         self.on_evento(ev)
 
     def _raciocinio(self, texto):

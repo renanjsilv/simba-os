@@ -2679,7 +2679,6 @@
  "Falar e testar": "Speak and test",
  "Fale no microfone por 4 segundos…": "Speak into the microphone for 4 seconds…",
  "Ouvindo…": "Listening…",
- "Detalhes: ambiente, contexto, agentes e atividade": "Details: environment, context, agents and activity",
  "Fechar o painel de detalhes": "Close the details panel",
  "Aparece depois da primeira resposta.": "Appears after the first response.",
  "Nenhuma resposta em andamento.": "No response in progress.",
@@ -2689,5 +2688,19 @@
  "Nenhuma ação executada.": "No actions executed.",
  "Ver todos os %1 passos no painel": "View all %1 steps in panel",
  "Ver detalhes no painel": "View details in panel",
- "Último pensamento do modelo": "Model's latest thought"
+ "Último pensamento do modelo": "Model's latest thought",
+ "(o pedido não ficou registrado nesta resposta)": "(the request wasn't recorded for this response)",
+ "Ainda nenhum comando — está pensando.": "No commands yet — it's thinking.",
+ "Detalhes: ambiente, contexto e agentes": "Details: environment, context and agents",
+ "Detalhes: fwupdmgr get-updates · fwupdmgr get-history": "Details: fwupdmgr get-updates · fwupdmgr get-history",
+ "Este agente não executou comandos.": "This agent didn't run any commands.",
+ "Execução": "Execution",
+ "Firmware não atualizado": "Firmware not updated",
+ "Mostrar o pedido inteiro": "Show the full request",
+ "O firmware não foi atualizado (motivo na mensagem acima).": "The firmware was not updated (reason in the message above).",
+ "O resto está em dia. Veja o motivo no terminal da atualização.": "Everything else is up to date. See the reason in the update terminal.",
+ "Pedido": "Request",
+ "Resultado": "Result",
+ "Ver o pedido e os comandos deste agente": "See this agent's request and commands",
+ "Voltar para a lista de agentes": "Back to the agent list"
 }

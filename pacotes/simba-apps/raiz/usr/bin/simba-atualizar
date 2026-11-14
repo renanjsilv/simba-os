@@ -58,7 +58,16 @@ aplicar() {
   titulo "4/4  $(simba-t "Firmware (BIOS e dispositivos)")"
   if command -v fwupdmgr >/dev/null; then
     fwupdmgr refresh >/dev/null 2>&1 || true
-    fwupdmgr update -y --no-reboot-check 2>&1 | grep -v '^$' || true
+    # 0 = atualizou, 2 = nada a fazer; o resto é erro de verdade (antes era engolido e a
+    # notificação dizia "tudo em dia" mesmo com o firmware falhando toda vez)
+    fwupdmgr update -y --no-reboot-check 2>&1 | grep -v '^$'
+    fw_rc=${PIPESTATUS[0]}
+    if [[ $fw_rc != 0 && $fw_rc != 2 ]]; then
+      FW_FALHOU=1
+      echo
+      simba-t "O firmware não foi atualizado (motivo na mensagem acima)."; echo
+      simba-t "Detalhes: fwupdmgr get-updates · fwupdmgr get-history"; echo
+    fi
   else
     simba-t "Atualizador de firmware não instalado."; echo
   fi
@@ -69,7 +78,11 @@ aplicar() {
     simba-t "A atualização terminou, mas deixou as pendências acima."; echo
   fi
   titulo "$(simba-t "Pronto! Tudo atualizado.")"
-  notify-send -a "Simba OS" -i system-software-update "$(simba-t "Tudo atualizado")" "$(simba-t "Sistema, Loja, Escritório e firmware estão em dia.")" 2>/dev/null
+  if [[ -n ${FW_FALHOU:-} ]]; then
+    notify-send -a "Simba OS" -u critical -i system-software-update "$(simba-t "Firmware não atualizado")" "$(simba-t "O resto está em dia. Veja o motivo no terminal da atualização.")" 2>/dev/null
+  else
+    notify-send -a "Simba OS" -i system-software-update "$(simba-t "Tudo atualizado")" "$(simba-t "Sistema, Loja, Escritório e firmware estão em dia.")" 2>/dev/null
+  fi
   read -rsn1 -p "$(simba-t "Pressione qualquer tecla para fechar.")" || true
 }
 

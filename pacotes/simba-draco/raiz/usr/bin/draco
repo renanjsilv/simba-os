@@ -6,7 +6,8 @@
 #   draco reset  -> forget the current conversation
 #   draco say "texto" -> just speak a text
 #   draco perguntar "texto" -> a typed request (Start menu): same as voice, minus the mic
-#   draco escuta liga|desliga|status -> the "Draco" wake word (wake.py, draco-wake.service)
+#   draco escuta liga|desliga|status -> the "Draco" wake word (wake.py, draco-wake.service);
+#     desliga stops and disables the service (frees its memory); F10 and the icon still work
 #   draco treinar -> ~4 min session that teaches the wake word your voice, then retrains it
 #   draco config -> settings window: AI provider, transcription, voice, timings (Super+F10)
 #   draco wake-listen | wake-process <wav> <s> <trigger.wav> [trigger.json] | wake-cancel -> called by wake.py
@@ -17,7 +18,6 @@ CODIGO="${DRACO_CODIGO:-/usr/share/draco}" # código (pacote simba-draco)
 RUN="${XDG_RUNTIME_DIR:-/tmp}/draco"
 CLAUDE="$HOME/.local/share/mise/installs/claude/latest/claude"
 TTS="$CODIGO/tts.py" # keeps the Piper voice loaded; see the file for details
-WHISPER_MODEL="small" # local fallback transcription
 CONFIG="$CODIGO/lib/config.py" # settings (~/.config/draco): AI provider, transcription, voice, timings
 LOG="$DATA/draco.log"
 
@@ -105,6 +105,16 @@ killpidfile() {
 
 stop_speaking() { killpidfile speak; }
 
+# The instructions: prompt.md with the user's name; in "só assistente de voz" mode
+# (PERMISSAO=voz) a note that files and the terminal are off. The note only explains:
+# the tool permissions (config.py: claude_voice_only_args / opencode_permission) enforce it.
+prompt_text() {
+  sed "s/{USUARIO}/$(nome_usuario)/g" "$(prompt_file)"
+  [[ $DRACO_PERMISSAO == voz ]] || return 0
+  printf '\n\n## %s\n%s\n' "$(simba-t "Modo só assistente de voz")" \
+    "$(simba-t "Nas configurações, a pessoa escolheu que você seja só um assistente de voz: você NÃO pode mexer em arquivos nem no sistema (nada de ler ou editar arquivos, terminal, teclas, WhatsApp). Pode responder, pesquisar na web, tocar e controlar mídia, criar lembretes, abrir apps e sites, mudar volume e brilho e ler a tela. Se pedirem algo fora disso, diga em uma frase que nesse modo você não mexe no computador e que dá para liberar em Super + F10, Permissões.")"
+}
+
 # Claude Code, as Draco runs it. Speed: low effort, no MCP connectors, only the tools
 # Draco uses (smaller prompt, ~40% fewer input tokens); the model and provider come
 # from the settings (DRACO_CLAUDE_ENV: Sonnet by default, measured ~2 s faster than
@@ -115,17 +125,20 @@ brain() {
   # Free brain (config "gratis"): OpenCode's free models, no account; lib/opencode_brain.py
   # speaks the same stream-json as Claude Code, so the rest of Draco doesn't change.
   if [[ $DRACO_MOTOR == opencode ]]; then
-    sed "s/{USUARIO}/$(nome_usuario)/g" "$(prompt_file)" >"$RUN/prompt-opencode.md"
+    prompt_text >"$RUN/prompt-opencode.md"
     exec env DRACO_PROMPT_FILE="$RUN/prompt-opencode.md" DRACO_MODELO="$DRACO_MODELO" \
       PATH="$CODIGO/bin:$PATH" python3 "$CODIGO/lib/opencode_brain.py" "$@"
   fi
   eval "cenv=($DRACO_CLAUDE_ENV)"
+  # Permissions: everything (default), or only a voice assistant (config.py claude_voice_only_args:
+  # web tools and the allowed dr-* commands; -p can't ask, so anything else is refused).
+  local perms=(--dangerously-skip-permissions --tools Bash,Read,Edit,Skill,WebSearch,WebFetch)
+  [[ $DRACO_PERMISSAO == voz && -n $DRACO_CLAUDE_PERMS ]] && eval "perms=($DRACO_CLAUDE_PERMS)"
   exec env "${cenv[@]}" PATH="$CODIGO/bin:$PATH" "$CLAUDE" -p \
-    --dangerously-skip-permissions \
+    "${perms[@]}" \
     --effort low --strict-mcp-config --exclude-dynamic-system-prompt-sections \
-    --tools Bash,Read,Edit,Skill,WebSearch,WebFetch \
     --output-format stream-json --verbose \
-    --append-system-prompt "$(sed "s/{USUARIO}/$(nome_usuario)/g" "$(prompt_file)")" "$@"
+    --append-system-prompt "$(prompt_text)" "$@"
 }
 
 continue_flag() { # --continue within the conversation memory window (always for a reply to Draco's question)
@@ -256,9 +269,14 @@ process() {
     fi
   fi
   if ((rc == 1)); then
-    text=$(voxtype -q --model "$WHISPER_MODEL" --language "${DRACO_LINGUA:-pt}" \
-      transcribe "$RUN/input.wav" 2>/dev/null | tail -n1)
-    log "transcrição: local"
+    # faster-whisper int8 (lib/stt_local.py; model MODELO_LOCAL, base by default: ~1 s
+    # where voxtype/whisper.cpp small took ~11 s on an i5-8250U); voxtype if the venv is missing
+    if [[ -x $DATA/venv/bin/python ]]; then
+      text=$("$DATA/venv/bin/python" "$CODIGO/lib/stt_local.py" "$RUN/input.wav" "${DRACO_STT_LOCAL:-base}" 2>>"$LOG" | tail -n1)
+    else
+      text=$(voxtype -q --model small --language "${DRACO_LINGUA:-pt}" transcribe "$RUN/input.wav" 2>/dev/null | tail -n1)
+    fi
+    log "transcrição: local (${DRACO_STT_LOCAL:-base})"
     text=$(python3 "$CODIGO/lib/transcript.py" text "$text" "${wake[@]:0:2}")
     rc=$?
   fi
@@ -410,8 +428,10 @@ wake_process() {
 escuta() {
   case $1 in
     # enable: continua ligada depois de reiniciar (antes era só start)
-    liga) rm -f "$DATA/wake.disabled"; systemctl --user enable --now draco-wake.service draco-aquecer.service >/dev/null 2>&1; echo "Escuta do \"Draco\" ligada." ;;
-    desliga) touch "$DATA/wake.disabled"; echo "Escuta do \"Draco\" desligada (microfone fechado)." ;;
+    # liga: enable + start (stays on after a reboot); desliga: stop + disable, so nothing waits
+    # in the background (frees ~250 MB); wake.disabled keeps it off across updates/migrations
+    liga) python3 "$CONFIG" escuta liga >/dev/null; echo "Escuta do \"Draco\" ligada." ;;
+    desliga) python3 "$CONFIG" escuta desliga >/dev/null; echo "Escuta do \"Draco\" desligada (serviço parado; o F10 continua funcionando)." ;;
     *)
       if [[ -f $DATA/wake.disabled ]]; then echo "Escuta: desligada"
       elif systemctl --user is-active --quiet draco-wake.service; then echo "Escuta: ligada"

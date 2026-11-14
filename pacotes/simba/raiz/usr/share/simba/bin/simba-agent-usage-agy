@@ -1,0 +1,108 @@
+#!/usr/bin/python3
+# simba:summary=Print the Antigravity usage record as JSON
+# simba:args=[--force] [--limits-only]
+# simba:hidden=true
+"""Collect Antigravity (agy) usage into one display-ready JSON record.
+
+Antigravity keeps its conversations under ~/.gemini/antigravity-cli. Token
+counts and authoritative rate limits are not exposed by the CLI, so this
+collector reports conversation activity as local stats and carries no
+limits; the panel still shows the agent with its recorded usage.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+AGENT_ID = "agy"
+AGENT_NAME = "Antigravity"
+AUTH_HELP = "Run `agy` to sign in with your Google account."
+
+
+def number(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except Exception:
+        return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--limits-only", action="store_true")
+    args = parser.parse_args()
+
+    brain = Path.home() / ".gemini" / "antigravity-cli" / "brain"
+
+    today = datetime.now().date()
+    recent_dates = [(today - timedelta(days=offset)).isoformat() for offset in range(6, -1, -1)]
+    recent = {day: 0 for day in recent_dates}
+    active_dates: set[str] = set()
+    total_sessions = 0
+    total_prompts = 0
+    today_prompts = 0
+    today_sessions = 0
+
+    if brain.is_dir():
+        for conv_dir in brain.iterdir():
+            if not conv_dir.is_dir():
+                continue
+            transcript = conv_dir / ".system_generated" / "logs" / "transcript.jsonl"
+            if not transcript.is_file():
+                transcript = conv_dir / "transcript.jsonl"
+            if not transcript.is_file():
+                continue
+            try:
+                mtime = transcript.stat().st_mtime
+            except OSError:
+                continue
+            day = datetime.fromtimestamp(mtime).date().isoformat()
+            active_dates.add(day)
+            total_sessions += 1
+            prompts_here = 0
+            try:
+                for line in transcript.read_text(errors="replace").splitlines():
+                    if '"USER_INPUT"' in line:
+                        prompts_here += 1
+            except OSError:
+                pass
+            if prompts_here <= 0:
+                prompts_here = 1
+            total_prompts += prompts_here
+            if day == today.isoformat():
+                today_prompts += prompts_here
+                today_sessions += 1
+            if day in recent:
+                recent[day] += prompts_here
+
+    record = {
+        "schemaVersion": 1,
+        "id": AGENT_ID,
+        "name": AGENT_NAME,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "ready": total_sessions > 0,
+        "hasLocalStats": True,
+        "tierLabel": "",
+        "usageStatusText": "",
+        "authHelpText": "",
+        "limits": [],
+        "todayPrompts": today_prompts,
+        "todaySessions": today_sessions,
+        "todayTotalTokens": 0,
+        "todayTokensByModel": {},
+        "recentDays": [{"date": d, "messageCount": recent[d]} for d in recent_dates],
+        "totalPrompts": total_prompts,
+        "totalSessions": total_sessions,
+        "activeDays": len(active_dates),
+        "activeDates": sorted(active_dates),
+        "modelUsage": {},
+    }
+    print(json.dumps(record, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

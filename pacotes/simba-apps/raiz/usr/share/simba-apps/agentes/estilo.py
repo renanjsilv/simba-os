@@ -1,6 +1,7 @@
 """Folha de estilo do chat dos Agentes de IA."""
 
 CSS = """
+@define-color simba_destaque @accent_color;
 window.background, .chat-window, .chat-bg, .chat-scroll {
   background-color: @window_bg_color;
 }
@@ -511,7 +512,7 @@ CSS += """
   border-radius: 7px;
   color: alpha(@window_fg_color, 0.60);
 }
-.passo-mais:hover { color: @accent_color; background-color: alpha(@accent_bg_color, 0.08); }
+.passo-mais:hover { color: @simba_destaque; background-color: alpha(@accent_bg_color, 0.08); }
 
 /* cartão de ação no computador (comando / edição): parece um terminal */
 .passo-cartao {
@@ -521,7 +522,7 @@ CSS += """
   background-color: alpha(@window_fg_color, 0.025);
   padding: 6px 8px 6px 6px;
 }
-.passo-cartao .passo-icone { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
+.passo-cartao .passo-icone { background-color: alpha(@accent_bg_color, 0.14); color: @simba_destaque; }
 .passo-cartao.erro { border-color: alpha(@error_color, 0.35); }
 .passo-cartao.erro .passo-icone { background-color: alpha(@error_color, 0.14); color: @error_color; }
 .passo-codigo {
@@ -537,7 +538,7 @@ CSS += """
   padding: 1px 8px;
   border-radius: 999px;
 }
-.passo-estado.rodando { color: @accent_color; background-color: alpha(@accent_bg_color, 0.12); }
+.passo-estado.rodando { color: @simba_destaque; background-color: alpha(@accent_bg_color, 0.12); }
 .passo-estado.auto { color: alpha(@window_fg_color, 0.62); background-color: alpha(@window_fg_color, 0.06); }
 .passo-estado.ok { color: @success_color; background-color: alpha(@success_color, 0.12); }
 .passo-estado.erro { color: @error_color; background-color: alpha(@error_color, 0.12); }
@@ -552,6 +553,59 @@ CSS += """
   padding: 8px 12px;
 }
 .passo-saida-texto { font-family: monospace; font-size: 12px; color: #e6e6e6; }
+
+/* imagem que o agente está lendo: miniatura clicável (abre o visualizador) */
+.passo-imagem { animation: surgir-suave 240ms ease-out; }
+.passo-imagem-botao {
+  padding: 0;
+  margin: 5px 0 4px 0;
+  border-radius: 12px;
+  border: 1px solid alpha(@window_fg_color, 0.14);
+  background: none;
+  box-shadow: 0 1px 5px alpha(#000, 0.10);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.passo-imagem-botao:hover {
+  border-color: alpha(@accent_bg_color, 0.60);
+  box-shadow: 0 3px 12px alpha(#000, 0.20);
+}
+.passo-imagem-foto { border-radius: 11px; }
+.passo-imagem-selo {
+  margin: 7px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  background-color: alpha(#000, 0.64);
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 600;
+  opacity: 0.82;
+  box-shadow: 0 1px 4px alpha(#000, 0.35);
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+.passo-imagem-botao:hover .passo-imagem-selo,
+.passo-imagem-botao:focus .passo-imagem-selo {
+  opacity: 1;
+  background-color: alpha(@accent_bg_color, 0.92);
+}
+
+/* visualizador da imagem (janela própria) */
+window.visor-imagem { background-color: #0f1115; }
+.visor-cabecalho {
+  background-color: alpha(#0f1115, 0.96);
+  border-bottom: 1px solid alpha(#ffffff, 0.08);
+  box-shadow: none;
+}
+.visor-cabecalho button { color: alpha(#ffffff, 0.85); }
+.visor-cabecalho button:hover { background-color: alpha(#ffffff, 0.10); }
+.visor-titulo { color: #f6f6f6; font-weight: 600; }
+.visor-corpo { background-color: #0f1115; padding: 10px 12px 6px 12px; }
+.visor-rodape {
+  color: alpha(#ffffff, 0.50);
+  font-size: 11.5px;
+  margin: 6px 2px 2px 2px;
+  font-feature-settings: "tnum";
+}
+.visor-erro { color: alpha(#ffffff, 0.72); font-size: 14px; padding: 40px; }
 
 /* trecho do raciocínio entre os passos */
 .passo-pensamento { padding: 2px 0 6px 0; animation: surgir-suave 260ms ease-out; }
@@ -577,7 +631,7 @@ CSS += """
 .pergunta-card entry { background: @view_bg_color; border: 1px solid alpha(@window_fg_color, .12); border-radius: 12px; }
 .pergunta-card { margin-left: 2px; margin-right: 2px; }
 .composer-hint { color: alpha(@window_fg_color, .55); }
-.uso-pop-link { color: @accent_color; font-size: 13px; font-weight: 600; margin-top: 4px; }
+.uso-pop-link { color: @simba_destaque; font-size: 13px; font-weight: 600; margin-top: 4px; }
 levelbar.uso-medidor > trough { background-color: alpha(@window_fg_color, .08); }
 levelbar.uso-medidor > trough > block.empty { background-color: transparent; }
 .pensamento-texto { animation: surgir-suave 260ms ease-out; }
@@ -661,7 +715,7 @@ popover.seletor-pop > contents { padding: 6px; border-radius: 14px; }
 .seletor-linha.separar { margin-top: 2px; }
 .seletor-nome { font-weight: 600; font-size: 13.5px; }
 .seletor-sub { font-size: 12px; color: alpha(@window_fg_color, 0.55); }
-.seletor-marca { color: @accent_color; }
+.seletor-marca { color: @simba_destaque; }
 .seletor-aviso {
   font-size: 11px; font-weight: 600; color: @warning_color;
   background-color: alpha(@warning_color, 0.12);
@@ -690,8 +744,10 @@ popover.uso-pop > contents { padding: 14px 16px; border-radius: 16px; }
   animation: surgir 320ms cubic-bezier(.2,.8,.2,1);
 }
 .pergunta-titulo { font-weight: 650; font-size: 14.5px; }
-.pergunta-rotulo { font-size: 11.5px; font-weight: 700; color: @accent_color; }
+.pergunta-rotulo { font-size: 11.5px; font-weight: 700; color: @simba_destaque; }
 .pergunta-opcao { border-radius: 999px; padding: 4px 14px; }
+/* pergunta no meio da resposta: fica no lugar em que foi feita */
+.pergunta-card.na-resposta { margin: 10px 0 12px 0; }
 .pergunta-card.respondida { border-color: alpha(@window_fg_color, 0.10); background-color: alpha(@window_fg_color, 0.03); }
 
 /* ---------- painel lateral de código (canvas) ---------- */
@@ -702,7 +758,7 @@ popover.uso-pop > contents { padding: 14px 16px; border-radius: 16px; }
 .painel-codigo-view, .painel-codigo-view text { font-family: monospace; font-size: 13px; }
 .painel-abas { padding: 4px 8px; border-bottom: 1px solid alpha(@window_fg_color, 0.06); }
 .painel-aba { font-size: 12px; border-radius: 8px; padding: 2px 10px; min-height: 26px; }
-.painel-aba:checked { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
+.painel-aba:checked { background-color: alpha(@accent_bg_color, 0.14); color: @simba_destaque; }
 
 /* estado vazio com entrada suave */
 .empty-state { animation: surgir 420ms cubic-bezier(.2,.8,.2,1); }
@@ -717,4 +773,373 @@ popover.uso-pop > contents { padding: 14px 16px; border-radius: 16px; }
   border-radius: 999px; padding: 1px 9px;
 }
 .acoes-pc.root { color: @warning_color; background-color: alpha(@warning_color, 0.12); }
+
+/* ================= painéis laterais (conversas / detalhes) ================= */
+@keyframes entrar-lado { from { opacity: 0; margin-left: -10px; } to { opacity: 1; margin-left: 0; } }
+@keyframes entrar-baixo { from { opacity: 0; margin-top: 6px; } to { opacity: 1; margin-top: 0; } }
+@keyframes ponto-vivo {
+  0%   { box-shadow: 0 0 0 0 alpha(@accent_bg_color, 0.55); }
+  70%  { box-shadow: 0 0 0 5px alpha(@accent_bg_color, 0); }
+  100% { box-shadow: 0 0 0 0 alpha(@accent_bg_color, 0); }
+}
+@keyframes borda-viva {
+  0%   { border-color: alpha(@accent_bg_color, 0.22); }
+  50%  { border-color: alpha(@accent_bg_color, 0.60); }
+  100% { border-color: alpha(@accent_bg_color, 0.22); }
+}
+
+/* ---- conversas (esquerda) ---- */
+.barra-conversas {
+  background-color: @sidebar_bg_color;
+  border-right: 1px solid alpha(@window_fg_color, 0.07);
+  padding: 8px 0 0 0;
+}
+.barra-acoes { padding: 0 8px 6px 8px; }
+.barra-acao {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: alpha(@window_fg_color, 0.88);
+  transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.barra-acao image { opacity: 0.80; transition: opacity 160ms ease; }
+.barra-acao:hover { background-color: alpha(@window_fg_color, 0.07); color: @window_fg_color; }
+.barra-acao:hover image { opacity: 1; }
+.barra-acao:active { background-color: alpha(@window_fg_color, 0.11); }
+.barra-acao:focus-visible { box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.45); }
+
+/* ação principal: um tom do accent, sem competir com o conteúdo */
+.barra-acao-nova {
+  background-color: alpha(@accent_bg_color, 0.13);
+  border: 1px solid alpha(@accent_bg_color, 0.22);
+  box-shadow: none;
+}
+.barra-acao-nova:hover {
+  background-color: alpha(@accent_bg_color, 0.19);
+  border-color: alpha(@accent_bg_color, 0.32);
+}
+.barra-acao-nova:active { background-color: alpha(@accent_bg_color, 0.25); }
+.barra-acao-nova image { color: @simba_destaque; opacity: 1; }
+
+/* Procurar fica discreto ao lado da ação principal */
+.barra-acao-icone {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 10px;
+  color: alpha(@window_fg_color, 0.62);
+}
+.barra-acao-icone:hover { background-color: alpha(@window_fg_color, 0.07); color: @window_fg_color; }
+.barra-acao-icone:focus-visible { box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.45); }
+
+.barra-conversas-busca {
+  margin: 2px 8px 4px 8px;
+  min-height: 34px;
+  border-radius: 10px;
+  background-color: alpha(@window_fg_color, 0.055);
+  border: 1px solid alpha(@window_fg_color, 0.07);
+  box-shadow: none;
+}
+.barra-conversas-busca:focus-within {
+  border-color: alpha(@accent_bg_color, 0.55);
+  background-color: alpha(@window_fg_color, 0.04);
+}
+.barra-conversas-busca image { opacity: 0.50; }
+
+/* nível 1: "Recentes" */
+.barra-secao-caixa {
+  padding: 8px 14px 6px 14px;
+  border-bottom: 1px solid alpha(@window_fg_color, 0.06);
+}
+.barra-secao {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.55px;
+  color: alpha(@window_fg_color, 0.48);
+}
+.barra-secao-contagem {
+  font-size: 10.5px;
+  font-weight: 600;
+  font-feature-settings: "tnum";
+  color: alpha(@window_fg_color, 0.36);
+}
+
+/* nível 2: grupos de data, alinhados com o texto dos títulos */
+.barra-grupo-caixa { padding: 10px 6px 3px 6px; }
+.barra-grupo-caixa.primeiro { padding-top: 6px; }
+.barra-grupo {
+  margin-left: 30px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: alpha(@window_fg_color, 0.36);
+}
+
+.barra-lista { background: none; padding: 0 4px 12px 4px; }
+.barra-lista > row.barra-conversa {
+  min-height: 44px;
+  padding: 6px 3px 6px 6px;
+  margin: 1px 0;
+  border-radius: 10px;
+  background: none;
+  outline: none;
+  animation: surgir-suave 200ms ease-out;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
+}
+.barra-lista > row.barra-conversa:hover { background-color: alpha(@window_fg_color, 0.055); }
+.barra-lista > row.barra-conversa:selected {
+  background-color: alpha(@accent_bg_color, 0.14);
+  box-shadow: inset 2px 0 0 @accent_bg_color, inset 0 0 0 1px alpha(@accent_bg_color, 0.10);
+}
+.barra-lista > row.barra-conversa:selected:hover { background-color: alpha(@accent_bg_color, 0.18); }
+.barra-lista > row.barra-conversa:focus-visible {
+  box-shadow: inset 0 0 0 2px alpha(@accent_bg_color, 0.55);
+}
+
+/* identidade: logo do agente num chip pequeno e consistente */
+.barra-conversa-avatar {
+  min-width: 24px;
+  min-height: 24px;
+  border-radius: 7px;
+  background-color: alpha(@window_fg_color, 0.055);
+  border: 1px solid alpha(@window_fg_color, 0.07);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+/* ícone do chip: opacidade aplicada direto na imagem (set_opacity) */
+row.barra-conversa:selected .barra-conversa-avatar {
+  background-color: alpha(@accent_bg_color, 0.16);
+  border-color: alpha(@accent_bg_color, 0.22);
+}
+
+.barra-conversa-titulo {
+  font-size: 13px;
+  font-weight: 550;
+  color: alpha(@window_fg_color, 0.92);
+}
+.barra-conversa-sub {
+  font-size: 11px;
+  font-weight: 500;
+  color: alpha(@window_fg_color, 0.50);
+}
+.barra-conversa-hora {
+  font-size: 10.5px;
+  font-weight: 500;
+  font-feature-settings: "tnum";
+  color: alpha(@window_fg_color, 0.46);
+}
+row.barra-conversa:selected .barra-conversa-titulo { color: @window_fg_color; font-weight: 600; }
+row.barra-conversa:selected .barra-conversa-sub { color: alpha(@window_fg_color, 0.68); }
+row.barra-conversa:selected .barra-conversa-hora { color: alpha(@simba_destaque, 0.90); }
+
+/* menu em coluna fixa: o horário nunca anda quando o "…" aparece */
+.barra-conversa-menu {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  color: alpha(@window_fg_color, 0.55);
+  opacity: 0;
+  transition: opacity 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+row.barra-conversa:hover .barra-conversa-menu,
+row.barra-conversa:selected .barra-conversa-menu,
+.barra-conversa-menu:checked,
+.barra-conversa-menu:focus-within { opacity: 1; }
+.barra-conversa-menu:hover {
+  background-color: alpha(@window_fg_color, 0.08);
+  color: @window_fg_color;
+}
+.barra-conversa-opcao {
+  min-height: 32px;
+  padding: 2px 10px;
+  border-radius: 8px;
+}
+.barra-conversa-opcao:hover { background-color: alpha(@window_fg_color, 0.07); }
+
+/* estado vazio: ícone discreto e uma frase, sem caixa tracejada */
+.barra-vazio { padding: 24px 20px; }
+.barra-vazio-icone { opacity: 0.38; }
+.barra-vazio-texto {
+  font-size: 12.5px;
+  color: alpha(@window_fg_color, 0.54);
+}
+
+/* barra de rolagem discreta */
+.barra-conversas scrollbar { background: none; border: none; }
+.barra-conversas scrollbar trough { background: none; border: none; }
+.barra-conversas scrollbar slider {
+  min-width: 5px;
+  min-height: 36px;
+  border-radius: 999px;
+  background-color: alpha(@window_fg_color, 0.16);
+}
+.barra-conversas scrollbar slider:hover { background-color: alpha(@window_fg_color, 0.28); }
+
+/* ---- detalhes (direita) ---- */
+.painel-detalhes {
+  background-color: @sidebar_bg_color;
+  border-left: 1px solid alpha(@window_fg_color, 0.07);
+}
+.detalhes-cab { padding: 10px 8px 4px 18px; min-height: 36px; }
+.detalhes-titulo { font-size: 15px; font-weight: 700; letter-spacing: -0.1px; }
+.detalhes-fechar {
+  min-width: 30px; min-height: 30px; padding: 0;
+  border-radius: 9px;
+  opacity: 0.65;
+  transition: opacity 150ms ease, background-color 150ms ease;
+}
+.detalhes-fechar:hover { opacity: 1; background-color: alpha(@window_fg_color, 0.08); }
+.detalhes-conteudo { padding: 0 12px 14px 12px; }
+.detalhes-secao { margin: 14px 4px 6px 4px; }
+.detalhes-secao-titulo {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: alpha(@window_fg_color, 0.50);
+}
+label.detalhes-secao { margin: 14px 4px 6px 4px; }
+.detalhes-cartao {
+  background-color: alpha(@view_bg_color, 0.85);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+  border-radius: 14px;
+  padding: 4px;
+  box-shadow: 0 1px 2px alpha(#000, 0.04);
+  animation: entrar-baixo 320ms cubic-bezier(.2,.8,.2,1);
+}
+.detalhes-linha { min-height: 34px; padding: 0 10px; }
+.detalhes-linha-botao {
+  padding: 0; border-radius: 10px;
+  transition: background-color 150ms ease;
+}
+.detalhes-linha-botao:hover { background-color: alpha(@window_fg_color, 0.06); }
+.detalhes-linha-botao .detalhes-seta { opacity: 0; transition: opacity 150ms ease; }
+.detalhes-linha-botao:hover .detalhes-seta { opacity: 0.55; }
+.detalhes-icone { color: alpha(@window_fg_color, 0.60); }
+.detalhes-valor { font-size: 13px; font-weight: 500; }
+.detalhes-dica { font-size: 12px; color: alpha(@window_fg_color, 0.55); }
+.detalhes-cartao .detalhes-dica { margin: 2px 10px 8px 10px; font-feature-settings: "tnum"; }
+.detalhes-ctx-pct {
+  font-size: 11.5px; font-weight: 700;
+  font-feature-settings: "tnum";
+  color: alpha(@window_fg_color, 0.62);
+}
+levelbar.detalhes-ctx-barra { margin: 10px 10px 4px 10px; }
+levelbar.detalhes-ctx-barra > trough {
+  min-height: 6px; padding: 0; border: none;
+  border-radius: 999px;
+  background-color: alpha(@window_fg_color, 0.08);
+}
+levelbar.detalhes-ctx-barra > trough > block { min-height: 6px; border: none; border-radius: 999px; }
+levelbar.detalhes-ctx-barra > trough > block.filled { background-color: @accent_bg_color; }
+levelbar.detalhes-ctx-barra > trough > block.empty { background-color: transparent; }
+levelbar.detalhes-ctx-barra.alto > trough > block.filled { background-color: @warning_color; }
+levelbar.detalhes-ctx-barra.critico > trough > block.filled { background-color: @error_color; }
+
+/* cartões de agentes */
+.detalhes-agentes { margin-bottom: 4px; }
+.detalhes-agente {
+  background-color: alpha(@view_bg_color, 0.85);
+  border: 1px solid alpha(@window_fg_color, 0.08);
+  border-radius: 14px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px alpha(#000, 0.04);
+  animation: entrar-baixo 320ms cubic-bezier(.2,.8,.2,1);
+  transition: border-color 300ms ease, background-color 300ms ease;
+}
+.detalhes-agente.rodando {
+  border-color: alpha(@accent_bg_color, 0.40);
+  background-color: alpha(@accent_bg_color, 0.04);
+  animation: entrar-baixo 320ms cubic-bezier(.2,.8,.2,1), borda-viva 2.4s ease-in-out 320ms infinite;
+}
+.detalhes-agente.erro { border-color: alpha(@error_color, 0.35); }
+.detalhes-agente-avatar {
+  padding: 7px;
+  min-width: 16px; min-height: 16px;
+  border-radius: 10px;
+  background-color: alpha(@window_fg_color, 0.06);
+}
+.detalhes-agente.rodando .detalhes-agente-avatar { background-color: alpha(@accent_bg_color, 0.14); }
+.detalhes-agente-nome { font-size: 13.5px; font-weight: 650; }
+.detalhes-agente-papel { font-size: 11.5px; color: alpha(@window_fg_color, 0.50); }
+.detalhes-agente-sub {
+  font-size: 12px;
+  color: alpha(@window_fg_color, 0.62);
+  margin: 4px 0 0 40px;
+}
+.detalhes-agente .passo-estado { padding: 2px 9px 2px 7px; transition: background-color 300ms ease, color 300ms ease; }
+.detalhes-ponto {
+  min-width: 6px; min-height: 6px;
+  border-radius: 999px;
+  background-color: currentColor;
+}
+.passo-estado.rodando .detalhes-ponto { animation: ponto-vivo 1.6s ease-out infinite; }
+.detalhes-sem-sub { margin: 2px 6px; }
+.detalhes-vazio {
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px dashed alpha(@window_fg_color, 0.14);
+  color: alpha(@window_fg_color, 0.55);
+  font-size: 12.5px;
+  animation: surgir-suave 300ms ease-out;
+}
+.detalhes-vazio image { opacity: 0.7; }
+.detalhes-sep { margin: 0; background-color: alpha(@window_fg_color, 0.07); min-height: 1px; }
+.detalhes-resumo {
+  margin: 0 4px 8px 4px;
+  font-size: 12px; font-weight: 600;
+  color: alpha(@window_fg_color, 0.62);
+  font-feature-settings: "tnum";
+}
+.detalhes-racio { margin: 0 4px 8px 4px; font-size: 13px; }
+.detalhes-linha-do-tempo { margin: 0 2px; }
+.painel-detalhes .passo-cartao { margin: 4px 0; padding: 5px 6px 5px 5px; }
+.painel-detalhes .passo-cartao .passo-estado { font-size: 10.5px; padding: 1px 6px; }
+.painel-detalhes .passo-botao { min-width: 24px; min-height: 24px; }
+.painel-detalhes .passo-codigo { font-size: 12px; padding: 8px 10px; }
+.seletor-gratis {
+  font-size: 10.5px; font-weight: 700;
+  color: @success_color;
+  background-color: alpha(@success_color, 0.13);
+  border-radius: 999px; padding: 1px 8px;
+}
 """
+
+
+_destaque_prov = None
+
+
+def _cor_destaque():
+    """Cor de destaque legível sobre o fundo atual (claro ou escuro), calculada aqui.
+
+    O @accent_color do libadwaita chegou a aparecer preto/branco em sessões reais
+    (texto preto no tema escuro); com a cor calculada pelo próprio app isso não acontece.
+    """
+    from gi.repository import Adw
+    estilo = Adw.StyleManager.get_default()
+    escuro = estilo.get_dark()
+    try:
+        return Adw.AccentColor.to_standalone_rgba(estilo.get_accent_color(), escuro).to_string()
+    except Exception:  # noqa: BLE001 — libadwaita antiga
+        return "#78aeed" if escuro else "#1c71d8"
+
+
+def aplicar_destaque(display):
+    """Define @simba_destaque e o mantém em dia quando o tema ou a cor de destaque mudam."""
+    global _destaque_prov
+    from gi.repository import Adw, Gtk
+    primeiro = _destaque_prov is None
+    if primeiro:
+        _destaque_prov = Gtk.CssProvider()
+        # prioridade acima da folha do app: a definição vale para as regras dela
+        Gtk.StyleContext.add_provider_for_display(display, _destaque_prov,
+                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    _destaque_prov.load_from_data(f"@define-color simba_destaque {_cor_destaque()};".encode())
+    if primeiro:
+        estilo = Adw.StyleManager.get_default()
+        for sinal in ("notify::dark", "notify::accent-color"):
+            try:
+                estilo.connect(sinal, lambda *_: aplicar_destaque(display))
+            except TypeError:  # propriedade inexistente nesta versão
+                pass

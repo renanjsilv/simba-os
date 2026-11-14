@@ -104,6 +104,13 @@ def resumir_entrada(tipo, entrada):
             r["comando"] = str(cmd)[:8000]
         if isinstance(entrada.get("description"), str) and entrada["description"].strip():
             r["descricao"] = _curto(entrada["description"], 120)
+    elif tipo == "leitura":
+        # Guardar o caminho (e não só o nome): o chat mostra a imagem lida e, com
+        # um clique, abre o visualizador para ver o que o agente está vendo.
+        caminho = (entrada.get("file_path") or entrada.get("filePath") or entrada.get("path")
+                   or entrada.get("Path") or entrada.get("notebook_path") or entrada.get("TargetFile") or "")
+        if caminho:
+            r["arquivo"] = str(caminho)
     elif tipo == "edicao":
         caminho = (entrada.get("file_path") or entrada.get("filePath") or entrada.get("path")
                    or entrada.get("Path") or entrada.get("notebook_path") or entrada.get("TargetFile") or "")
@@ -250,6 +257,7 @@ class AgentStreamParser:
         self.modelo = None
         self.uso = {}              # entrada, saida, custo
         self.janelas = {}          # {"5h": 0.04, "7d": 0.0} (fração usada)
+        self.contexto = None       # tokens na janela de contexto do agente principal agora
         self._parcial = False      # Claude: texto já chegou por deltas
         self._bloco_novo = False   # Claude: próximo delta abre um bloco de texto novo
         self._done = False
@@ -340,6 +348,14 @@ class AgentStreamParser:
             setattr(self, k, v)
         if mudou:
             self.on_meta(mudou)
+
+    def _contexto(self, u, chaves=("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")):
+        """Tamanho da conversa que o modelo está lendo (a última chamada do agente principal)."""
+        if not isinstance(u, dict):
+            return
+        total = sum(int(u.get(k) or 0) for k in chaves)
+        if total > 0:
+            self._meta(contexto=total)
 
     def _somar_uso(self, entrada=0, saida=0, custo=None, substituir=False):
         u = {} if substituir else dict(self.uso)
@@ -564,6 +580,8 @@ class AgentStreamParser:
             et = ev.get("type")
             if data.get("parent_tool_use_id"):
                 return  # texto de subagente: fica fora da resposta
+            if et == "message_start":
+                self._contexto((ev.get("message") or {}).get("usage"))
             if et == "content_block_start":
                 bloco = ev.get("content_block") or {}
                 if bloco.get("type") == "text":
@@ -603,6 +621,7 @@ class AgentStreamParser:
                 return
             msg = data.get("message") or {}
             self._meta(modelo=msg.get("model"))
+            self._contexto(msg.get("usage"))
             for c in msg.get("content") or []:
                 if not isinstance(c, dict):
                     continue
@@ -669,6 +688,7 @@ class AgentStreamParser:
         if t == "turn.completed":
             u = data.get("usage") or {}
             self._somar_uso(u.get("input_tokens", 0), u.get("output_tokens", 0))
+            self._contexto(u, ("input_tokens",))
             return
         if t == "turn.started":
             self.on_status(_t("✦ Pensando na resposta..."))
@@ -734,6 +754,9 @@ class AgentStreamParser:
         elif t == "step_finish":
             tok = part.get("tokens") or {}
             cache = tok.get("cache") or {}
+            entrada = (tok.get("input") or 0) + (cache.get("read") or 0) + (cache.get("write") or 0)
+            if entrada:
+                self._meta(contexto=int(entrada))
             self._somar_uso((tok.get("input") or 0) + (cache.get("read") or 0) + (cache.get("write") or 0),
                             (tok.get("output") or 0) + (tok.get("reasoning") or 0), part.get("cost"))
         elif t == "tool_use":

@@ -1,9 +1,13 @@
 """Bloco "Pensando": o que a IA raciocinou e executou durante uma resposta.
 
+Fica no FIM da resposta (junto da caixa de mensagem, acompanhando a conversa).
 Enquanto o agente trabalha, o cabeçalho mostra o passo atual (com brilho) e um
-cronômetro; clicar abre a linha do tempo: raciocínio, passos com ícone por tipo e
-cartões para o que mexe na máquina (comandos e edições de arquivo, com a saída).
-Ao terminar, recolhe para "Pensou por 1 min 20 s · 7 passos".
+cronômetro; clicar mostra só o ÚLTIMO pensamento/ação — a linha do tempo inteira
+(raciocínio, passos, cartões de comando e edição, subagentes) fica no painel de
+detalhes à direita (detalhes.py), como no Claude e no ChatGPT ("Activity").
+Ao terminar, recolhe para "Pensou por 1 min 20 s · 7 passos". Imagens lidas pelo
+agente viram uma miniatura clicável (abre um visualizador); na primeira imagem o
+bloco se abre sozinho para mostrá-la, a menos que o usuário já o tenha fechado.
 
 Leve de propósito: recolhido, o bloco não cria nenhuma linha; aberto, mostra só
 os últimos passos (os anteriores entram sob demanda) e os detalhes de cada cartão
@@ -21,10 +25,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gsk", "4.0")
 gi.require_version("Graphene", "1.0")
-from gi.repository import Adw, Gdk, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 sys.path.insert(0, "/usr/share/simba-apps/idiomas")
 from simba_i18n import t as _t  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import anexos  # noqa: E402
 
 ICONES = {
     "comando": "utilities-terminal-symbolic",
@@ -71,6 +78,16 @@ def duracao(seg):
 def _milhar(n):
     n = int(n or 0)
     return f"{n / 1000:.0f}k" if n >= 1000 else str(n)
+
+
+def _sem_hifen(lbl):
+    """Código quebrado na largura do painel sem o hífen que o Pango põe no meio das palavras."""
+    try:
+        attrs = Pango.AttrList()
+        attrs.insert(Pango.attr_insert_hyphens_new(False))
+        lbl.set_attributes(attrs)
+    except (AttributeError, TypeError):  # Pango antigo
+        pass
 
 
 def _escuro():
@@ -209,6 +226,126 @@ def _rotulo(texto="", classes=(), **kw):
 
 def _acessivel(widget, texto):
     widget.update_property([Gtk.AccessibleProperty.LABEL], [texto])
+
+
+TAM_IMAGEM = (220, 140)          # miniatura na linha do tempo (painel da direita)
+TAM_IMAGEM_ULTIMO = (460, 300)   # miniatura dentro do bloco "Pensando"
+IMAGEM_MAX = 30 * 1024 * 1024    # acima disto a prévia custaria caro demais
+
+
+def _caminho_imagem(bloco, passo):
+    """A imagem que este passo leu, se for uma imagem existente (None se não for)."""
+    if not isinstance(passo, dict) or passo.get("tipo") != "leitura":
+        return None
+    caminho = str((passo.get("entrada") or {}).get("arquivo") or "").strip()
+    if not caminho:
+        return None
+    arq = Path(caminho).expanduser()
+    base = getattr(bloco, "base", None)
+    if not arq.is_absolute() and base:
+        arq = Path(base) / arq
+    try:
+        if not anexos.eh_imagem(arq) or not arq.is_file() or arq.stat().st_size > IMAGEM_MAX:
+            return None
+    except OSError:
+        return None
+    return arq
+
+
+def _tamanho_legivel(n):
+    for unidade, fator in (("GB", 1024 ** 3), ("MB", 1024 ** 2), ("KB", 1024)):
+        if n >= fator:
+            return f"{n / fator:.1f} {unidade}"
+    return f"{int(n)} B"
+
+
+def _abrir_imagem(origem, caminho):
+    """Visualizador da imagem que o agente está lendo (janela própria, fundo escuro)."""
+    caminho = Path(caminho)
+    raiz = origem.get_root() if origem is not None else None
+    janela = Gtk.Window()
+    janela.set_title(caminho.name)
+    janela.set_default_size(1040, 760)
+    janela.set_size_request(360, 260)
+    janela.add_css_class("visor-imagem")
+    if isinstance(raiz, Gtk.Window):
+        janela.set_transient_for(raiz)
+
+    cab = Gtk.HeaderBar()
+    cab.add_css_class("visor-cabecalho")
+    titulo = Gtk.Label(label=caminho.name, ellipsize=Pango.EllipsizeMode.MIDDLE)
+    titulo.add_css_class("visor-titulo")
+    cab.set_title_widget(titulo)
+
+    botao_tela = Gtk.Button(icon_name="view-fullscreen-symbolic")
+    botao_tela.add_css_class("flat")
+    botao_tela.set_tooltip_text(_t("Tela cheia"))
+    cab.pack_end(botao_tela)
+
+    botao_fora = Gtk.Button(icon_name="document-open-symbolic")
+    botao_fora.add_css_class("flat")
+    botao_fora.set_tooltip_text(_t("Abrir com"))
+    botao_fora.connect(
+        "clicked",
+        lambda _b: Gtk.FileLauncher.new(Gio.File.new_for_path(str(caminho))).launch(janela, None, None))
+    cab.pack_end(botao_fora)
+    janela.set_titlebar(cab)
+
+    corpo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+    corpo.add_css_class("visor-corpo")
+    try:
+        textura = Gdk.Texture.new_from_filename(str(caminho))
+    except GLib.Error:
+        textura = None
+    if textura is not None:
+        foto = Gtk.Picture.new_for_paintable(textura)
+        foto.set_content_fit(Gtk.ContentFit.CONTAIN)
+        foto.set_can_shrink(True)
+        foto.set_hexpand(True)
+        foto.set_vexpand(True)
+        foto.add_css_class("visor-foto")
+        corpo.append(foto)
+        rodape = Gtk.Label(
+            label=f"{textura.get_width()} × {textura.get_height()} px · {_tamanho_legivel(caminho.stat().st_size)}",
+            xalign=0.5)
+        rodape.add_css_class("visor-rodape")
+        corpo.append(rodape)
+    else:
+        aviso = Gtk.Label(label=_t("Não foi possível abrir a imagem."), xalign=0.5)
+        aviso.add_css_class("visor-erro")
+        aviso.set_vexpand(True)
+        aviso.set_valign(Gtk.Align.CENTER)
+        corpo.append(aviso)
+    janela.set_child(corpo)
+
+    def alternar_tela(_b=None):
+        janela.set_fullscreened(not janela.get_fullscreened())
+
+    botao_tela.connect("clicked", alternar_tela)
+    teclas = Gtk.EventControllerKey()
+
+    def tecla(_c, keyval, _codigo, _estado):
+        if keyval == Gdk.KEY_Escape:
+            janela.close()
+            return True
+        if keyval == Gdk.KEY_F11:
+            alternar_tela()
+            return True
+        return False
+    teclas.connect("key-pressed", tecla)
+    janela.add_controller(teclas)
+
+    janela.present()
+    if animacoes():
+        janela.set_opacity(0.0)
+        passos = [0]
+
+        def surgir():
+            passos[0] += 1
+            janela.set_opacity(min(1.0, passos[0] / 9))
+            return passos[0] < 9
+        GLib.timeout_add(18, surgir)
+    return janela
 
 
 def _ligar_tema():
@@ -394,16 +531,19 @@ class ListaPassos(Gtk.Box):
 class LinhaPasso(Gtk.Box):
     """Um passo: linha simples (ícone, descrição, duração) ou cartão (comando/edição)."""
 
-    def __init__(self, bloco, passo):
+    def __init__(self, bloco, passo, sem_filhos=False):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.bloco = bloco
         self.passo = passo
+        self.sem_filhos = sem_filhos   # resumo do último passo: subagente sem a lista dele
         self.cartao = None       # True/False depois de montado
         self.filhos = None
         self.saida_rev = None
         self.saida_lbl = None
         self.saida_cheia = False
         self.diff_cheio = False
+        self.imagem = None          # miniatura clicável da imagem lida
+        self.imagem_arquivo = None
         self._montar()
 
     # ── construção ───────────────────────────────────────────────────────────
@@ -419,6 +559,7 @@ class LinhaPasso(Gtk.Box):
             self.remove(filho)
             filho = self.get_first_child()
         self.saida_rev = self.saida_lbl = self.filhos = None
+        self.imagem = self.imagem_arquivo = None
         self.cartao = self._eh_cartao()
         if self.passo.get("tipo") == "pensamento":
             # trecho do raciocínio entre um passo e outro (como no Claude): texto corrido
@@ -458,6 +599,8 @@ class LinhaPasso(Gtk.Box):
         self.estado_box.add_css_class("passo-estado")
         self.estado_box.set_valign(Gtk.Align.CENTER)
         self.estado_lbl = Gtk.Label()
+        # encolhe com reticências em vez de alargar o cartão (painel de detalhes é estreito)
+        self.estado_lbl.set_ellipsize(Pango.EllipsizeMode.END)
         self.estado_box.append(self.estado_lbl)
         cab.append(self.estado_box)
         self.girador = None
@@ -479,6 +622,7 @@ class LinhaPasso(Gtk.Box):
             self.corpo.set_wrap(True)
             self.corpo.set_wrap_mode(Pango.WrapMode.CHAR)
             self.corpo.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
+            _sem_hifen(self.corpo)
             self.append(self.corpo)
             self.btn_diff = Gtk.Button()
             self.btn_diff.add_css_class("flat")
@@ -505,7 +649,7 @@ class LinhaPasso(Gtk.Box):
             _repintaveis.add(self)
             _ligar_tema()
 
-        if p.get("tipo") == "subagente" and self.bloco.filhos.get(p["id"]):
+        if p.get("tipo") == "subagente" and self.bloco.filhos.get(p["id"]) and not self.sem_filhos:
             self._criar_filhos()
         self.atualizar()
 
@@ -631,8 +775,54 @@ class LinhaPasso(Gtk.Box):
             for c in ("erro", "negado", "parado"):
                 (self.estado_box.add_css_class if c == estado else self.estado_box.remove_css_class)(c)
             self.estado_box.set_visible(rodando or bool(rotulo))
-            if p.get("tipo") == "subagente" and self.filhos is None and self.bloco.filhos.get(p["id"]):
+            if (p.get("tipo") == "subagente" and self.filhos is None and not self.sem_filhos
+                    and self.bloco.filhos.get(p["id"])):
                 self._criar_filhos()
+        self._atualizar_imagem()
+
+    def _atualizar_imagem(self):
+        """Imagem lida: mostra a miniatura e abre o visualizador num clique."""
+        arq = _caminho_imagem(self.bloco, self.passo)
+        if arq is None:
+            if self.imagem is not None:
+                self.imagem.set_visible(False)
+            return
+        if self.imagem is not None and self.imagem_arquivo == str(arq):
+            self.imagem.set_visible(True)
+            return
+        if self.imagem is not None:
+            self.remove(self.imagem)
+            self.imagem = None
+        self.imagem_arquivo = str(arq)
+        larg, alt = TAM_IMAGEM_ULTIMO if self.sem_filhos else TAM_IMAGEM
+        textura = anexos.miniatura(arq, larg, alt)
+        if textura is None:
+            return
+
+        caixa = Gtk.Overlay()
+        caixa.add_css_class("passo-imagem")
+        foto = Gtk.Picture.new_for_paintable(textura)
+        foto.set_can_shrink(False)
+        foto.add_css_class("passo-imagem-foto")
+        caixa.set_child(foto)
+        selo = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        selo.add_css_class("passo-imagem-selo")
+        selo.append(Gtk.Image.new_from_icon_name("zoom-in-symbolic"))
+        selo.append(Gtk.Label(label=_t("Visualizar")))
+        selo.set_halign(Gtk.Align.END)
+        selo.set_valign(Gtk.Align.END)
+        caixa.add_overlay(selo)
+
+        botao = Gtk.Button()
+        botao.add_css_class("flat")
+        botao.add_css_class("passo-imagem-botao")
+        botao.set_halign(Gtk.Align.START)
+        botao.set_child(caixa)
+        botao.set_tooltip_text(f"{_t('Visualizar')} — {arq.name}")
+        botao.connect("clicked", lambda _b, a=arq: _abrir_imagem(self, a))
+        _acessivel(botao, f"{_t('Visualizar')} {arq.name}")
+        self.append(botao)
+        self.imagem = botao
 
     def repintar(self):
         """Corpo do cartão (cores dependem do tema)."""
@@ -707,8 +897,13 @@ class LinhaPasso(Gtk.Box):
             self.saida_lbl = Gtk.Label(xalign=0, yalign=0)
             self.saida_lbl.add_css_class("passo-saida-texto")
             self.saida_lbl.set_selectable(True)
+            # quebra as linhas longas na largura disponível (sem rolagem lateral escondida)
+            self.saida_lbl.set_wrap(True)
+            self.saida_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            self.saida_lbl.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
+            _sem_hifen(self.saida_lbl)
             rolagem = Gtk.ScrolledWindow()
-            rolagem.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+            rolagem.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
             rolagem.set_propagate_natural_height(True)
             rolagem.set_child(self.saida_lbl)
             caixa.append(rolagem)
@@ -736,16 +931,33 @@ class LinhaPasso(Gtk.Box):
 
 
 # ── o bloco ─────────────────────────────────────────────────────────────────
-class BlocoPensando(Gtk.Box):
-    """Cabeçalho clicável + linha do tempo recolhível de uma resposta."""
+def ultimo_trecho(texto, limite=420):
+    """O fim de um raciocínio: o último parágrafo (cortado pelo começo se for longo)."""
+    partes = [x.strip() for x in str(texto or "").strip().split("\n\n") if x.strip()]
+    if not partes:
+        return ""
+    ultimo = partes[-1]
+    return ultimo if len(ultimo) <= limite else "…" + ultimo[-limite:].lstrip()
 
-    def __init__(self, registro=None, seguro=False, vivo=True, ao_abrir=None):
+
+class BlocoPensando(Gtk.Box):
+    """Cabeçalho clicável + o último passo; a linha do tempo inteira vai para o painel de detalhes."""
+
+    def __init__(self, registro=None, seguro=False, vivo=True, ao_abrir=None, ao_detalhes=None, base=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("pensando")
         self.registro = registro
         self.seguro = bool(seguro)
         self.vivo = bool(vivo)
+        self.base = base            # pasta de trabalho (caminhos relativos viram absolutos)
+        self._interagiu = False     # o usuário já abriu/fechou o bloco: não abrir sozinho
         self.ao_abrir = ao_abrir or (lambda: None)
+        # ao_detalhes(bloco, abrir): o painel da direita passa a mostrar este bloco
+        self.ao_detalhes = ao_detalhes
+        self.observador = None      # painel de detalhes: avisado a cada novidade
+        self.ultimo_id = None
+        self.ultimo_linha = None
+        self._ultimo_sujo = True
         self.passos = []            # todos, na ordem (é a lista guardada na conversa)
         self.por_id = {}
         self.raiz = []              # passos de primeiro nível
@@ -796,13 +1008,29 @@ class BlocoPensando(Gtk.Box):
         self.botao.set_child(cab)
         self.botao.set_tooltip_text(_t("Ver o que a IA pensou e executou"))
         self.botao.connect("toggled", self._alternar)
+        self.botao.connect("clicked", lambda _b: setattr(self, "_interagiu", True))
         self.append(self.botao)
 
         self.revelador = Gtk.Revealer()
         self.revelador.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
         self.revelador.set_transition_duration(200)
-        self.corpo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.corpo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.corpo.add_css_class("pensando-corpo")
+        # só o último pensamento/ação (o histórico inteiro fica no painel da direita)
+        self.ultimo_contexto = _rotulo(classes=("pensando-contexto",))
+        self.ultimo_contexto.set_ellipsize(Pango.EllipsizeMode.END)
+        self.ultimo_contexto.set_visible(False)
+        self.corpo.append(self.ultimo_contexto)
+        self.ultimo_caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.ultimo_caixa.add_css_class("pensando-ultimo")
+        self.corpo.append(self.ultimo_caixa)
+        self.btn_detalhes = Gtk.Button()
+        self.btn_detalhes.add_css_class("flat")
+        self.btn_detalhes.add_css_class("passo-mais")
+        self.btn_detalhes.add_css_class("pensando-ver-tudo")
+        self.btn_detalhes.set_halign(Gtk.Align.START)
+        self.btn_detalhes.connect("clicked", lambda _b: self.ao_detalhes and self.ao_detalhes(self, True))
+        self.corpo.append(self.btn_detalhes)
         self.revelador.set_child(self.corpo)
         self.append(self.revelador)
 
@@ -891,6 +1119,8 @@ class BlocoPensando(Gtk.Box):
         self._aviso = ""
         self.rotulo.set_label(texto)
         self._atualizar_tempo()
+        if self.observador is not None:
+            self.observador(self, None)
 
     def status_atual(self):
         return self._status
@@ -911,6 +1141,8 @@ class BlocoPensando(Gtk.Box):
         botao.update_state([Gtk.AccessibleState.EXPANDED], [int(aberto)])
         if aberto:
             self.ao_abrir()
+            if self.ao_detalhes:
+                self.ao_detalhes(self, False)   # o painel (se aberto) acompanha este bloco
 
     def expandir(self, aberto=True):
         if self.tem_conteudo() or not aberto:
@@ -920,23 +1152,87 @@ class BlocoPensando(Gtk.Box):
         return self.botao.get_active()
 
     def _montar_corpo(self):
-        if self.raciocinio and self.racio_view is None and not self._n_seg:
-            self._criar_raciocinio()
-        if self.lista is None and self.raiz:
-            self.lista = ListaPassos(self, self.raiz)
-            self.corpo.append(self.lista)
+        if self._ultimo_sujo or self.ultimo_linha is None:
+            self._atualizar_ultimo()
 
-    def _criar_raciocinio(self):
-        """Conversas antigas: o raciocínio inteiro num texto só, acima dos passos."""
-        self.racio_view = Gtk.Label(xalign=0)
-        self.racio_view.set_wrap(True)
-        self.racio_view.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        self.racio_view.set_selectable(True)
-        self.racio_view.add_css_class("pensamento-texto")
-        _acessivel(self.racio_view, _t("Raciocínio do modelo"))
-        self.racio_view.set_markup(markup_pensamento(self.raciocinio))
-        self.corpo.prepend(self.racio_view)
-        self._racio_no_buffer = len(self.raciocinio)
+    # ── o último passo (o que aparece dentro do bloco) ───────────────────────
+    def ultimo_passo(self):
+        return self.passos[-1] if self.passos else None
+
+    def _ultimo_mudou(self, p):
+        if self.observador is not None:
+            self.observador(self, p)
+        if not self.aberto():
+            self._ultimo_sujo = True
+            return
+        if p is not None and p.get("id") == self.ultimo_id and self.ultimo_linha is not None:
+            if hasattr(self.ultimo_linha, "passo"):
+                self.ultimo_linha.atualizar()
+            else:
+                self.ultimo_linha.set_markup(markup_pensamento(ultimo_trecho(p.get("texto"))))
+            self._atualizar_btn_detalhes()
+            return
+        self._atualizar_ultimo()
+
+    def _atualizar_ultimo(self):
+        """Troca o conteúdo do bloco aberto pelo passo mais recente."""
+        self._ultimo_sujo = False
+        if self.ultimo_linha is not None:
+            self.ultimo_caixa.remove(self.ultimo_linha)
+            self.ultimo_linha = None
+        p = self.ultimo_passo()
+        self.ultimo_id = p.get("id") if p else None
+        if p is None and self.raciocinio:
+            # conversa antiga: só o raciocínio, sem passos
+            p = {"tipo": "pensamento", "texto": self.raciocinio}
+        if p is None:
+            self.ultimo_contexto.set_visible(False)
+            self._atualizar_btn_detalhes()
+            return
+        if p.get("tipo") == "pensamento":
+            # o último trecho do raciocínio, não o raciocínio inteiro
+            lbl = Gtk.Label(xalign=0)
+            lbl.set_wrap(True)
+            lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            lbl.set_selectable(True)
+            lbl.add_css_class("pensamento-texto")
+            _acessivel(lbl, _t("Último pensamento do modelo"))
+            lbl.set_markup(markup_pensamento(ultimo_trecho(p.get("texto"))))
+            self.ultimo_linha = lbl
+        else:
+            self.ultimo_linha = LinhaPasso(self, p, sem_filhos=True)
+        self.ultimo_caixa.append(self.ultimo_linha)
+        pai = self.por_id.get(p.get("pai")) if p.get("pai") else None
+        if pai is not None:
+            self.ultimo_contexto.set_label("↳ " + (str(pai.get("texto") or "").strip() or _t("Subagente")))
+        self.ultimo_contexto.set_visible(pai is not None)
+        self._atualizar_btn_detalhes()
+
+    def _atualizar_btn_detalhes(self):
+        n = len([p for p in self.passos if p.get("tipo") != "pensamento"]) + self.descartados
+        if n > 1:
+            texto = _t("Ver todos os %1 passos no painel", n)
+        else:
+            texto = _t("Ver detalhes no painel")
+        self.btn_detalhes.set_label(texto)
+        self.btn_detalhes.set_visible(self.ao_detalhes is not None)
+
+    # ── linha do tempo inteira (mostrada no painel de detalhes) ──────────────
+    def linha_do_tempo(self):
+        """A lista de passos completa, que passa a ser atualizada ao vivo por este bloco."""
+        if self.lista is None:
+            self.lista = ListaPassos(self, self.raiz)
+        return self.lista
+
+    def soltar_linha_do_tempo(self):
+        """O painel deixou de mostrar este bloco: as atualizações não vão mais para lá."""
+        lista, self.lista = self.lista, None
+        if lista is not None and lista.get_parent() is not None:
+            lista.get_parent().remove(lista)
+
+    def raciocinio_sem_trechos(self):
+        """Conversas antigas guardam o raciocínio num texto só (sem os trechos entre passos)."""
+        return self.raciocinio if self.raciocinio and not self._n_seg else ""
 
     def _rolar_raciocinio(self):
         return False
@@ -996,14 +1292,20 @@ class BlocoPensando(Gtk.Box):
                 self.raiz.append(p)
                 if self.lista is not None:
                     self.lista.acrescentado(p)
-                elif self.aberto():
-                    self._montar_corpo()
             if len(self.passos) == 1:
                 self._atualizar_cabecalho()   # passa a ser clicável
+                if self.tem_conteudo() and not self.get_visible():
+                    self.set_visible(True)
         else:
             linha = self._linha(pid)
             if linha is not None:
                 linha.atualizar()
+        self._ultimo_mudou(p)
+        # O agente começou a ler uma imagem: abre o bloco uma vez para a prévia
+        # aparecer (se o usuário já tiver aberto/fechado à mão, respeita a escolha).
+        if (self.vivo and not self._interagiu and not self.aberto()
+                and _caminho_imagem(self, p) is not None):
+            self.expandir(True)
 
     def _linha(self, pid):
         """A linha na tela de um passo (None se o bloco está recolhido ou o passo, fora da vista)."""
@@ -1045,6 +1347,7 @@ class BlocoPensando(Gtk.Box):
                 linha = self._linha(self._seg["id"])
                 if linha is not None:
                     linha.atualizar()
+                self._ultimo_mudou(self._seg)
         if primeiro and self.raciocinio:
             self._atualizar_cabecalho()
         # resumo corrente: a última linha do raciocínio vira o passo atual do cabeçalho
@@ -1083,7 +1386,10 @@ class BlocoPensando(Gtk.Box):
         self._aviso = ""
         self.set_visible(self.tem_conteudo())
         self.botao.set_active(False)
+        self._ultimo_sujo = True
         self._atualizar_cabecalho()
+        if self.observador is not None:
+            self.observador(self, None)
 
     # ── conversa salva ───────────────────────────────────────────────────────
     def carregar(self, registro):

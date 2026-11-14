@@ -191,6 +191,20 @@ ShellRoot {
       if (done) done(x)
     })
   }
+  property bool testingVoice: false
+  function testVoice(id, done) {
+    var pid = id || (st && st.transcricao ? st.transcricao.id : "local")
+    testingVoice = true
+    setResult(pid, { busy: true, ok: false, msg: I18n.t("Fale no microfone por 4 segundos…") })
+    config(["ouvir", "4", pid], null, out => {
+      testingVoice = false
+      var x = { ok: false, msg: "falhou ao testar microfone" }
+      try { x = JSON.parse(out) } catch (e) {}
+      setResult(pid, { busy: false, ok: x.ok, msg: x.msg })
+      refresh()
+      if (done) done(x)
+    })
+  }
   function saveKey(id, key) {
     config(["chave", id], { DRACO_CHAVE: key }, () => test(id))
   }
@@ -816,6 +830,7 @@ ShellRoot {
             busy: card.busy
             onClicked: {
               if (keyField.text !== "") { shell.saveKey(card.p.id, keyField.text); keyField.text = "" }
+              else if (card.p.tipo === "transcricao") shell.testVoice(card.p.id)
               else shell.test(card.p.id)
             }
           }
@@ -852,7 +867,12 @@ ShellRoot {
         // No account, no key: just check it
         RowLayout {
           visible: !card.needsKey && card.p.login !== true && card.p.tipo !== "cerebro"
-          Btn { text: I18n.t("Testar"); busy: card.busy; onClicked: shell.test(card.p.id) }
+          Btn {
+            text: card.p.tipo === "transcricao" ? I18n.t("Falar e testar") : I18n.t("Testar")
+            glyph: card.p.tipo === "transcricao" ? "\u{f036c}" : ""
+            busy: card.busy
+            onClicked: card.p.tipo === "transcricao" ? shell.testVoice(card.p.id) : shell.test(card.p.id)
+          }
         }
 
         StateLine {
@@ -1446,12 +1466,36 @@ ShellRoot {
             }
           }
 
+          // ── Permissões ───────────────────────────────────────────────────
+          SectionLabel { text: I18n.t("Permissões no computador") }
+          Card {
+            SettingRow {
+              title: I18n.t("Pode mexer nos arquivos e no sistema")
+              hint: (shell.st && shell.st.permissao === "voz")
+                ? I18n.t("Modo só assistente de voz: arquivos e terminal estão bloqueados. O Draco apenas responde, busca na web, toca músicas e abre programas.")
+                : I18n.t("Modo completo: o Draco pode ler e editar arquivos, executar comandos e controlar o computador.")
+              Toggle {
+                id: permToggle
+                on: shell.st ? (shell.st.permissao !== "voz") : true
+                onToggled: {
+                  busy = true
+                  shell.config(["set", "PERMISSAO", on ? "voz" : "total"], null, () => {
+                    busy = false
+                    shell.refresh()
+                  })
+                }
+              }
+            }
+          }
+
           // ── Voice ───────────────────────────────────────────────────────
           SectionLabel { text: I18n.t("Voz") }
           Card {
             SettingRow {
-              title: I18n.t("Atender quando eu disser “Draco”")
-              hint: I18n.t("Chame sem apertar nada. Desligado, o microfone só abre com o F10.")
+              title: I18n.t("Escuta em segundo plano (“Draco”)")
+              hint: (shell.st && shell.st.escuta)
+                ? (shell.st.escuta_mb > 0 ? I18n.t("Ouvindo em segundo plano (%1 MB de memória RAM). Desligue para economizar memória; você ainda pode usar o Draco pelo atalho F10 ou pelo ícone.").replace("%1", shell.st.escuta_mb) : I18n.t("Ouvindo em segundo plano. Desligue para economizar memória RAM; o atalho F10 e o ícone continuam funcionando."))
+                : I18n.t("Serviço desligado (economiza memória RAM). O Draco não fica esperando em segundo plano; use o atalho F10 ou clique no ícone para falar.")
               Toggle {
                 id: wakeToggle
                 on: shell.st ? shell.st.escuta : false
@@ -1633,11 +1677,22 @@ ShellRoot {
 
             // Transcription
             Card {
-              ColumnLayout {
-                spacing: 4
+              RowLayout {
                 Layout.fillWidth: true
-                Label { text: I18n.t("Reconhecimento de voz"); font.pixelSize: 14; font.weight: Font.DemiBold }
-                Label { text: I18n.t("Transforma a sua fala em texto e confirma que você disse “Draco”."); color: shell.muted; font.pixelSize: 12; Layout.fillWidth: true }
+                spacing: 16
+                ColumnLayout {
+                  spacing: 4
+                  Layout.fillWidth: true
+                  Label { text: I18n.t("Reconhecimento de voz"); font.pixelSize: 14; font.weight: Font.DemiBold }
+                  Label { text: I18n.t("Transforma a sua fala em texto e confirma que você disse “Draco”."); color: shell.muted; font.pixelSize: 12; Layout.fillWidth: true }
+                }
+                Btn {
+                  text: shell.testingVoice ? I18n.t("Ouvindo…") : I18n.t("Testar microfone")
+                  glyph: "\u{f036c}"
+                  compact: true
+                  busy: shell.testingVoice
+                  onClicked: shell.testVoice()
+                }
               }
               ColumnLayout {
                 Layout.fillWidth: true

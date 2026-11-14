@@ -16,7 +16,7 @@ AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parents[1] / "pacotes/simba-apps/raiz/usr/share/simba-apps/agentes"
 sys.path.insert(0, str(RAIZ))
 
-from parser import AgentStreamParser, descrever_ferramenta  # noqa: E402
+from parser import AgentStreamParser, descrever_ferramenta, resumir_entrada  # noqa: E402
 import motor as M  # noqa: E402
 
 
@@ -199,6 +199,13 @@ class Descricao(unittest.TestCase):
         self.assertIn("Lendo", descrever_ferramenta("Read", {"file_path": "/a/b/c.py"}))
         self.assertIn("c.py", descrever_ferramenta("Edit", {"file_path": "/a/b/c.py"}))
         self.assertIn("git status", descrever_ferramenta("Bash", {"command": "git status"}))
+
+    def test_caminho_da_imagem_lida(self):
+        # o chat precisa do caminho (não só do nome) para mostrar a imagem lida
+        r = resumir_entrada("leitura", {"filePath": "/tmp/captura-do-navegador.png"})
+        self.assertEqual(r.get("arquivo"), "/tmp/captura-do-navegador.png")
+        r = resumir_entrada("leitura", {"file_path": "/home/usuario/foto.jpg"})
+        self.assertEqual(r.get("arquivo"), "/home/usuario/foto.jpg")
 
 
 if __name__ == "__main__":

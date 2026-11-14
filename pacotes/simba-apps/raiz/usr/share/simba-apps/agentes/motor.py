@@ -378,14 +378,33 @@ def marcar_gratis_esgotado(modelo, segundos=3600):
     return any(m not in fora for m in modelos_gratis())
 
 
+def eh_gratis(modelo):
+    return str(modelo or "").endswith("-free")
+
+
+def usa_gratis(a, cfg=None):
+    """True quando o agente roda nos modelos grátis em cascata.
+
+    O OpenCode já vem assim: sem conta, ou com conta mas sem modelo escolhido
+    ("Grátis automático"), ou com um modelo grátis escolhido. Quando um modelo grátis
+    esgota, o próximo grátis assume sozinho.
+    """
+    if not AGENTES.get(a, {}).get("gratis"):
+        return False
+    if modo_gratis(a):
+        return True
+    m = modelo_escolhido(a, cfg if cfg is not None else ler_config(verificar=False))
+    return not m or eh_gratis(m)
+
+
 def modelo_efetivo(a, cfg):
-    """O modelo escolhido; no modo grátis, só vale se for grátis (senão, o melhor grátis)."""
+    """O modelo que vai rodar: o escolhido; na cascata grátis, o melhor grátis disponível."""
     m = modelo_escolhido(a, cfg)
-    if modo_gratis(a) and not m.endswith("-free"):
-        return modelo_gratis()
-    if modo_gratis(a) and m in _gratis_fora():
-        return modelo_gratis()
-    return m
+    if not usa_gratis(a, cfg):
+        return m
+    if eh_gratis(m) and m not in _gratis_fora():
+        return m
+    return modelo_gratis()
 
 
 def aplicar_modelo(a, cmd, modelo, interativo=False):
@@ -647,7 +666,8 @@ def esgotado_ate(a):
 
 def marcar_esgotado(a, ate_iso=None):
     # Modo grátis: esgotou o modelo, não o agente; o próximo modelo grátis continua.
-    if modo_gratis(a) and marcar_gratis_esgotado(modelo_efetivo(a, ler_config(verificar=False))):
+    cfg = ler_config(verificar=False)
+    if usa_gratis(a, cfg) and marcar_gratis_esgotado(modelo_efetivo(a, cfg)):
         return
     if not ate_iso:
         volta = uso(a).get("sessaoVolta") or uso(a).get("semanaVolta")

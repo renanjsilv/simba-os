@@ -27,7 +27,9 @@ the mic opens for your answer right away, no "Draco" needed (`draco wake-process
   wake.py --teste --arquivo <wav>   same, reading a file instead of the mic
   wake.py --gravar         = `draco treinar`: teach it your voice (wake_record.py)
 
-Pause with `draco escuta desliga` (the mic is closed while paused).
+Turn it off with `draco escuta desliga` (or the settings): the service is stopped and
+disabled, so it uses no memory; F10 still works. When the package updates this file,
+the running service notices and restarts itself (systemd brings it back) with the new code.
 """
 import os as _os, sys as _sys
 _sys.path.insert(0, _os.path.expanduser("/usr/share/simba-apps/idiomas"))
@@ -86,6 +88,19 @@ NEAR = 0.2                  # speech quieter than this share of the "Draco" leve
                             # (TV, people talking farther away): it neither starts nor holds the recording
 
 TEST = "--teste" in sys.argv
+CODE_MTIME = os.path.getmtime(os.path.abspath(__file__))
+
+
+class Updated(Exception):
+    """wake.py changed on disk (package update): exit so systemd starts the new code."""
+
+
+def check_updated():
+    try:
+        if os.path.getmtime(os.path.abspath(__file__)) != CODE_MTIME:
+            raise Updated
+    except OSError:
+        pass
 FILE = sys.argv[sys.argv.index("--arquivo") + 1] if "--arquivo" in sys.argv else None
 # Só o caminho do modelo VAD que vem no faster_whisper: achar o pacote sem importá-lo
 # (o import puxa o ctranslate2 e atrasava o início do serviço).
@@ -240,6 +255,7 @@ class Mic:
     HIGHPASS = butter(4, 80, "highpass", fs=RATE, output="sos")
 
     def __init__(self):
+        self.swap = False  # big-endian samples (an AU stream, see below)
         # --raw: sem ele o pw-record (PipeWire >= 1.6.10) escreve na saída padrão um arquivo
         # AU (cabeçalho ".snd" + amostras big-endian), que lido como s16 little-endian é só
         # chiado: o detector ficava surdo sem dar erro nenhum.
@@ -247,12 +263,30 @@ class Mic:
             ["pw-record", "--raw", "--rate", str(RATE), "--channels", "1", "--format", "s16", "-"],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.zi = np.zeros((len(self.HIGHPASS), 2))
+        self.skip_au_header()
+
+    def skip_au_header(self):
+        """In case some pw-record ignores --raw: an AU stream starts with ".snd", the offset
+        of the samples (big-endian) and their encoding; skip the header, swap the bytes."""
+        head = self.proc.stdout.read(4)
+        if head == b".snd":
+            rest = self.proc.stdout.read(20)
+            offset = int.from_bytes(rest[0:4], "big")
+            self.proc.stdout.read(max(offset - 24, 0))
+            self.swap = True
+            log("aviso: o pw-record mandou áudio AU (big-endian); convertendo")
+            self.pending = b""
+        else:
+            self.pending = head
 
     def read(self, n):
-        raw = self.proc.stdout.read(n * 2)
+        need = n * 2 - len(self.pending)
+        raw = self.pending + self.proc.stdout.read(need)
+        self.pending = b""
         if len(raw) < n * 2:
             raise EOFError
-        x, self.zi = sosfilt(self.HIGHPASS, np.frombuffer(raw, np.int16).astype(np.float32), zi=self.zi)
+        pcm = np.frombuffer(raw, ">i2" if self.swap else np.int16)
+        x, self.zi = sosfilt(self.HIGHPASS, pcm.astype(np.float32), zi=self.zi)
         return np.clip(x, -32768, 32767).astype(np.int16).tobytes()
 
     def close(self):
@@ -401,6 +435,8 @@ def listen(clf, verifier, feats, vad, mic):
     while not os.path.exists(DISABLED):
         raw = mic.read(CHUNK)
         t += CHUNK / RATE
+        if not FILE and int(t / 0.08) % 60 == 0:  # every ~5 s
+            check_updated()
         if os.path.exists(FOLLOWUP):
             os.unlink(FOLLOWUP)
             vad.reset()
@@ -504,6 +540,10 @@ def main():
         mic = Mic()
         try:
             listen(clf, verifier, feats, vad, mic)
+        except Updated:
+            log("wake.py foi atualizado: reiniciando com o código novo")
+            mic.close()
+            sys.exit(75)  # Restart=on-failure brings it back
         except EOFError:
             log("microfone fechou; reabrindo")
             time.sleep(1)

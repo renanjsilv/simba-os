@@ -16,7 +16,8 @@ import numpy as np
 from piper import PiperVoice
 from scipy.signal import resample_poly
 
-D = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # /usr/share/draco
+D = os.path.expanduser("~/.local/share/draco")                       # voices, wake-train
 SR = 16000
 rng = np.random.default_rng(1)
 amb = np.frombuffer(open(os.path.join(D, "wake-train", "ambiente.raw"), "rb").read(), np.int16).astype(np.float32)
@@ -83,7 +84,7 @@ tmp = tempfile.mkdtemp()
 for name, (parts, bg, expected, dur) in SCENARIOS.items():
     path = os.path.join(tmp, "cenario.wav")
     build(parts, bg, path)
-    log = subprocess.run([sys.executable, "-I", os.path.join(D, "wake.py"), "--teste", "--arquivo", path],
+    log = subprocess.run([sys.executable, "-I", os.path.join(CODE, "wake.py"), "--teste", "--arquivo", path],
                          capture_output=True, text=True).stdout
     got, secs = outcome(log)
     ok = got == expected and (dur is None or dur[0] <= secs <= dur[1])

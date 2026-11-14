@@ -18,6 +18,7 @@ from simba_i18n import t as _t  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import motor as M  # noqa: E402
+import detalhes  # noqa: E402
 
 HOME = Path.home()
 CONVERSAS = HOME / ".local/state/simba/agents/conversas"
@@ -33,6 +34,8 @@ class HistoricoMixin:
         return self.conversa_id
 
     def _titulo_conversa(self):
+        if getattr(self, "conversa_titulo_manual", None):
+            return self.conversa_titulo_manual   # renomeada pela pessoa
         for msg in self.conversa_mensagens:
             if msg.get("tipo") == "user":
                 texto = " ".join(str(msg.get("texto", "")).split())
@@ -58,10 +61,13 @@ class HistoricoMixin:
         if not any(m.get("tipo") == "user" for m in self.conversa_mensagens):
             return
         self._sincronizar_ativo()
+        nova = not self.conversa_id
         cid = self._garantir_id_conversa()
+        titulo = self._titulo_conversa()
         dados = {
             "id": cid,
-            "titulo": self._titulo_conversa(),
+            "titulo": titulo,
+            "titulo_manual": bool(getattr(self, "conversa_titulo_manual", None)),
             "criada": self.conversa_criada or time.time(),
             "atualizada": time.time(),
             "pasta": str(self.work_dir),
@@ -81,6 +87,11 @@ class HistoricoMixin:
             os.replace(temporario, destino)
         except OSError:
             pass
+        # a barra de conversas só relê quando aparece uma conversa nova ou o título muda
+        if nova or getattr(self, "_titulo_na_barra", None) != (cid, titulo):
+            self._titulo_na_barra = (cid, titulo)
+            if hasattr(self, "_conversas_mudaram"):
+                self._conversas_mudaram()
 
     def _agendar_salvamento(self, atraso=1200):
         if self.salvar_fonte:
@@ -297,7 +308,7 @@ class HistoricoMixin:
         self._limpar_chat()
         self.text_input.grab_focus()
 
-    def _confirmar_renomear_conversa(self, dados, caixa, dialog, filtro=""):
+    def _confirmar_renomear_conversa(self, dados, caixa, dialog, filtro="", ao_mudar=None):
         alerta = Adw.AlertDialog.new(_t("Renomear conversa"), _t("Digite o novo título da conversa:"))
         alerta.add_response("cancelar", _t("Cancelar"))
         alerta.add_response("salvar", _t("Salvar"))
@@ -317,21 +328,35 @@ class HistoricoMixin:
             novo = entry.get_text().strip()
             if not novo:
                 return
-            dados["titulo"] = novo
             cid = dados.get("id")
+            dados["titulo"] = novo
             if cid:
                 destino = CONVERSAS / f"{cid}.json"
+                gravar = dados
                 try:
-                    destino.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+                    # relê do disco: a lista guardada pode estar velha
+                    atual = json.loads(destino.read_text(encoding="utf-8"))
+                    if isinstance(atual, dict):
+                        gravar = atual
+                except (OSError, ValueError):
+                    pass
+                gravar["titulo"] = novo
+                gravar["titulo_manual"] = True
+                try:
+                    destino.write_text(json.dumps(gravar, ensure_ascii=False), encoding="utf-8")
                 except OSError:
                     pass
-            if self.historico_dialog is dialog and caixa.get_root():
+                if cid == self.conversa_id:
+                    self.conversa_titulo_manual = novo
+            if ao_mudar is not None:
+                ao_mudar()
+            elif dialog is not None and self.historico_dialog is dialog and caixa.get_root():
                 self._preencher_historico(caixa, dialog, filtro)
 
         alerta.connect("response", resposta)
-        alerta.present(dialog)
+        alerta.present(dialog or self)
 
-    def _confirmar_apagar_conversa(self, dados, caixa, dialog, filtro=""):
+    def _confirmar_apagar_conversa(self, dados, caixa, dialog, filtro="", ao_mudar=None):
         alerta = Adw.AlertDialog.new(
             _t("Apagar conversa?"),
             f"{dados.get('titulo') or _t('Nova conversa')}\n"
@@ -357,11 +382,13 @@ class HistoricoMixin:
                     self.conversa_mensagens = []
                     self.ativo_registro = None
                     self._limpar_chat()
-                if self.historico_dialog is dialog and caixa.get_root():
+                if ao_mudar is not None:
+                    ao_mudar()
+                elif dialog is not None and self.historico_dialog is dialog and caixa.get_root():
                     self._preencher_historico(caixa, dialog, filtro)
 
         alerta.connect("response", resposta)
-        alerta.present(dialog)
+        alerta.present(dialog or self)
 
     def _carregar_conversa(self, dados, dialog):
         if self._rodando():
@@ -378,6 +405,8 @@ class HistoricoMixin:
 
         self._limpar_chat()
         self.conversa_id = dados.get("id")
+        self.conversa_titulo_manual = dados.get("titulo") if dados.get("titulo_manual") else None
+        self._titulo_na_barra = (self.conversa_id, dados.get("titulo"))
         self.conversa_criada = dados.get("criada") or time.time()
         self.conversa_mensagens = list(mensagens)
         self.ativo_registro = None
@@ -414,8 +443,10 @@ class HistoricoMixin:
                 # bloco "Pensando" como ficou no fim da resposta (conversas antigas
                 # só têm a lista de textos "atividade": viram passos simples)
                 widgets["bloco"].seguro = bool(msg.get("seguro"))
+                widgets["bloco"].registro_msg = msg
                 widgets["bloco"].carregar(msg)
                 widgets["card"].atualizar_acoes(widgets["bloco"].passos)
+                self.ultimo_bloco = widgets["bloco"]
             elif tipo == "sistema":
                 self._adicionar_sistema(msg.get("texto", ""), registro=False)
             elif tipo == "handover":
@@ -439,6 +470,18 @@ class HistoricoMixin:
                     break
 
         self.empty_state.set_visible(not self.conversa_mensagens)
+        # painel de detalhes: a última resposta e o contexto que ela deixou
+        if hasattr(self, "detalhes"):
+            ultimo = getattr(self, "ultimo_bloco", None)
+            if ultimo is not None:
+                self._detalhes_bloco(ultimo, abrir=False)
+            reg = next((m for m in reversed(self.conversa_mensagens)
+                        if m.get("tipo") == "assistant" and m.get("contexto")), None)
+            if reg is not None:
+                self.detalhes.contexto(reg["contexto"], detalhes.janela_contexto(reg.get("agente"), reg.get("modelo")))
+            self._atualizar_detalhes_ambiente()
+        if hasattr(self, "barra"):
+            self.barra.marcar_atual(self.conversa_id)
         self._scroll_para_fim(forcar=True)
         self.text_input.grab_focus()
 

@@ -41,11 +41,14 @@ from seletor import Seletor  # noqa: E402
 from central import CentralMixin  # noqa: E402
 import marcas  # noqa: E402
 from estilo import CSS  # noqa: E402
+import estilo  # noqa: E402
 from historico import HistoricoMixin  # noqa: E402
 from markdown import MarkdownMixin  # noqa: E402
 from painel import PainelMixin  # noqa: E402
 from parser import AgentStreamParser  # noqa: E402
 import atividade  # noqa: E402
+import conversas  # noqa: E402
+import detalhes  # noqa: E402
 import integracoes  # noqa: E402
 import lateral  # noqa: E402
 import voz  # noqa: E402
@@ -57,6 +60,26 @@ except (ImportError, ValueError):
 # AGENTES_DEV=1 abre uma instância separada (para testar sem mexer na janela aberta).
 APP_ID = "com.simba.AgentesDev" if os.environ.get("AGENTES_DEV") else "com.simba.Agentes"
 HOME = Path.home()
+# o que a janela lembra entre uma abertura e outra (painéis laterais abertos ou fechados)
+JANELA_CFG = HOME / ".config/agentes/janela.json"
+
+
+def ler_janela_cfg():
+    try:
+        import json
+        c = json.loads(JANELA_CFG.read_text())
+        return c if isinstance(c, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def gravar_janela_cfg(c):
+    try:
+        import json
+        JANELA_CFG.parent.mkdir(parents=True, exist_ok=True)
+        JANELA_CFG.write_text(json.dumps(c))
+    except OSError:
+        pass
 
 
 def _vigiar_interface():
@@ -105,6 +128,7 @@ def formatar_uso(uso):
 VIGIA_PASSO = 5          # s entre uma conferida e outra
 VIGIA_AVISO = 90         # s sem sinal para o status começar a contar o tempo parado
 VIGIA_SAIDA = 120        # s que o processo pode ficar aberto depois de responder, sem nada pendente
+ROLAGEM_PAUSA = 6        # s: depois de a pessoa rolar para cima, a conversa espera antes de descer sozinha
 VIGIA_MINIMO = 60        # s: piso do limite de silêncio, por mais baixo que esteja na configuração
 VIGIA_REPETICOES = 30    # mesma ação seguida tantas vezes = preso num laço
 
@@ -203,6 +227,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.proc = None
         self.agente_atual = None
         self.usados = set()
+        self.ativo_trechos = []        # trechos da resposta já fechados por uma pergunta no meio
+        self.ativo_prefixo = ""        # texto da resposta que já está nesses trechos
         self.conversas_iniciadas = set()
         self.anterior_passagem = None
         self.inicio_agente = 0.0
@@ -305,8 +331,15 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         # Seletor de agente: pílula com logo + nome; a lista abre num popover com
         # o logo, o modelo e o estado do limite de cada agente.
+        # Barra de conversas (esquerda): Nova conversa, Procurar, Recentes
+        self.btn_barra = Gtk.ToggleButton(icon_name="sidebar-show-symbolic")
+        self.btn_barra.add_css_class("flat")
+        self.btn_barra.add_css_class("icon-button")
+        self.btn_barra.set_tooltip_text(f"{_t('Conversas')} (Ctrl+B)")
+        header.pack_start(self.btn_barra)
+
         marcas.registrar()
-        self.dropdown = Seletor(lambda: self.dropdown_items, self._on_agente_selecionado,
+        self.dropdown = Seletor(self._itens_agentes_atuais, self._on_agente_selecionado,
                                 cabecalho=_t("Agente de IA"), classe="agent-pill",
                                 icone_fn=lambda it: self._icone_item(it.get("id")))
         self.icone_seletor = self.dropdown.icone
@@ -364,6 +397,13 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.btn_navegador.connect("toggled", self._on_alternar_navegador)
         acoes.append(self.btn_navegador)
 
+        # Painel de detalhes (direita): ambiente, contexto, agentes e atividade
+        self.btn_detalhes = Gtk.ToggleButton(icon_name="sidebar-show-right-symbolic")
+        self.btn_detalhes.add_css_class("flat")
+        self.btn_detalhes.add_css_class("icon-button")
+        self.btn_detalhes.set_tooltip_text(f"{_t('Detalhes: ambiente, contexto, agentes e atividade')} (Ctrl+Shift+D)")
+        acoes.append(self.btn_detalhes)
+
         header.pack_end(acoes)
 
         # Área Central de Mensagens: coluna central ergonômica para leitura agradável
@@ -393,7 +433,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.seguir_fim = True
         adj = self.scroller.get_vadjustment()
         adj.connect("value-changed", self._rolagem_mudou)
-        adj.connect("notify::upper", lambda *_: self.seguir_fim and GLib.idle_add(self._do_scroll))
+        adj.connect("notify::upper", lambda *_: (self.seguir_fim or not self._lendo_acima())
+                    and self._scroll_para_fim())
 
         # O estado vazio fica sobreposto à área de rolagem para centralizar de verdade
         self.empty_state = self._criar_estado_vazio()
@@ -457,7 +498,43 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.divisao.set_shrink_start_child(False)
         self.divisao.set_shrink_end_child(False)
         box_principal.set_size_request(420, -1)
-        toolbar_view.set_content(self.divisao)
+
+        # Painéis laterais (como no Claude Code): conversas à esquerda, detalhes à direita.
+        # Em janelas estreitas viram sobrepostos e começam fechados.
+        cfg_janela = ler_janela_cfg()
+        self.detalhes = detalhes.PainelDetalhes(ao_fechar=lambda: self.btn_detalhes.set_active(False),
+                                                abrir_pasta=lambda p: self._abrir_arquivo(str(p)))
+        self.split_detalhes = Adw.OverlaySplitView()
+        self.split_detalhes.set_sidebar_position(Gtk.PackType.END)
+        self.split_detalhes.set_sidebar(self.detalhes)
+        self.split_detalhes.set_content(self.divisao)
+        self.split_detalhes.set_min_sidebar_width(270)
+        self.split_detalhes.set_max_sidebar_width(380)
+        self.split_detalhes.set_sidebar_width_fraction(0.24)
+        self.split_detalhes.set_show_sidebar(bool(cfg_janela.get("detalhes", True)))
+        self.barra = conversas.BarraConversas(
+            listar=self._listar_conversas, abrir=self._abrir_da_barra,
+            nova=lambda: self._limpar_chat(), renomear=self._renomear_da_barra,
+            apagar=self._apagar_da_barra, quando=self._quando_legivel)
+        self.split_barra = Adw.OverlaySplitView()
+        self.split_barra.set_sidebar(self.barra)
+        self.split_barra.set_content(self.split_detalhes)
+        self.split_barra.set_min_sidebar_width(220)
+        self.split_barra.set_max_sidebar_width(300)
+        self.split_barra.set_sidebar_width_fraction(0.18)
+        self.split_barra.set_show_sidebar(bool(cfg_janela.get("conversas", True)))
+        for split, botao, chave in ((self.split_barra, self.btn_barra, "conversas"),
+                                    (self.split_detalhes, self.btn_detalhes, "detalhes")):
+            split.bind_property("show-sidebar", botao, "active",
+                                GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE)
+            botao.connect("toggled", self._painel_lateral_alternado, split, chave)
+        toolbar_view.set_content(self.split_barra)
+
+        # Estado temporário dos painéis laterais quando o navegador está aberto:
+        # ao abrir o navegador, os painéis de Conversas e Detalhes são minimizados
+        # e restaurados ao fechar, sem alterar a preferência salva do usuário.
+        self._nav_sidebar_temp = False
+        self._nav_sidebar_salvo = None
 
         # Arrastar e soltar arquivos/imagens em qualquer lugar da janela
         drop_target = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
@@ -473,7 +550,17 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             for alvo in (self.box_mensagens, self.box_inferior):
                 bp.add_setter(alvo, "margin-start", margem)
                 bp.add_setter(alvo, "margin-end", margem)
+            if condicao.startswith("max"):
+                bp.add_setter(self.split_barra, "collapsed", True)
+                bp.add_setter(self.split_detalhes, "collapsed", True)
             self.add_breakpoint(bp)
+        # janela média: só os detalhes viram sobrepostos (a conversa continua com espaço)
+        bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 1180sp"))
+        bp.add_setter(self.split_detalhes, "collapsed", True)
+        self.add_breakpoint(bp)
+        for split, chave in ((self.split_barra, "conversas"), (self.split_detalhes, "detalhes")):
+            split.connect("notify::collapsed", self._painel_lateral_recolhido, chave)
+        self._atualizar_detalhes_ambiente()
 
         self._atualizar_pasta_ui()
         self._atualizar_botao_enviar()
@@ -818,6 +905,22 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
     def _mostrar_navegador(self):
         if self.painel_codigo.get_visible():
             self.painel_codigo.set_visible(False)
+        # Ao abrir o navegador, minimizar os painéis de Conversas e Detalhes para
+        # deixar em foco só o chat e o navegador. Guardar o estado anterior para
+        # restaurar ao fechar (como estava, inclusive se já estivessem fechados).
+        if getattr(self, "_nav_sidebar_salvo", None) is None:
+            self._nav_sidebar_salvo = {
+                "conversas": self.split_barra.get_show_sidebar(),
+                "detalhes": self.split_detalhes.get_show_sidebar(),
+            }
+        # Minimização ativa enquanto o navegador estiver aberto: evita persistir
+        # o fechamento temporário como preferência do usuário.
+        self._nav_sidebar_temp = True
+        # Garante a minimização a cada abertura (mesmo se os painéis tiverem sido
+        # reabertos manualmente enquanto o navegador estava aberto), sem sobrescrever
+        # o estado salvo na primeira abertura.
+        self.split_barra.set_show_sidebar(False)
+        self.split_detalhes.set_show_sidebar(False)
         if not self.navegador.get_visible():
             self.navegador.set_visible(True)
             self._abrir_lateral(0.4)
@@ -830,15 +933,27 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._fechar_lateral_se_vazia()
         if self.btn_navegador.get_active():
             self.btn_navegador.set_active(False)
+        # Restaurar os painéis laterais como estavam antes de abrir o navegador.
+        salvo = getattr(self, "_nav_sidebar_salvo", None)
+        if salvo is not None:
+            self._nav_sidebar_temp = True
+            try:
+                self.split_barra.set_show_sidebar(bool(salvo.get("conversas", False)))
+                self.split_detalhes.set_show_sidebar(bool(salvo.get("detalhes", False)))
+            finally:
+                self._nav_sidebar_salvo = None
+                self._nav_sidebar_temp = False
+        else:
+            self._nav_sidebar_temp = False
         # a conversa volta a ser o foco: cursor na caixa de mensagem
         self.text_input.grab_focus()
 
     # ── painel de código (como os Artifacts do Claude / Canvas do ChatGPT) ──
     def _preparar_painel_codigo(self):
+        # Se o navegador estava aberto, restaurar os painéis laterais (como estavam)
+        # antes de trocar para o painel de código.
         if self.navegador is not None and self.navegador.get_visible():
-            self.navegador.set_visible(False)
-            if self.btn_navegador.get_active():
-                self.btn_navegador.set_active(False)
+            self._esconder_navegador()
         self.painel_codigo.set_visible(True)
         self._abrir_lateral(0.5)
         self.lateral.set_visible(True)
@@ -858,6 +973,88 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.text_input.grab_focus()
 
     # ── simba-chat: pedidos dos agentes ──────────────────────────────────────
+    # ── painéis laterais: conversas (esquerda) e detalhes (direita) ─────────
+    def _painel_lateral_alternado(self, botao, split, chave):
+        # enquanto o navegador está aberto, os painéis laterais são minimizados
+        # temporariamente: não persistir mudanças de preferência nesse intervalo
+        if getattr(self, "_nav_sidebar_temp", False):
+            if chave == "conversas" and botao.get_active():
+                self.barra.marcar_atual(self.conversa_id)
+            return
+        # sobreposto (janela estreita) é temporário: não muda a preferência
+        if not split.get_collapsed():
+            cfg = ler_janela_cfg()
+            cfg[chave] = botao.get_active()
+            gravar_janela_cfg(cfg)
+        if chave == "conversas" and botao.get_active():
+            self.barra.marcar_atual(self.conversa_id)
+
+    def _painel_lateral_recolhido(self, split, _p, chave):
+        # janela estreita: o painel vira sobreposto e fecha; ao alargar, volta como estava
+        # Enquanto o navegador estiver aberto, os painéis laterais ficam minimizados:
+        # não reabrir ao redimensionar a janela (senão a minimização se perde).
+        if getattr(self, "_nav_sidebar_temp", False):
+            split.set_show_sidebar(False)
+            return
+        split.set_show_sidebar(False if split.get_collapsed() else bool(ler_janela_cfg().get(chave, True)))
+
+    def _abrir_da_barra(self, dados):
+        if self._rodando():
+            self.barra.marcar_atual(self.conversa_id)
+            self._adicionar_sistema(_t("Espere a resposta terminar (ou pare com Esc) para abrir outra conversa."),
+                                    registro=False)
+            return
+        self._carregar_conversa(dados, None)
+        self.barra.marcar_atual(self.conversa_id)
+        if self.split_barra.get_collapsed():
+            self.split_barra.set_show_sidebar(False)
+
+    def _renomear_da_barra(self, dados):
+        self._confirmar_renomear_conversa(dados, None, None, ao_mudar=self._conversas_mudaram)
+
+    def _apagar_da_barra(self, dados):
+        self._confirmar_apagar_conversa(dados, None, None, ao_mudar=self._conversas_mudaram)
+
+    def _conversas_mudaram(self):
+        if hasattr(self, "barra"):
+            self.barra.atual = self.conversa_id
+            self.barra.recarregar()
+
+    def _info_agente_atual(self):
+        """(id, nome, modelo) de quem responde agora (ou vai responder)."""
+        cfg = M.ler_config(verificar=False)
+        agente = (self.agente_atual if self._rodando() else None) or self._agente_escolhido()
+        if not agente:
+            agente = next((a for a in getattr(self, "candidatos", []) if not M.esgotado_ate(a)), None)
+        if not agente:
+            return None, _t("Automático"), ""
+        info = M.AGENTES.get(agente, {})
+        modelo = ""
+        if self._rodando() and self.ativo_registro is not None:
+            modelo = self.ativo_registro.get("modelo") or ""
+        modelo = modelo or M.modelo_efetivo(agente, cfg) or info.get("modelo", "")
+        return agente, info.get("nome", agente), modelo
+
+    def _atualizar_detalhes_ambiente(self):
+        if not hasattr(self, "detalhes"):
+            return
+        agente, nome, modelo = self._info_agente_atual()
+        seguro = bool(M.ler_config(verificar=False).get("seguro"))
+        self.detalhes.ambiente(pasta=self.work_dir, agente=nome, modelo=modelo, seguro=seguro,
+                               icone=marcas.icone_agente(agente, modelo) if agente else "simba-agente")
+
+    def _detalhes_bloco(self, bloco, abrir=True):
+        """O painel de detalhes passa a mostrar a atividade deste bloco "Pensando"."""
+        if not hasattr(self, "detalhes"):
+            return
+        reg = getattr(bloco, "registro_msg", None) or {}
+        agente = reg.get("agente") or self.agente_atual
+        nome = M.AGENTES.get(agente, {}).get("nome", agente) if agente else None
+        icone = marcas.icone_agente(agente, reg.get("modelo")) if agente else None
+        self.detalhes.mostrar_bloco(bloco, agente=nome, icone=icone)
+        if abrir:
+            self.split_detalhes.set_show_sidebar(True)
+
     def _tratar_integracao(self, pedido, responder):
         cmd = pedido.get("cmd")
         if cmd == "estado":
@@ -960,11 +1157,40 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         enviar.connect("clicked", livre_enviar)
         p = {"card": card, "concluir": concluir}
         self.perguntas.append(p)
-        self.box_mensagens.append(card)
+        self._inserir_na_resposta(card)
         self._scroll_para_fim(forcar=True)
         if not self.is_active():
             self._trazer_janela()
         GLib.idle_add(lambda: ((botoes.get_child_at_index(0) or entrada).grab_focus(), False)[1])
+
+    def _inserir_na_resposta(self, widget):
+        """Põe `widget` no ponto atual da resposta em andamento e continua o texto abaixo dele.
+
+        Sem isso a pergunta ia para o fim da conversa e o resto da resposta (que continua
+        no mesmo cartão, acima) a deixava presa embaixo de tudo.
+        """
+        card, msg = getattr(self, "ativo_card", None), self.ativo_mensagem
+        if card is None or msg is None or self.finalizado or msg.get_parent() is not card:
+            self.box_mensagens.append(widget)
+            return
+        if self.render_fonte:
+            GLib.source_remove(self.render_fonte)
+            self.render_fonte = 0
+        msg.definir(self._texto_do_trecho(self.ativo_texto))   # fecha o trecho atual como está
+        widget.add_css_class("na-resposta")
+        card.insert_child_after(widget, msg)
+        seguinte = self._criar_mensagem()
+        card.insert_child_after(seguinte, widget)
+        self.ativo_trechos.append(msg)
+        self.ativo_prefixo = self.ativo_texto
+        self.ativo_mensagem = seguinte
+
+    def _texto_do_trecho(self, texto):
+        """Parte do texto da resposta que vai no trecho atual (depois da última pergunta)."""
+        prefixo = getattr(self, "ativo_prefixo", "")
+        if prefixo and texto.startswith(prefixo):
+            return texto[len(prefixo):].lstrip("\n")
+        return texto
 
     def _cancelar_perguntas(self):
         for p in list(self.perguntas):
@@ -1215,6 +1441,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             ate = M.esgotado_ate(a)
             it = {"id": a, "nome": nome, "curto": nome,
                   "sub": modelo or _t("Modelo padrão do agente")}
+            if M.usa_gratis(a, cfg):
+                it["sub"] = (modelo.split("/", 1)[-1] if modelo else _t("Grátis automático · troca sozinho entre os modelos grátis"))
+                it["selo"] = _t("Grátis")
             if ate:
                 it["aviso"] = f"{_t('volta')} {M.hora(ate)}"
             if i == 0:
@@ -1231,6 +1460,18 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._atualizar_modelo_dropdown()
         self._atualizar_uso_ui()
         self._atualizar_estado_gratis()
+
+    def _itens_agentes_atuais(self):
+        """Itens do seletor com o aviso "volta …" em dia (o limite pode ter zerado desde a montagem)."""
+        for it in self.dropdown_items:
+            a = it.get("id")
+            if a in M.AGENTES:
+                ate = M.esgotado_ate(a)
+                if ate:
+                    it["aviso"] = f"{_t('volta')} {M.hora(ate)}"
+                elif it.get("aviso", "").startswith(_t("volta")):
+                    it.pop("aviso", None)
+        return self.dropdown_items
 
     def _on_agente_selecionado(self, _i, item):
         # Durante uma resposta, agente_atual é quem está respondendo
@@ -1251,16 +1492,47 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         cfg = M.ler_config(verificar=False)
         atual = M.modelo_escolhido(agente, cfg)
         nome = M.AGENTES.get(agente, {}).get("nome", agente)
-        opcoes = [{"id": "", "valor": "", "nome": _t("Padrão do agente"), "curto": _t("Modelo padrão"),
-                   "sub": _t("O que o %1 escolher", nome)}]
+        tem_gratis = bool(M.AGENTES.get(agente, {}).get("gratis"))
+        if tem_gratis:
+            # OpenCode: o padrão é a cascata dos modelos grátis; os grátis vêm primeiro
+            opcoes = [{"id": "", "valor": "", "nome": _t("Grátis automático"), "curto": _t("Grátis automático"),
+                       "sub": _t("Usa os modelos grátis e troca sozinho quando um esgota"),
+                       "selo": _t("Grátis"), "icone": "starred-symbolic"}]
+        else:
+            opcoes = [{"id": "", "valor": "", "nome": _t("Padrão do agente"), "curto": _t("Modelo padrão"),
+                       "sub": _t("O que o %1 escolher", nome)}]
         vistos = {""}
-        for o in M.modelos(agente):
+        lista = M.modelos(agente)
+        if tem_gratis:
+            gratis = M.modelos_gratis()
+            ordem = {v: i for i, v in enumerate(gratis)}
+            lista = ([o for o in lista if M.eh_gratis(o.get("valor"))] or [{"valor": v} for v in gratis])
+            lista.sort(key=lambda o: ordem.get(o.get("valor"), len(ordem)))
+            lista += [o for o in M.modelos(agente) if not M.eh_gratis(o.get("valor"))]
+        fora = M._gratis_fora() if tem_gratis else {}
+        so_gratis = tem_gratis and M.modo_gratis(agente)
+        secao = None
+        for o in lista:
             valor = str(o.get("valor", "")).strip()
             if valor and valor not in vistos:
                 vistos.add(valor)
-                rot = o.get("rotulo") or valor
-                opcoes.append({"id": valor, "valor": valor, "nome": rot, "curto": rot,
-                               "sub": valor if valor != rot else ""})
+                rot = o.get("rotulo") or valor.split("/", 1)[-1]
+                op = {"id": valor, "valor": valor, "nome": rot, "curto": rot,
+                      "sub": valor if valor != rot else ""}
+                if tem_gratis:
+                    g = M.eh_gratis(valor)
+                    nova = _t("Grátis") if g else _t("Com conta conectada")
+                    if nova != secao:
+                        op["secao"] = nova
+                        secao = nova
+                    if g:
+                        op["nome"] = op["curto"] = rot[:-5] if rot.endswith("-free") else rot
+                        op["selo"] = _t("Grátis")
+                        if valor in fora:
+                            op["aviso"] = _t("esgotado")
+                    elif so_gratis:
+                        op["sub"] = _t("Precisa conectar uma conta")
+                opcoes.append(op)
         if atual and atual not in vistos:
             opcoes.append({"id": atual, "valor": atual, "nome": atual, "curto": atual})
 
@@ -1545,6 +1817,10 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
     def _iniciar_execucao(self, pedido, agente_forcado=None, arq_passagem=None):
         cfg = M.ler_config(verificar=False)
         seguro = bool(cfg.get("seguro"))
+        if not agente_forcado and arq_passagem is None:
+            # pedido novo: quem esgotou num pedido anterior volta a valer se o limite já zerou
+            # (antes o Automático pulava o agente pelo resto da conversa)
+            self.usados.clear()
         agente = agente_forcado or self._agente_escolhido()
         if agente and not agente_forcado and seguro and not M.suporta_seguro(agente):
             nome = M.AGENTES.get(agente, {}).get("nome", agente)
@@ -1554,10 +1830,15 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             self._proximo_da_fila()
             return
         if not agente:
-            cands = [a for a in M.candidatos(cfg, pular=self.usados, verificar=False, seguro=seguro)
+            pular = self.usados - {a for a in self.usados
+                                   if M.usa_gratis(a, cfg) and M.modelo_gratis()}
+            cands = [a for a in M.candidatos(cfg, pular=pular, verificar=False, seguro=seguro)
                      if not M.esgotado_ate(a)]
             if not cands:
                 cands = M.candidatos(cfg, verificar=False, seguro=seguro)
+                nao_esgotados = [a for a in cands if not M.esgotado_ate(a)]
+                if nao_esgotados:
+                    cands = nao_esgotados
             if not cands:
                 self._adicionar_sistema(
                     _t("Nenhum agente com modo somente leitura disponível.") if seguro else
@@ -2018,7 +2299,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.render_fonte = 0
         if self.finalizado or self.ativo_mensagem is None:
             return False
-        self.ativo_mensagem.definir(self.ativo_texto, ao_vivo=self.seguir_fim)
+        self.ativo_mensagem.definir(self._texto_do_trecho(self.ativo_texto), ao_vivo=self.seguir_fim)
         # com texto na tela o cabeçalho do bloco sobe com a conversa: o indicador de
         # digitação, no fim, continua dizendo o que o agente faz
         if self.ativo_digitando is not None and not self.ativo_digitando.get_visible():
@@ -2052,11 +2333,21 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._finalizar_resposta(notificar=False)
 
         seguro = bool(cfg.get("seguro"))
-        seguintes = [a for a in M.candidatos(cfg, pular=self.usados, verificar=False, seguro=seguro)
+        pular = self.usados - {a for a in self.usados
+                               if M.usa_gratis(a, cfg) and M.modelo_gratis()}
+        seguintes = [a for a in M.candidatos(cfg, pular=pular, verificar=False, seguro=seguro)
                      if not M.esgotado_ate(a)]
         # Modo grátis: o mesmo agente segue com o próximo modelo grátis.
-        if not seguintes and M.modo_gratis(agente_antigo) and not M.esgotado_ate(agente_antigo):
+        if not seguintes and M.usa_gratis(agente_antigo, cfg) and not M.esgotado_ate(agente_antigo):
             seguintes = [agente_antigo]
+        # Se ainda não há próximo, tenta reutilizar um agente grátis que ainda
+        # tenha modelo disponível (ex.: OpenCode com modelos -free restantes),
+        # mesmo que já tenha sido usado nesta conversa.
+        if not seguintes:
+            for a in M.candidatos(cfg, verificar=False, seguro=seguro):
+                if M.usa_gratis(a, cfg) and M.modelo_gratis():
+                    seguintes = [a]
+                    break
         if not seguintes:
             self._adicionar_sistema(
                 f"⚡ {_t('Limite de uso atingido para')} {nome_antigo}. "
@@ -2143,7 +2434,12 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             if interrompida:
                 self.ativo_registro["interrompida"] = True
         if self.ativo_mensagem is not None:
-            self.ativo_mensagem.definir(texto)
+            if self.ativo_trechos and not texto.startswith(self.ativo_prefixo):
+                # texto trocado por inteiro (erro): mostra tudo num trecho só
+                for t in self.ativo_trechos:
+                    t.set_visible(False)
+                self.ativo_prefixo = ""
+            self.ativo_mensagem.definir(self._texto_do_trecho(texto))
             self.ativo_mensagem.concluir(recolher=self.seguir_fim)
             self.ativo_renderizado = True
 
@@ -2153,6 +2449,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         card = getattr(self, "ativo_card", None)
         if card is not None:
+            card.texto_total = texto
             card.remove_css_class("ativo")
             card.acoes.set_visible(True)
             if self.ativo_bloco is not None:
@@ -2330,7 +2627,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         info = M.AGENTES.get(agente, {})
         nome = info.get("nome", agente)
         if modelo is None:
-            modelo = M.modelo_escolhido(agente, M.ler_config(verificar=False)) or info.get("modelo", "")
+            modelo = M.modelo_efetivo(agente, M.ler_config(verificar=False)) or info.get("modelo", "")
 
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         card.add_css_class("assistant-card")
@@ -2428,18 +2725,20 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         header_row.append(lbl_hora)
         card.append(header_row)
 
-        # Bloco "Pensando": passo atual + cronômetro; clicado, abre a linha do tempo
-        # (raciocínio, passos, cartões de comando). Fica acima do texto, como um resumo
-        # do trabalho; o indicador de digitação fica DEPOIS do texto, no fim da conversa.
-        seguro = bool(M.ler_config(verificar=False).get("seguro")) if ativo else False
-        bloco = atividade.BlocoPensando(seguro=seguro, vivo=ativo,
-                                        ao_abrir=lambda: GLib.idle_add(self._do_scroll) if self.seguir_fim else None)
-        bloco.set_visible(ativo)
-        card.append(bloco)
-
         # Corpo da resposta: blocos de texto, código e tabela (markdown.MensagemView)
         mensagem = self._criar_mensagem()
         card.append(mensagem)
+
+        # Bloco "Pensando": passo atual + cronômetro; clicado, abre a linha do tempo
+        # (raciocínio, passos, cartões de comando). Fica na parte inferior do chat,
+        # junto da caixa de mensagem, para acompanhar o trabalho sem subir a tela.
+        seguro = bool(M.ler_config(verificar=False).get("seguro")) if ativo else False
+        bloco = atividade.BlocoPensando(
+            seguro=seguro, vivo=ativo, base=str(self.work_dir),
+            ao_abrir=lambda: GLib.idle_add(self._do_scroll) if self.seguir_fim else None,
+            ao_detalhes=lambda b, abrir=True: self._detalhes_bloco(b, abrir=abrir))
+        bloco.set_visible(ativo)
+        card.append(bloco)
 
         digitando = atividade.Digitando()
         card.append(digitando)
@@ -2451,7 +2750,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         btn_copiar.add_css_class("flat")
         btn_copiar.add_css_class("action-button")
         btn_copiar.set_tooltip_text(_t("Copiar resposta"))
-        btn_copiar.connect("clicked", lambda b: self._copiar_icone(mensagem.texto, b))
+        # resposta com perguntas no meio fica em vários trechos: copia o texto inteiro
+        btn_copiar.connect("clicked", lambda b: self._copiar_icone(getattr(card, "texto_total", None) or mensagem.texto, b))
         act_row.append(btn_copiar)
         pedido_ant = next((m for m in reversed(self.conversa_mensagens) if m.get("tipo") == "user"), None)
         if pedido_ant is not None:
@@ -2483,6 +2783,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 "passos": [],
             }
             self.conversa_mensagens.append(novo)
+            bloco.registro_msg = novo
             if ativo:
                 self.ativo_registro = novo
                 # os passos são guardados na própria conversa, à medida que chegam
@@ -2491,12 +2792,18 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         if ativo:
             self.ativo_mensagem = mensagem
+            self.ativo_trechos = []
+            self.ativo_prefixo = ""
             self.ativo_bloco = bloco
             self.ativo_digitando = digitando
             self.ativo_modelo = mostrar_modelo
             self.ativo_duracao_lbl = lbl_duracao
             self.ativo_card = card
             self.ativo_renderizado = False
+            self.ultimo_bloco = bloco
+            if hasattr(self, "detalhes"):
+                self._detalhes_bloco(bloco, abrir=False)
+                self._atualizar_detalhes_ambiente()
 
         if registro:
             self._salvar_conversa()
@@ -2607,10 +2914,19 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
     def _rolagem_mudou(self, adj):
         if getattr(self, "_rolando_sozinho", False):
             return
-        self.seguir_fim = adj.get_value() >= adj.get_upper() - adj.get_page_size() - 96
+        valor = adj.get_value()
+        if valor < getattr(self, "_ultimo_valor", 0) - 2:
+            self._rolou_em = time.monotonic()   # a pessoa subiu para ler algo
+        self._ultimo_valor = valor
+        self.seguir_fim = valor >= adj.get_upper() - adj.get_page_size() - 96
+
+    def _lendo_acima(self):
+        """A pessoa subiu a conversa há pouco: não puxa a tela de volta enquanto ela lê."""
+        return time.monotonic() - getattr(self, "_rolou_em", 0) < ROLAGEM_PAUSA
 
     def _scroll_para_fim(self, forcar=False):
-        if forcar:
+        # conteúdo novo da IA leva a conversa até o fim (foco no que acabou de chegar)
+        if forcar or not self._lendo_acima():
             self.seguir_fim = True
         if self.seguir_fim:
             GLib.idle_add(self._do_scroll)
@@ -2619,6 +2935,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         adj = self.scroller.get_vadjustment()
         self._rolando_sozinho = True
         adj.set_value(adj.get_upper() - adj.get_page_size())
+        self._ultimo_valor = adj.get_value()
         self._rolando_sozinho = False
         return False
 
@@ -2664,6 +2981,7 @@ class App(Adw.Application):
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), css_prov, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+        estilo.aplicar_destaque(Gdk.Display.get_default())
         marcas.registrar()
         threading.Thread(target=anexos.limpar_antigos, daemon=True).start()
         _vigiar_interface()

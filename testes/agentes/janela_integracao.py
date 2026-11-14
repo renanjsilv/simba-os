@@ -8,6 +8,7 @@ Roda a MainWindow de verdade (GTK no backend Broadway, HOME temporário) com um
 CLI real faria. Verifica: texto em tempo real, fila de mensagens, retomada da
 sessão certa, interrupção (sem finalizar duas vezes) e troca por limite.
 """
+import base64
 import json
 import os
 from pathlib import Path
@@ -122,14 +123,14 @@ class Teste:
         roteiro.append(("claude-ferramenta.ndjson", 0.15))
         self.enviar("o que tem nesta pasta?")
         yield 0.4
-        # bloco "Pensando" acima do texto; indicador de digitação abaixo, no fim da conversa
+        # bloco "Pensando" abaixo do texto, junto do indicador de digitação na parte inferior
         bl, msg, dg = self.win.ativo_bloco, self.win.ativo_mensagem, self.win.ativo_digitando
         filhos, f = [], (msg.get_parent().get_first_child() if msg and msg.get_parent() else None)
         while f is not None:
             filhos.append(f)
             f = f.get_next_sibling()
-        checar(bl in filhos and dg in filhos and filhos.index(bl) < filhos.index(msg) < filhos.index(dg),
-               "Pensando acima do texto, digitando abaixo")
+        checar(bl in filhos and dg in filhos and filhos.index(msg) < filhos.index(bl) <= filhos.index(dg),
+               "Texto acima do Pensando, Pensando e digitação na parte inferior")
         print("2) mensagem enviada durante a resposta vai para a fila")
         roteiro.append(("claude-ferramenta.ndjson", 0.05))
         self.enviar("e o tamanho?")
@@ -501,6 +502,60 @@ class Teste:
             checar("simba-navegador fechar" in N.INSTRUCAO_AGENTE, "instrução ensina o agente a fechar")
             checar(N._corpo_js('let a = 2; a * 3').endswith("return (function(){ return (a * 3); })();"),
                    "js com várias instruções devolve a última")
+
+        print("21) painéis laterais: conversas à esquerda e detalhes à direita")
+        checar(hasattr(w, "barra") and hasattr(w, "detalhes"), "painéis de conversas e detalhes criados")
+        checar(w.btn_barra.get_visible() and w.btn_detalhes.get_visible(), "botões dos painéis laterais no cabeçalho")
+        w.btn_detalhes.set_active(True)
+        yield 0.2
+        checar(w.split_detalhes.get_show_sidebar(), "painel de detalhes abre pelo botão")
+        checar(w.detalhes.lbl_pasta.get_label() != "", "ambiente: pasta de trabalho exibida")
+        checar(w.detalhes.lbl_modo.get_label() != "", "ambiente: modo livre/leitura exibido")
+        agentes_lst = w.detalhes.agentes_listados()
+        checar(len(agentes_lst) >= 1, "painel de detalhes lista o agente principal")
+        w.btn_barra.set_active(True)
+        yield 0.2
+        checar(w.split_barra.get_show_sidebar(), "painel de conversas abre pelo botão")
+        # teste do bloco pensando: dentro dele só o último pensamento/ação
+        ultimo = getattr(w, "ultimo_bloco", None)
+        if ultimo is not None:
+            ultimo.expandir(True)
+            yield 0.2
+            checar(ultimo.ultimo_linha is not None, "bloco pensando aberto mostra só o último pensamento/passo")
+            checar(ultimo.btn_detalhes.get_visible(), "botão para abrir painel de detalhes presente no bloco pensando")
+            # imagem lida pelo agente: miniatura clicável dentro do "Pensando"
+            captura = home / "captura.png"
+            captura.write_bytes(base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="))
+            ultimo.passo({"id": "img-teste", "tipo": "leitura", "nome": "read",
+                          "entrada": {"arquivo": str(captura)}, "texto": "Lendo: captura.png",
+                          "estado": "rodando"})
+            yield 0.3
+            linha_img = ultimo.ultimo_linha
+            checar(linha_img is not None and getattr(linha_img, "imagem", None) is not None,
+                   "imagem lida aparece no bloco Pensando e pode ser clicada")
+            if getattr(linha_img, "imagem", None) is not None:
+                checar(linha_img.imagem.get_child() is not None, "miniatura da imagem montada")
+                import atividade
+                from gi.repository import Gtk
+                visor = atividade._abrir_imagem(linha_img, captura)
+                yield 0.2
+                checar(isinstance(visor, Gtk.Window) and visor.get_visible(),
+                       "clicar na imagem abre o visualizador")
+                visor.close()
+            # numa resposta em andamento, a imagem lida abre o bloco sozinho
+            import atividade
+            novo = atividade.BlocoPensando(vivo=True, base=str(home))
+            w.box_mensagens.append(novo)
+            novo.passo({"id": "img-teste-2", "tipo": "leitura", "nome": "read",
+                        "entrada": {"arquivo": str(captura)}, "texto": "Lendo: captura.png",
+                        "estado": "rodando"})
+            yield 0.2
+            checar(novo.aberto(), "ler imagem abre o bloco Pensando sozinho")
+            checar(getattr(novo.ultimo_linha, "imagem", None) is not None,
+                   "bloco aberto sozinho já mostra a miniatura")
+            checar(novo.revelador.get_reveal_child(), "conteúdo do bloco auto-aberto fica visível")
+            novo.unparent()
 
 
 class AppTeste(A.App):

@@ -15,6 +15,10 @@ and the draco script both go through this file.
   config.py modelos <provedor> [--atualizar]
                                the models it offers right now, as JSON (cached 6 h)
   config.py modelo <provedor> <id>   choose one (saved per provider: MODELO_<PROVEDOR>)
+  config.py ouvir [segundos]   record the mic (default 5 s) and transcribe it with the chosen
+                               service, as JSON {"ok", "msg", "texto", "tempo"} (the "Testar" button)
+  config.py escuta liga|desliga   the background "Draco" listener (draco-wake.service): desliga
+                               disables the service (frees its memory), not just pauses it
 """
 import json
 import os
@@ -74,13 +78,30 @@ STTS = [
     {"id": "openai", "nome": "OpenAI", "desc": "Whisper da OpenAI, pago por uso",
      "base": "https://api.openai.com/v1", "modelo": "whisper-1",
      "url_chave": "https://platform.openai.com/api-keys"},
-    {"id": "local", "nome": "Neste computador", "desc": "Sem internet nem chave, mas erra mais e é mais lento"},
+    # faster-whisper int8 (lib/stt_local.py); the model is MODELO_LOCAL (tiny/base/small)
+    {"id": "local", "nome": "Neste computador", "desc": "Sem internet nem chave; um pouco mais lento e erra mais que a nuvem"},
 ]
 # Model chosen per provider (MODELO_<ID>); empty = this default. Claude: measured on
 # Draco's own requests, Opus ~2 s slower per request than Sonnet and Haiku no faster
 # once a tool is involved, so Sonnet ("sonnet" = always the newest Sonnet).
 DEFAULT_MODEL = {"assinatura": "sonnet", "anthropic": "sonnet", "nvidia": "moonshotai/kimi-k2.6",
-                 "groq": "whisper-large-v3-turbo", "openai": "whisper-1"}
+                 "groq": "whisper-large-v3-turbo", "openai": "whisper-1", "local": "base"}
+# Whisper on this computer (lib/stt_local.py), measured on an i5-8250U with 4-6 s requests.
+LOCAL_MODELS = [
+    {"id": "base", "nome": "Equilibrado (base)", "tags": ["recomendado"], "desc": "~1 s, erra ~14% das palavras, ~600 MB ao transcrever"},
+    {"id": "small", "nome": "Mais preciso (small)", "tags": [], "desc": "~3 s, erra ~9%, ~1,2 GB ao transcrever"},
+    {"id": "tiny", "nome": "Mais leve (tiny)", "tags": ["mais leve"], "desc": "~0,5 s, erra ~26%, ~450 MB ao transcrever"},
+]
+# PERMISSAO: what the AI may do. "total" = anything (files, terminal, keys); "voz" = only a
+# voice assistant: answers, web, media, reminders, apps and volume; no files, no terminal
+# (enforced in the tool permissions of Claude Code / OpenCode, see VOICE_ONLY_TOOLS).
+# The dr-* helpers it may still run in "voz", with the subcommands allowed ("*" = all).
+VOICE_ONLY_TOOLS = {
+    "dr-web": "*", "dr-midia": "*", "dr-spotify": "*", "dr-youtube": "*", "dr-lembrete": "*",
+    "dr-maps": "*", "dr-fotos": "*", "dr-app": "*",
+    "dr-sistema": ("status", "volume", "brilho", "bateria"),
+    "dr-tela": ("texto", "janela", "ver"), "dr-win": ("list", "find", "focus"),
+}
 # Microsoft's neural voices (free, online; tts.py falls back to the local VOZ_LOCAL).
 # Measured time to the first sound: Antonio/Francisca ~1.0 s, Thalita ~2.3 s; the
 # "Multilingual" voices from other languages arrive slower than real time (stutter).
@@ -105,7 +126,8 @@ DEFAULTS = {"CEREBRO": "", "TRANSCRICAO": "local", "VOZ": "pt_BR-faber-medium", 
             "VOZ_EN": VOZ_PADRAO["en"][0], "VOZ_LOCAL_EN": VOZ_PADRAO["en"][1],
             "ESPERA": "5", "SILENCIO": "2", "MEMORIA": "10",
             "LIMIAR": "",  # wake word score needed; empty = the model's own (lower = more sensitive)
-            **{f"MODELO_{p['id'].upper()}": "" for p in BRAINS + STTS if p["id"] != "local"}}
+            "PERMISSAO": "total",  # "total" | "voz" (see VOICE_ONLY_TOOLS)
+            **{f"MODELO_{p['id'].upper()}": "" for p in BRAINS + STTS}}
 LIMITS = {"ESPERA": (2, 15), "SILENCIO": (0.8, 5), "MEMORIA": (0, 120), "LIMIAR": (0.5, 0.99)}
 
 
@@ -288,10 +310,17 @@ def brain_state(cfg, check_login=True):
     return (True, "chave salva") if get_key(pid) else (False, "falta a chave")
 
 
+VENV_PY = os.path.join(DATA, "venv", "bin", "python")
+
+
+def local_stt_ok():
+    return os.path.exists(VENV_PY)
+
+
 def stt_state(cfg):
     pid = cfg.get("TRANSCRICAO", "local")
     if pid == "local":
-        return True, "neste computador"
+        return (True, "neste computador") if local_stt_ok() else (False, "falta preparar o Draco (draco preparar)")
     return (True, "chave salva") if get_key(pid) else (False, "falta a chave")
 
 
@@ -373,7 +402,7 @@ def status():
         c["tem_chave"] = bool(get_key(p["id"]))
         c["precisa_chave"] = not p.get("login") and not p.get("semConta") and p["id"] != "local"
         c["modelo"] = model_of(cfg, p["id"])
-        c["tem_modelos"] = p["id"] != "local"
+        c["tem_modelos"] = True
         return c
     return {
         "pronto": b_ok,
@@ -385,7 +414,47 @@ def status():
         "escuta": not os.path.exists(os.path.join(DATA, "wake.disabled")),
         "espera": number(cfg, "ESPERA"), "silencio": number(cfg, "SILENCIO"), "memoria": number(cfg, "MEMORIA"),
         "limiar": cfg.get("LIMIAR", ""),  # "" = o padrão do modelo da palavra de ativação
+        "permissao": "voz" if cfg.get("PERMISSAO") == "voz" else "total",
+        **wake_service(),
     }
+
+
+def wake_service():
+    """The background listener: on (enabled and not paused) and the memory it uses now (MB)."""
+    try:
+        out = subprocess.run(["systemctl", "--user", "show", "draco-wake.service", "draco-aquecer.service",
+                              "-p", "UnitFileState,ActiveState,MemoryCurrent"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    units = [dict(l.split("=", 1) for l in block.splitlines() if "=" in l) for block in out.strip().split("\n\n")]
+    wake = units[0] if units else {}
+    mem = 0
+    for u in units:
+        try:
+            mem += int(u.get("MemoryCurrent", "")) if u.get("ActiveState") == "active" else 0
+        except ValueError:
+            pass
+    return {"escuta": wake.get("UnitFileState") == "enabled" and not os.path.exists(os.path.join(DATA, "wake.disabled")),
+            "escuta_ativa": wake.get("ActiveState") == "active",
+            "escuta_mb": round(mem / 1048576)}
+
+
+def set_wake(on):
+    """On: enable + start the listener (and the warm-up). Off: stop and disable both, so
+    nothing waits in the background (memory freed); wake.disabled keeps it off across
+    logins, package updates, `draco preparar` and the Simba migrations."""
+    flag = os.path.join(DATA, "wake.disabled")
+    units = ["draco-wake.service", "draco-aquecer.service"]
+    if on:
+        if os.path.exists(flag):
+            os.unlink(flag)
+        r = subprocess.run(["systemctl", "--user", "enable", "--now", *units], capture_output=True, text=True)
+    else:
+        os.makedirs(DATA, exist_ok=True)
+        open(flag, "a").close()
+        r = subprocess.run(["systemctl", "--user", "disable", "--now", *units], capture_output=True, text=True)
+    return r.returncode == 0
 
 
 def env():
@@ -398,8 +467,38 @@ def env():
     out["DRACO_CLAUDE_ENV"] = " ".join(f"{k}={shlex.quote(v)}" for k, v in brain_env(cfg).items())
     out["DRACO_MODELO"] = model_of(cfg, cfg.get("CEREBRO", ""))
     out["DRACO_MOTOR"] = (provider(cfg.get("CEREBRO", "")) or {}).get("motor", "claude")
+    out["DRACO_PERMISSAO"] = "voz" if cfg.get("PERMISSAO") == "voz" else "total"
+    out["DRACO_STT_LOCAL"] = model_of(cfg, "local")
+    if out["DRACO_PERMISSAO"] == "voz":
+        out["DRACO_CLAUDE_PERMS"] = " ".join(shlex.quote(a) for a in claude_voice_only_args())
     for k, v in out.items():
         print(f"{k}={shlex.quote(v)}")
+
+
+def voice_only_bash():
+    """Bash command patterns the AI may run in "só assistente de voz" mode."""
+    pats = []
+    for cmd, subs in VOICE_ONLY_TOOLS.items():
+        for prefix in (cmd, os.path.join(CODIGO, "bin", cmd)):
+            pats += [f"{prefix} *"] if subs == "*" else [f"{prefix} {s} *" for s in subs] + [f"{prefix} {s}" for s in subs]
+    return pats
+
+
+def claude_voice_only_args():
+    """Claude Code flags for "voz": only web tools and the allowed dr-* commands; any other
+    Bash command, and reading/editing files, is denied (-p cannot ask, so it is refused)."""
+    return ["--tools", "Bash,WebSearch,WebFetch",
+            "--allowedTools", ",".join(["WebSearch", "WebFetch"] + [f"Bash({p})" for p in voice_only_bash()]),
+            "--disallowedTools", "Read,Edit,Write,NotebookEdit"]
+
+
+def opencode_permission(cfg=None):
+    """OpenCode's "permission" config for the current PERMISSAO (lib/opencode_brain.py)."""
+    cfg = cfg or load()
+    if cfg.get("PERMISSAO") != "voz":
+        return "allow"
+    return {"*": "deny", "bash": {"*": "deny", **{p: "allow" for p in voice_only_bash()}},
+            "webfetch": "allow", "websearch": "allow", "todowrite": "allow", "todoread": "allow"}
 
 
 def http(url, headers, timeout=10, body=None):
@@ -525,6 +624,9 @@ def fetch_models(pid):
             out.append({"id": mid, "nome": mid.split("/", 1)[-1], "tags": ["recomendado"] if mid.startswith(NVIDIA_GOOD) else []})
         out.sort(key=lambda m: ("recomendado" not in m["tags"], m["nome"].lower()))
         return out, "NVIDIA (grátis)", None
+    if pid == "local":
+        return [{"id": m["id"], "nome": m["nome"], "tags": m["tags"], "desc": m["desc"]} for m in LOCAL_MODELS], \
+            "Whisper neste computador", None
     if pid in ("groq", "openai"):
         p = provider(pid)
         if key:
@@ -564,8 +666,10 @@ def test(pid):
     if not p:
         return {"ok": False, "msg": "provedor desconhecido"}
     if pid == "local":
-        ok = subprocess.run(["sh", "-c", "command -v voxtype"], capture_output=True).returncode == 0
-        return {"ok": ok, "msg": "pronto" if ok else "voxtype não está instalado"}
+        if not local_stt_ok():
+            return {"ok": False, "msg": "falta preparar o Draco (draco preparar)"}
+        ok = subprocess.run([VENV_PY, "-c", "import faster_whisper"], capture_output=True).returncode == 0
+        return {"ok": ok, "msg": "pronto" if ok else "falta o faster-whisper (draco preparar)"}
     if p.get("login"):
         ok, msg = claude_login()
         return {"ok": ok, "msg": f"conectado ({msg})" if ok else msg}
@@ -631,6 +735,87 @@ def test(pid):
     if code in (401, 403):
         return {"ok": False, "msg": "chave recusada"}
     return {"ok": False, "msg": f"erro {code or 'de conexão'}: {body[:120]}"}
+
+
+def mic_name():
+    """Description of the default microphone (PipeWire), for the test's messages."""
+    try:
+        out = subprocess.run(["wpctl", "inspect", "@DEFAULT_AUDIO_SOURCE@"], capture_output=True, text=True, timeout=3).stdout
+        for line in out.splitlines():
+            if "node.description" in line or "node.nick" in line:
+                return line.split("=", 1)[1].strip().strip('"')
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
+def transcribe(wav, cfg=None):
+    """(text, seconds it took, service used) with the chosen service; local if none or it fails."""
+    cfg = cfg or load()
+    t = time.time()
+    s = stt()
+    if s:
+        base, key, model = s
+        try:
+            out = subprocess.run(["curl", "-sS", "--max-time", "15", f"{base}/audio/transcriptions",
+                                  "-H", f"Authorization: Bearer {key}", "-F", f"model={model}", "-F", f"language={LING}",
+                                  "-F", "temperature=0", "-F", "response_format=json", "-F", f"file=@{wav}"],
+                                 capture_output=True, text=True, timeout=20).stdout
+            return json.loads(out)["text"].strip(), time.time() - t, provider(cfg.get("TRANSCRICAO"))["nome"]
+        except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError):
+            t = time.time()
+    if not local_stt_ok():
+        return None, 0, ""
+    r = subprocess.run([VENV_PY, os.path.join(CODIGO, "lib", "stt_local.py"), wav, model_of(cfg, "local")],
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode:
+        return None, 0, ""
+    return r.stdout.strip(), time.time() - t, "neste computador"
+
+
+def listen_test(seconds=5.0, pid=None):
+    """The "Testar" button of the speech recognition: record the mic and transcribe it,
+    so it tests the real thing (microphone + service), not just the key."""
+    import tempfile
+    import wave
+    import array
+    cfg = load()
+    if pid and provider(pid):
+        cfg = {**cfg, "TRANSCRICAO": pid}
+    pid = cfg.get("TRANSCRICAO", "local")
+    if pid != "local" and not get_key(pid):
+        return {"ok": False, "msg": "falta a chave"}
+    fd, wav = tempfile.mkstemp(prefix="draco-teste-", suffix=".wav")
+    os.close(fd)
+    try:
+        try:
+            rec = subprocess.Popen(["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", wav],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            return {"ok": False, "msg": "não consegui abrir o microfone (pw-record)"}
+        time.sleep(seconds)
+        rec.terminate()
+        rec.wait(5)
+        try:
+            with wave.open(wav) as w:
+                pcm = array.array("h", w.readframes(w.getnframes()))
+        except (OSError, EOFError, wave.Error):
+            pcm = array.array("h")
+        mic = mic_name()
+        peak = max((abs(x) for x in pcm), default=0)
+        if peak < 300:  # ~-40 dB: nothing reached the microphone
+            return {"ok": False, "msg": _t("o microfone não captou som (%1); confira a entrada de áudio").replace(
+                "%1", mic or _t("entrada padrão"))}
+        text, took, used = transcribe(wav, cfg)
+        if text is None:
+            return {"ok": False, "msg": "o reconhecimento falhou; confira a internet ou a chave"}
+        if not text:
+            return {"ok": False, "msg": "não entendi nada; fale mais perto do microfone"}
+        took_s = f"{took:.1f}".replace(".", "," if LING == "pt" else ".")
+        return {"ok": True, "texto": text, "tempo": round(took, 2),
+                "msg": _t("ouvi: “%1” (%2 s, %3)").replace("%1", text).replace("%2", took_s).replace("%3", _t(used))}
+    finally:
+        os.unlink(wav)
 
 
 def restart_voice():
@@ -734,6 +919,17 @@ def main():
             pass
     elif cmd == "testar":
         print(json.dumps(test(args[1]), ensure_ascii=False))
+    elif cmd == "ouvir":
+        sec = 5.0
+        pid = None
+        for a in args[1:]:
+            try:
+                sec = float(a)
+            except ValueError:
+                pid = a
+        print(json.dumps(listen_test(sec, pid), ensure_ascii=False))
+    elif cmd == "escuta":
+        print(json.dumps({"ok": set_wake(args[1:] == ["liga"]), **wake_service()}, ensure_ascii=False))
     elif cmd == "login":
         login()
     elif cmd == "modelos":
@@ -741,7 +937,7 @@ def main():
             sys.exit("provedor desconhecido")
         print(json.dumps(models(args[1], "--atualizar" in args), ensure_ascii=False))
     elif cmd == "modelo":
-        if not provider(args[1]) or args[1] == "local":
+        if not provider(args[1]):
             sys.exit("provedor desconhecido")
         save({f"MODELO_{args[1].upper()}": args[2] if len(args) > 2 else ""})
     else:

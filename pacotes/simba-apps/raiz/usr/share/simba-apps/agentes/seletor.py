@@ -184,6 +184,11 @@ class Seletor(Gtk.MenuButton):
             sub.add_css_class("seletor-sub")
             textos.append(sub)
         caixa.append(textos)
+        if it.get("selo"):
+            selo = Gtk.Label(label=it["selo"])
+            selo.add_css_class("seletor-gratis")
+            selo.set_valign(Gtk.Align.CENTER)
+            caixa.append(selo)
         if it.get("aviso"):
             av = Gtk.Label(label=it["aviso"])
             av.add_css_class("seletor-aviso")
@@ -196,6 +201,10 @@ class Seletor(Gtk.MenuButton):
         marca.set_opacity(1.0 if i == self._sel else 0.0)
         caixa.append(marca)
         linha.set_child(caixa)
+        if it.get("secao"):
+            cab = Gtk.Label(label=it["secao"], xalign=0)
+            cab.add_css_class("seletor-titulo")
+            linha.set_header(cab)
         if i == self._sel:
             linha.add_css_class("atual")
         return linha

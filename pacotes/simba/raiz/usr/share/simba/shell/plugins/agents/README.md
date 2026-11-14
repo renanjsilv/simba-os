@@ -55,6 +55,9 @@ light surfaces — and the bar glyph stands in when there is none.
 | `claude` | Anthropic's OAuth usage endpoint (5-hour session + 7-day weekly) | `~/.claude/projects` transcripts, opencode sessions on an Anthropic provider, plus `stats-cache.json` and `history.jsonl` as fallback |
 | `codex` | The Codex app-server RPC | native Codex CLI session files (plus pi and opencode sessions) |
 | `fireworks` | Estimated prepaid balance: configured funding minus rated account costs | Fireworks billing API, grouped by day and model for the last 30 days |
+| `agy` | None yet (Antigravity does not expose a quota endpoint usable with the stored credentials) | `~/.gemini/antigravity-cli/brain` conversations |
+| `grok` | None yet (Grok CLI reports usage only inside the interactive session) | `~/.grok/sessions` |
+| `copilot` | None yet (Copilot limits are enforced server-side; the CLI writes usage records) | `~/.copilot/session-state` events |
 
 Claude limits need a signed-in CLI; without credentials the panel says so and
 falls back to local stats only. A non-default Claude directory is honored via

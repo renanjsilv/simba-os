@@ -49,7 +49,10 @@ def run_once(oc, model, prompt, instr, session):
     if session:
         cmd += ["-s", session]
     env = {**os.environ, "OPENCODE_CONFIG_CONTENT": json.dumps({
-        "instructions": [instr], "permission": "allow", "autoupdate": False, "share": "disabled"})}
+        # "allow", or in "só assistente de voz" only the web and the allowed dr-* commands
+        # (config.opencode_permission); --auto approves the rest only if not denied
+        "instructions": [instr], "permission": config.opencode_permission(), "autoupdate": False,
+        "share": "disabled"})}
     p = subprocess.Popen(cmd + ["--", prompt], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                          stdin=subprocess.DEVNULL, text=True, env=env)
     texts, err, sid, acted = [], "", session, False

@@ -243,7 +243,8 @@ def main():
                            stdout=f, stderr=subprocess.STDOUT)
     result = open(log).read()
     if "instalado:" in result:
-        subprocess.run(["systemctl", "--user", "restart", "draco-wake.service"])
+        # só reinicia se a escuta estiver ligada (desligada nas configurações = continua parada)
+        subprocess.run(["systemctl", "--user", "try-restart", "draco-wake.service"])
         line = next((l for l in result.splitlines() if l.startswith("sua voz:")), "")
         say("Treino concluído e o detector novo já está valendo. " + line.replace("sua voz:", "Com a sua voz, ele").strip())
     elif r.returncode != 0:

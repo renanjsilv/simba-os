@@ -1,0 +1,86 @@
+#!/usr/bin/python3
+# simba:summary=Print the Grok usage record as JSON
+# simba:args=[--force] [--limits-only]
+# simba:hidden=true
+"""Collect Grok (grok CLI) usage into one display-ready JSON record."""
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+AGENT_ID = "grok"
+AGENT_NAME = "Grok"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--limits-only", action="store_true")
+    args = parser.parse_args()
+
+    sessions = Path.home() / ".grok" / "sessions"
+    today = datetime.now().date()
+    recent_dates = [(today - timedelta(days=o)).isoformat() for o in range(6, -1, -1)]
+    recent = {d: 0 for d in recent_dates}
+    active: set[str] = set()
+    total_sessions = 0
+    total_prompts = 0
+    today_prompts = 0
+    today_sessions = 0
+
+    if sessions.is_dir():
+        for f in sessions.rglob("events.jsonl"):
+            total_sessions += 1
+            prompts = 0
+            day = None
+            try:
+                for line in f.read_text(errors="replace").splitlines():
+                    if '"role":"user"' in line or '"type":"user"' in line:
+                        prompts += 1
+                mtime = f.stat().st_mtime
+                day = datetime.fromtimestamp(mtime).date().isoformat()
+            except OSError:
+                continue
+            if day is None:
+                day = today.isoformat()
+            active.add(day)
+            if prompts <= 0:
+                prompts = 1
+            total_prompts += prompts
+            if day in recent:
+                recent[day] += prompts
+            if day == today.isoformat():
+                today_prompts += prompts
+                today_sessions += 1
+
+    record = {
+        "schemaVersion": 1,
+        "id": AGENT_ID,
+        "name": AGENT_NAME,
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "ready": total_sessions > 0,
+        "hasLocalStats": True,
+        "tierLabel": "",
+        "usageStatusText": "",
+        "authHelpText": "",
+        "limits": [],
+        "todayPrompts": today_prompts,
+        "todaySessions": today_sessions,
+        "todayTotalTokens": 0,
+        "todayTokensByModel": {},
+        "recentDays": [{"date": d, "messageCount": recent[d]} for d in recent_dates],
+        "totalPrompts": total_prompts,
+        "totalSessions": total_sessions,
+        "activeDays": len(active),
+        "activeDates": sorted(active),
+        "modelUsage": {},
+    }
+    print(json.dumps(record, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

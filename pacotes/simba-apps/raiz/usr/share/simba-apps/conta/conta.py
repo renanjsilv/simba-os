@@ -15,6 +15,7 @@ criou) e restaura tudo numa instalação nova.
   conta auto liga|desliga           sincronização automática (a cada 2 h e 10 min após ligar)
   conta categoria <id> liga|desliga escolhe o que entra no backup
   conta tamanho                     estima o tamanho do backup local
+  conta fundo liga|desliga          papel de parede igual em todas as máquinas, na hora
 
 Variáveis para teste: CONTA_RCLONE (binário), CONTA_REMOTO (remoto já configurado,
 ex. "teste:" para um remoto local), CONTA_HOME (pasta pessoal alternativa).
@@ -144,6 +145,7 @@ def config():
     c.setdefault("categorias", {k: k != "segredos" for k in CATEGORIAS})
     c.setdefault("pastas_personalizadas", [])
     c.setdefault("pastas_excluidas", [])
+    c.setdefault("sincronizar_fundo", True)
     return c
 
 
@@ -620,6 +622,7 @@ def cmd_status(_a):
         "nome": c.get("nome", ""),
         "cripto": bool(c.get("cripto")),
         "auto": timer == "enabled",
+        "sincronizar_fundo": bool(c.get("sincronizar_fundo", True)),
         "categorias": c["categorias"],
         "rotulos": CATEGORIAS,
         "ultima": e.get("ultima", ""),
@@ -1027,6 +1030,9 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
         else:
             d_fundo = _decidir(fundo_local, fundo_remoto, e.get("base_fundo"), mais_novo)
             d_tema = _decidir(tema_local, tema_remoto, e.get("base_tema"), mais_novo)
+        # O papel de parede tem canal próprio e imediato (conta fundo vigiar, fundo.json no
+        # Drive); o meta.json daqui é de até 20 min atrás e desfaria a troca mais nova.
+        d_fundo = "ignorar"
         if "conflito" in (d_fundo, d_tema):
             conflito_info = {
                 "maquina_remota": maquina_remota, "data_remota": data_remota, "data_local": ultima_local,
@@ -1127,6 +1133,159 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
         return False
     finally:
         salvar_estado(sincronizando=False)
+
+
+# ── papel de parede imediato entre máquinas ──────────────────────────────────
+# Quem troca o papel envia na hora (imagem em dados/fundo-atual + fundo.json, pequeno, na
+# pasta da conta); as outras máquinas leem o fundo.json a cada FUNDO_INTERVALO segundos.
+# FUNDO_ESTADO = último papel combinado com o Drive (o enviado ou o recebido): evita
+# reenviar o que acabou de chegar e devolver para a nuvem a troca de outra máquina.
+FUNDO_ESTADO = HOME / ".local/state/conta/fundo.json"
+FUNDO_INTERVALO = int(os.environ.get("CONTA_FUNDO_INTERVALO") or 30)
+FUNDO_MAX = 60 * 1024 * 1024
+FUNDO_LINK = HOME / ".local/state/simba/current/background"
+
+
+def _fundo_remoto_info():
+    r = rc("cat", f"{remoto_base()}/fundo.json", check=False, timeout=30)
+    if r.returncode != 0:
+        if "not found" in (r.stderr or "").lower() or "doesn't exist" in (r.stderr or "").lower():
+            return {}
+        raise RuntimeError((r.stderr or "").strip()[-300:] or "rclone cat fundo.json falhou")
+    try:
+        v = json.loads(r.stdout or "{}")
+    except ValueError:
+        return {}
+    return v if isinstance(v, dict) else {}
+
+
+def _id_maquina():
+    if os.environ.get("CONTA_MAQUINA"):        # testes
+        return os.environ["CONTA_MAQUINA"]
+    try:
+        return Path("/etc/machine-id").read_text().strip()[:16] or nome_maquina()
+    except OSError:
+        return nome_maquina()
+
+
+def fundo_enviar(c=None, inicio=False):
+    c = c or config()
+    img, h = _fundo_local()
+    if not img or not h or not img.is_file() or img.stat().st_size > FUNDO_MAX:
+        return False
+    combinado = ler_json(FUNDO_ESTADO, {})
+    if combinado.get("hash") == h:
+        return False                       # já é o que está na nuvem (enviado ou recebido)
+    if inicio and not combinado.get("hash") and _fundo_remoto_info():
+        return False                       # máquina recém-conectada: adota o da nuvem, não impõe o seu
+    tmp = CACHE / "fundo-envio"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True)
+    shutil.copy2(img, tmp / img.name)
+    rc("sync", str(tmp), f"{remoto_dados(c)}/fundo-atual", timeout=600)
+    shutil.rmtree(tmp, ignore_errors=True)
+    info = {"hash": h, "nome": img.name, "original": str(img), "maquina": nome_maquina(),
+            "id": _id_maquina(), "data": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
+    rc("rcat", f"{remoto_base()}/fundo.json", entrada=json.dumps(info, ensure_ascii=False), timeout=60)
+    gravar_json(FUNDO_ESTADO, info)
+    salvar_estado(base_fundo=h)
+    return True
+
+
+def fundo_puxar(c=None):
+    c = c or config()
+    info = _fundo_remoto_info()
+    h = info.get("hash")
+    if not h:
+        return False
+    combinado = ler_json(FUNDO_ESTADO, {})
+    if h == combinado.get("hash"):
+        return False
+    img_local, local = _fundo_local()
+    if h == local or info.get("id") == _id_maquina():
+        gravar_json(FUNDO_ESTADO, info)
+        return False
+    # Troca local ainda não enviada e mais nova que a da nuvem: vale a daqui (o envio vem a seguir).
+    if combinado.get("hash") and local and local != combinado.get("hash"):
+        try:
+            remota = datetime.datetime.fromisoformat(info.get("data", "")).timestamp()
+        except ValueError:
+            remota = 0
+        try:
+            if FUNDO_LINK.lstat().st_mtime > remota:
+                return False
+        except OSError:
+            pass
+    alvo = None
+    original = Path(info.get("original") or "")
+    if original.name and original.is_file() and _hash_arquivo(original) == h:
+        alvo = original                    # imagem que existe aqui também (papéis do sistema)
+    else:
+        destino = HOME / ".local/share/conta/fundo"
+        destino.mkdir(parents=True, exist_ok=True)
+        rc("copy", f"{remoto_dados(c)}/fundo-atual", str(destino), check=False, timeout=600)
+        alvo = next((f for f in destino.iterdir() if f.is_file() and _hash_arquivo(f) == h), None)
+        if alvo:                           # guarda só o atual
+            for f in destino.iterdir():
+                if f.is_file() and f != alvo:
+                    f.unlink(missing_ok=True)
+    if not alvo:
+        return False
+    gravar_json(FUNDO_ESTADO, info)        # antes de aplicar: a troca não volta para a nuvem
+    salvar_estado(base_fundo=h)
+    _aplicar_fundo(alvo)
+    return True
+
+
+def _fundo_ativo(c):
+    return c.get("sincronizar_fundo", True) and not esta_pausado()[0] and conectado()
+
+
+def _link_fundo():
+    try:
+        return os.readlink(FUNDO_LINK)
+    except OSError:
+        return ""
+
+
+def cmd_fundo(a):
+    if a.acao in ("liga", "desliga"):
+        c = config()
+        c["sincronizar_fundo"] = a.acao == "liga"
+        salvar_config(c)
+        return 0
+    c = config()
+    if a.acao == "enviar":
+        return 0 if not _fundo_ativo(c) or fundo_enviar(c) else 0
+    if a.acao == "puxar":
+        return 0 if not _fundo_ativo(c) or fundo_puxar(c) else 0
+    # vigiar: serviço do usuário (conta-fundo.service), leve: lê o link a cada 2 s e o
+    # fundo.json da nuvem a cada FUNDO_INTERVALO s; não faz nada sem conta ou com a opção desligada.
+    visto = _link_fundo()
+    proxima = 0.0
+    primeira = True
+    while True:
+        try:
+            c = config()
+            if c.get("sincronizar_fundo", True) and not esta_pausado()[0]:
+                link = _link_fundo()
+                if link != visto:
+                    time.sleep(2)          # trocas seguidas: envia só a última
+                    visto = _link_fundo()
+                    if conectado():
+                        fundo_enviar(c)
+                if time.monotonic() >= proxima:
+                    proxima = time.monotonic() + FUNDO_INTERVALO
+                    if conectado():
+                        fundo_puxar(c)
+                        if primeira:
+                            fundo_enviar(c, inicio=True)   # troca feita com a máquina desligada
+                            primeira = False
+                    visto = _link_fundo()
+        except Exception as exc:  # noqa: BLE001 — rede caiu etc.: tenta de novo depois
+            print(_t("papel de parede: %1", str(exc)[-200:]), file=sys.stderr, flush=True)
+            proxima = time.monotonic() + FUNDO_INTERVALO
+        time.sleep(2)
 
 
 def cmd_sincronizar(a):
@@ -1502,8 +1661,6 @@ Description=Sincronização e backup automático da conta no Google Drive
 [Timer]
 OnBootSec=3min
 OnUnitActiveSec=20min
-OnCalendar=*:0/20
-Persistent=true
 RandomizedDelaySec=2min
 
 [Install]
@@ -1601,6 +1758,9 @@ def main():
     p.add_argument("modo", choices=["liga", "desliga"])
     p.set_defaults(f=cmd_categoria)
     sub.add_parser("tamanho").set_defaults(f=cmd_tamanho)
+    p = sub.add_parser("fundo", help="papel de parede imediato entre máquinas")
+    p.add_argument("acao", choices=["vigiar", "enviar", "puxar", "liga", "desliga"])
+    p.set_defaults(f=cmd_fundo)
     sub.add_parser("foto", help="baixa a foto de perfil da conta Google").set_defaults(f=cmd_foto)
     p = sub.add_parser("pausar", help="pausa a sincronização por X horas (Modo Viagem)")
     p.add_argument("horas", nargs="?", type=int, default=24)

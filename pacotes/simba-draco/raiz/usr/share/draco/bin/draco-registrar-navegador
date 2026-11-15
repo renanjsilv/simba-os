@@ -1,0 +1,36 @@
+#!/bin/bash
+# Registra no navegador a extensão "definir como papel de parede" do Draco (Google Fotos e
+# imagens da web): manifesto native messaging apontando para o host instalado pelo pacote e
+# a pasta da extensão no --load-extension dos *-flags.conf que já existirem.
+# Antes o manifesto era gravado com ~/.local/share/draco/bin, que sumiu quando o Draco
+# virou pacote (/usr/share/draco) — a extensão parou de funcionar sem aviso.
+set -u
+HOST=/usr/share/draco/bin/draco-wallpaper-host
+EXT=/usr/share/draco/extensions/wallpaper
+[ -x "$HOST" ] || exit 0
+
+for dir in "$HOME/.config/BraveSoftware/Brave-Browser" "$HOME/.config/BraveSoftware/Brave-Browser-Beta" \
+           "$HOME/.config/chromium" "$HOME/.config/google-chrome"; do
+  [ -d "$dir" ] || [ "$dir" = "$HOME/.config/BraveSoftware/Brave-Browser" ] || continue
+  mkdir -p "$dir/NativeMessagingHosts"
+  cat > "$dir/NativeMessagingHosts/com.draco.wallpaper.json" <<JSON
+{
+  "name": "com.draco.wallpaper",
+  "description": "Draco: definir papel de parede",
+  "path": "$HOST",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://nkmhoblamidgnpibdjbpjdbpcdnhkpho/"]
+}
+JSON
+done
+
+for f in "$HOME/.config/brave-flags.conf" "$HOME/.config/chromium-flags.conf"; do
+  [ -f "$f" ] || continue
+  grep -q -- "$EXT" "$f" && continue
+  if grep -q '^--load-extension=' "$f"; then
+    sed -i "s|^--load-extension=.*|&,$EXT|" "$f"
+  else
+    printf -- '--load-extension=%s\n' "$EXT" >> "$f"
+  fi
+done
+exit 0

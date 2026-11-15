@@ -29,6 +29,7 @@ var itens = [
   ["contas", "contaCripto", "Criptografar o backup", "Proteger o backup do Drive com senha", "criptografia senha backup seguranca"],
   ["contas", "contaItens", "O que é salvo no backup", "Configurações, imagens, histórico, documentos, programas", "backup categorias historico wallpaper papel de parede configuracoes programas pacotes"],
   ["contas", "contaAuto", "Backup automático", "Sincronizar com o Drive a cada 2 horas", "automatico sincronizar backup agendado"],
+  ["contas", "contaFundo", "Sincronizar papel de parede", "Papel de parede igual em todos os computadores", "wallpaper fundo papel sincronizar outros computadores"],
   ["contas", "contaRestaurar", "Restaurar desta conta", "Trazer tudo do Google Drive para este computador", "restaurar formatar formatada recuperar backup"],
   ["agentes", "agentesAbrir", "Abrir o agente de IA", "Super+Shift+Ctrl+A", "agente ia claude codex antigravity agy opencode copilot abrir terminal"],
   ["agentes", "agentesOrdem", "Ordem dos agentes de IA", "Qual agente usar primeiro e qual vem depois", "agentes ordem prioridade claude codex antigravity agy limite tokens"],

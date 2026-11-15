@@ -446,19 +446,8 @@ for h in "$T"/home/*/; do
     for s in simba-install-chromium-copy-url simba-install-chromium-ytdlp simba-install-chromium-copy-url simba-install-chromium-ytdlp; do
       command -v "$s" >/dev/null && "$s"
     done
-    host=$HOME/.local/share/draco/bin/draco-wallpaper-host
-    [ -x "$host" ] || exit 0
-    d=$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts
-    mkdir -p "$d"
-    cat > "$d/com.draco.wallpaper.json" <<EOF
-{
-  "name": "com.draco.wallpaper",
-  "description": "Draco: definir papel de parede",
-  "path": "$host",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://nkmhoblamidgnpibdjbpjdbpcdnhkpho/"]
-}
-EOF
+    [ -x /usr/share/draco/bin/draco-registrar-navegador ] && /usr/share/draco/bin/draco-registrar-navegador
+    true
   ' || echo "aviso: extensões do Brave de $u não registradas" >> "$LOG"
 done
 

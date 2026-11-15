@@ -1,0 +1,13 @@
+[Unit]
+Description=Papel de parede igual em todas as máquinas da conta (conta fundo vigiar)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/conta fundo vigiar
+Restart=always
+RestartSec=30
+Nice=10
+
+[Install]
+WantedBy=default.target

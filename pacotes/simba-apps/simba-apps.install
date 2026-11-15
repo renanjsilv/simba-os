@@ -8,4 +8,9 @@ post_upgrade() {
   gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
   update-desktop-database -q /usr/share/applications 2>/dev/null || true
   /usr/bin/simba-nomes-apps /usr/share/applications >/dev/null 2>&1 || true
+  # papel de parede entre máquinas: liga já nas sessões abertas (as novas pegam pelo default.target)
+  for u in $(loginctl list-users --no-legend 2>/dev/null | awk '$1 >= 1000 {print $2}'); do
+    systemctl --user -M "$u@" daemon-reload >/dev/null 2>&1 || true
+    systemctl --user -M "$u@" start conta-fundo.service >/dev/null 2>&1 || true
+  done
 }

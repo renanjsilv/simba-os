@@ -2405,7 +2405,6 @@
  "Editar Perfil": "Edit Profile",
  "Windows (.exe)": "Windows (.exe)",
  "Sincronização dinâmica e backup automático": "Dynamic sync and automatic backup",
- "A cada 20 minutos: sincroniza alterações (como papel de parede) entre suas máquinas e salva o backup.": "Every 20 minutes: syncs changes (like wallpaper) across your machines and saves the backup.",
  "Verificar novidades na nuvem agora": "Check cloud updates now",
  "Busca se houve mudança de papel de parede, tema ou configurações feita em outro computador.": "Checks for wallpaper, theme or settings changes made on another computer.",
  "Verificação concluída": "Check completed",
@@ -2738,5 +2737,10 @@
  "%1: seu login expira em %2 dias. Renove para não perder o acesso.": "%1: your login expires in %2 days. Renew to avoid getting locked out.",
  "%1: atualização disponível (%2 → %3).": "%1: update available (%2 → %3).",
  "%1: atualização disponível.": "%1: update available.",
- "Ver na Central": "View in Settings"
+ "Ver na Central": "View in Settings",
+ "A cada 20 minutos: sincroniza alterações (como tema e favoritos) entre suas máquinas e salva o backup.": "Every 20 minutes: syncs changes (like theme and bookmarks) across your machines and saves the backup.",
+ "Sincronizar papel de parede": "Sync wallpaper",
+ "Ao trocar o papel de parede aqui, ele muda na hora nos seus outros computadores conectados a esta conta.": "When you change the wallpaper here, it changes right away on your other computers signed in to this account.",
+ "papel de parede: %1": "wallpaper: %1",
+ "Papel de parede igual em todos os computadores": "Same wallpaper on every computer"
 }

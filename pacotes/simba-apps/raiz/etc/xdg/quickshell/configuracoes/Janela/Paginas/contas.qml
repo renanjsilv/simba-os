@@ -462,10 +462,20 @@ Pagina {
       chave: "contaAuto"
       glifo: Icones.sync
       titulo: I18n.t("Sincronização dinâmica e backup automático")
-      descricao: I18n.t("A cada 20 minutos: sincroniza alterações (como papel de parede) entre suas máquinas e salva o backup.")
+      descricao: I18n.t("A cada 20 minutos: sincroniza alterações (como tema e favoritos) entre suas máquinas e salva o backup.")
       Interruptor {
         ligado: !!(pg.s && pg.s.auto)
         onAlternado: function(x) { Sistema.rodar(["conta", "auto", x ? "liga" : "desliga"], function() { pg.atualizar() }) }
+      }
+    }
+    Linha {
+      chave: "contaFundo"
+      glifo: Icones.wallpaper
+      titulo: I18n.t("Sincronizar papel de parede")
+      descricao: I18n.t("Ao trocar o papel de parede aqui, ele muda na hora nos seus outros computadores conectados a esta conta.")
+      Interruptor {
+        ligado: !(pg.s && pg.s.sincronizar_fundo === false)
+        onAlternado: function(x) { Sistema.rodar(["conta", "fundo", x ? "liga" : "desliga"], function() { pg.atualizar() }) }
       }
     }
     Linha {

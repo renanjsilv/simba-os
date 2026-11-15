@@ -574,7 +574,7 @@ Item {
       var it = item
       visible = false
       if (op.tipo === "gerenciador") { Quickshell.execDetached(["gerenciador-tarefas"]); return }
-      if (op.tipo === "area") { Quickshell.execDetached(["qs", "-c", "botoes-janela", "ipc", "call", "botoes", "mostrarArea"]); return }
+      if (op.tipo === "area") { Quickshell.execDetached(["qs", "-c", "configuracoes", "ipc", "call", "botoes", "mostrarArea"]); return }
       if (op.tipo === "config") { Quickshell.execDetached(["configuracoes", "barra"]); return }
       if (!it) return
       if (op.tipo === "janela") root.focar(op.j)

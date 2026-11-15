@@ -8,15 +8,45 @@
 #   simba-central chamada-abrir        traz a janela da chamada para a frente
 set -uo pipefail
 
-wifi_on()  { [[ $(nmcli -t -f WIFI g 2>/dev/null) == enabled ]]; }
+# Lido a cada 6 s pela barra (1,5 s com a Central aberta): nada de Python aqui. Cada consulta
+# vai direto ao D-Bus/arquivo; as ferramentas de linha de comando ficam só como reserva.
+wifi_on()  {
+  local r; r=$(busctl --system get-property org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+    org.freedesktop.NetworkManager WirelessEnabled 2>/dev/null) || r="b $([[ $(nmcli -t -f WIFI g 2>/dev/null) == enabled ]] && echo true)"
+  [[ $r == "b true" ]]
+}
 bt_on()    { bluetoothctl show 2>/dev/null | grep -q 'Powered: yes'; }
-dnd_on()   { [[ $(simba-shell notifications isDnd 2>/dev/null) =~ ^(on|true)$ ]]; }
+# O shell grava o "não perturbe" em ~/.local/state/simba/notifications.json a cada mudança
+# (caminho fixo no Service.qml; sem o arquivo = nunca foi ligado). Ler o arquivo evita abrir
+# um cliente qs ipc (~250 ms) a cada leitura.
+dnd_on()   {
+  local f="$HOME/.local/state/simba/notifications.json"
+  [[ -f $f ]] && [[ $(jq -r '.dnd // false' "$f" 2>/dev/null) == true ]]
+}
 tema()     { cat "$HOME/.local/state/simba/current/theme.name" 2>/dev/null; }
 luz_on()   { local t; t=$(hyprctl hyprsunset temperature 2>/dev/null | grep -oE '[0-9]+' | head -1); [[ -n $t ]] && ((t < 6000)); }
-perfil()   { powerprofilesctl get 2>/dev/null; }
+# powerprofilesctl é Python+GObject (~0,6 s e, às vezes, aborta ao sair); a propriedade do
+# D-Bus responde em milissegundos.
+perfil()   {
+  local r
+  r=$(busctl --system get-property net.hadess.PowerProfiles /net/hadess/PowerProfiles \
+    net.hadess.PowerProfiles ActiveProfile 2>/dev/null) && [[ $r =~ ^s\ \"(.*)\"$ ]] &&
+    { echo "${BASH_REMATCH[1]}"; return; }
+  powerprofilesctl get 2>/dev/null
+}
+# Claro/escuro pela luminância da cor de fundo do tema.
+tema_claro() {
+  awk 'match($0, /^[[:space:]]*background[[:space:]]*=[[:space:]]*["\047]?#[0-9a-fA-F]{6}/) {
+      h = tolower(substr($0, RSTART + RLENGTH - 6, 6)); x = "0123456789abcdef"
+      r = ((index(x, substr(h,1,1)) - 1) * 16 + index(x, substr(h,2,1)) - 1) / 255
+      g = ((index(x, substr(h,3,1)) - 1) * 16 + index(x, substr(h,4,1)) - 1) / 255
+      b = ((index(x, substr(h,5,1)) - 1) * 16 + index(x, substr(h,6,1)) - 1) / 255
+      print (.2126*r + .7152*g + .0722*b > .5) ? "true" : "false"; achou = 1; exit }
+    END { if (!achou) print "false" }' "$HOME/.local/state/simba/current/theme/colors.toml" 2>/dev/null || echo false
+}
 b() { "$@" && echo true || echo false; }
 
-saidas_audio() {
+_saidas_audio_py() {
   python3 -c '
 import subprocess, re, json
 def get_sinks():
@@ -64,7 +94,7 @@ print(json.dumps(get_sinks(), ensure_ascii=False))
 ' 2>/dev/null || echo '[]'
 }
 
-entradas_audio() {
+_entradas_audio_py() {
   python3 -c '
 import subprocess, re, json
 def get_sources():
@@ -110,6 +140,35 @@ print(json.dumps(get_sources(), ensure_ascii=False))
 ' 2>/dev/null || echo '[]'
 }
 
+# Saídas e entradas de áudio num jq só (pactl -f json); o Python antigo fica de reserva para
+# um pactl sem --format.
+AUDIO_JQ='
+  def props: (.properties // {});
+  def oid: (props["object.id"] // "0" | tonumber? // 0);
+  def bus: (props["device.bus"] // "" | ascii_downcase);
+  [ .lista[]
+    | select($tipo == "sink" or ((.name | contains(".monitor")) | not))
+    | .description = (.description // .name)
+    | ((.name + " " + .description + " " + bus
+        + (if $tipo == "sink" then " " + (props["device.form_factor"] // "" | ascii_downcase) else "" end))
+       | ascii_downcase) as $t
+    | { id: oid, nome: .name, descricao: .description,
+        tipo: (if (bus | contains("bluetooth")) or ($t | contains("bluez")) then "bluetooth"
+               elif $tipo == "sink" and ($t | test("headphone|headset|fone")) then "headphones"
+               elif $tipo == "sink" and ($t | test("hdmi|displayport")) then "hdmi"
+               elif $tipo == "sink" then "speaker"
+               elif $t | test("headset|headphone|fone") then "headset"
+               else "mic" end),
+        padrao: (.name == $padrao) } ]'
+audio_json() {  # sink|source
+  local lista padrao
+  lista=$(pactl -f json list "$1"s 2>/dev/null) && [[ $lista == \[* ]] || return 1
+  padrao=$(pactl get-default-"$1" 2>/dev/null)
+  jq -c --arg tipo "$1" --arg padrao "$padrao" "{lista: .} | $AUDIO_JQ" <<<"$lista"
+}
+saidas_audio()   { audio_json sink   2>/dev/null || _saidas_audio_py; }
+entradas_audio() { audio_json source 2>/dev/null || _entradas_audio_py; }
+
 estado() {
   local ssid vol mudo bri bmax bat carregando claro saidas entradas
   ssid=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | awk -F: '$2=="802-11-wireless"{print $1; exit}')
@@ -117,11 +176,7 @@ estado() {
   bri=$(brightnessctl -m 2>/dev/null | head -1 | cut -d, -f4 | tr -d %)
   bat=$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1)
   carregando=$(grep -qx -e Charging -e Full /sys/class/power_supply/BAT*/status 2>/dev/null && echo true || echo false)
-  claro=$(python3 -c "import re,sys
-t=open('$HOME/.local/state/simba/current/theme/colors.toml').read()
-m=re.search(r'^\s*background\s*=\s*[\"\']?#([0-9a-fA-F]{6})',t,re.M)
-h=m.group(1) if m else '000000'; r,g,b=(int(h[i:i+2],16)/255 for i in (0,2,4))
-print('true' if .2126*r+.7152*g+.0722*b>.5 else 'false')" 2>/dev/null || echo false)
+  claro=$(tema_claro)
   saidas=$(saidas_audio)
   entradas=$(entradas_audio)
   jq -cn --argjson wifi "$(b wifi_on)" --arg ssid "$ssid" --argjson bt "$(b bt_on)" \

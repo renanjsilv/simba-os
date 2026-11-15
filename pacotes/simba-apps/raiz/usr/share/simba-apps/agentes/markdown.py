@@ -502,13 +502,14 @@ class MarkdownMixin:
                 texto = linha[c] if c < len(linha) else ""
                 lbl = Gtk.Label(xalign=xalign.get(alinh[c] if c < len(alinh) else "", 0.0))
                 lbl.set_markup(inline_para_markup(texto))
-                # quebra só nas células longas: com quebra, a Grid mede a altura na
-                # largura mínima e a tabela ganhava um vão vazio embaixo
-                if len(texto) > 40:
-                    lbl.set_wrap(True)
-                    lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-                    lbl.set_max_width_chars(42)
-                    lbl.set_width_chars(24)
+                # Toda célula pode quebrar, com mínimo pequeno: sem isso a tabela não
+                # encolhe e, com Conversas + Detalhes abertos, empurra o painel de
+                # Detalhes para fora da tela. A Grid mede a altura na largura que recebe
+                # (altura-por-largura), então não sobra vão embaixo.
+                lbl.set_wrap(True)
+                lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+                lbl.set_max_width_chars(42)
+                lbl.set_width_chars(min(len(texto), 10))
                 lbl.set_selectable(True)
                 lbl.set_hexpand(True)
                 lbl.add_css_class("md-th" if r == 0 else "md-td")
@@ -518,11 +519,13 @@ class MarkdownMixin:
                 grade.attach(lbl, c, r, 1, 1)
         # Sem rolagem: as células quebram linha, e um ScrolledWindow horizontal
         # mediria a altura na largura mínima (sobrava um vão enorme embaixo).
-        moldura = Gtk.Box()
+        # Adw.Bin repassa a largura recebida ao medir a altura; um Gtk.Box horizontal
+        # media a altura na largura mínima da grade e deixava um vão embaixo.
+        moldura = Adw.Bin()
         moldura.add_css_class("md-tabela-moldura")
         moldura.set_overflow(Gtk.Overflow.HIDDEN)
         grade.set_hexpand(True)
-        moldura.append(grade)
+        moldura.set_child(grade)
         return moldura
 
     # ── código ───────────────────────────────────────────────────────────────

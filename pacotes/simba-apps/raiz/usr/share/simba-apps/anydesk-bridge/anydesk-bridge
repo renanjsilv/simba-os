@@ -23,6 +23,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 0' INT TERM
 
+# O TigerVNC (vncviewer) só serve à ponte: esconde o atalho dele do Menu Iniciar.
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+if [ ! -e "$APPS/vncviewer.desktop" ]; then
+  mkdir -p "$APPS"
+  printf '[Desktop Entry]\nType=Application\nName=TigerVNC\nExec=vncviewer\nNoDisplay=true\n' > "$APPS/vncviewer.desktop"
+fi
+
 # Monitor focado do Hyprland (nome e resolução física)
 read -r OUTPUT WIDTH HEIGHT < <(hyprctl monitors -j | python3 -I -c '
 import json, sys

@@ -32,6 +32,8 @@ Scope {
   property var recentes: []
   property var uso: ({})
   property var contexto: null          // { tipo, id, x, y } — menu do botão direito
+  property var desinst: null           // { id, x, y, info } — confirmação de "Desinstalar"
+  property var desinstalando: ({})     // id → true enquanto remove
   property bool energiaAberta: false
   property var energiaPos: ({ x: 0, y: 0, direita: true })
   property var barraFixados: []
@@ -274,7 +276,7 @@ Scope {
     extras.restart()
     conta.restart()
   }
-  function fechar() { aberto = false; contexto = null; energiaAberta = false }
+  function fechar() { aberto = false; contexto = null; desinst = null; energiaAberta = false }
   // Resolve (uma vez) os ícones de apps e arquivos que ainda não estão no cache.
   function buscarIcones() {
     var faltam = {}
@@ -342,13 +344,32 @@ Scope {
   }
   function menuApp(id, item, x, y) {
     var p = item.mapToItem(null, x, y)
+    desinst = null
     contexto = { id: id, x: p.x, y: p.y }
+  }
+  // Desinstalar: pergunta de onde o app vem (pacote, Flatpak, Steam, web app) e confirma.
+  function pedirDesinstalar(id, x, y) {
+    desinst = { id: id, x: x, y: y, info: null }
+    Sistema.json([Sistema.bin + "/iniciar", "origem", id], function(v) {
+      if (m.desinst && m.desinst.id === id) m.desinst = { id: id, x: x, y: y, info: v || { tipo: null, motivo: I18n.t("Não consegui descobrir de onde vem este app") } }
+    })
+  }
+  function desinstalar(id) {
+    desinst = null
+    var d = Object.assign({}, desinstalando); d[id] = true; desinstalando = d
+    Sistema.rodar([Sistema.bin + "/iniciar", "desinstalar", id], function(out, code) {
+      var d2 = Object.assign({}, m.desinstalando); delete d2[id]; m.desinstalando = d2
+      if (code === 0) {
+        if (m.fixado(id)) m.desafixar(id)
+        if (m.barraFixados.indexOf(id) >= 0) m.fixarBarra(id, false)
+      }
+    })
   }
 
   // Teclas comuns a todos os estilos (o campo de pesquisa recebe o foco).
   function tecla(ev) {
     if (ev.key === Qt.Key_Escape) {
-      if (contexto || energiaAberta) { contexto = null; energiaAberta = false }
+      if (contexto || energiaAberta) { contexto = null; desinst = null; energiaAberta = false }
       else if (texto) texto = ""
       else if (pagina !== "inicio") pagina = "inicio"
       else fechar()
@@ -477,7 +498,7 @@ Scope {
           anchors.fill: parent
           acceptedButtons: Qt.LeftButton | Qt.RightButton
           // Tela cheia: clicar no vazio fecha, como no Windows.
-          onClicked: { if (m.contexto || m.energiaAberta) { m.contexto = null; m.energiaAberta = false } else if (w.telaCheia) m.fechar() }
+          onClicked: { if (m.contexto || m.desinst || m.energiaAberta) { m.contexto = null; m.desinst = null; m.energiaAberta = false } else if (w.telaCheia) m.fechar() }
         }
 
         Loader {
@@ -539,7 +560,8 @@ Scope {
           m.fixado(idApp) ? { id: "inicio", t: I18n.t("Mover para o início"), g: Icones.arrowUp } : null,
           m.barraFixados.indexOf(idApp) >= 0 ? { id: "desbarra", t: I18n.t("Desafixar da barra de tarefas"), g: Icones.dockBottom }
                                               : { id: "barra", t: I18n.t("Fixar na barra de tarefas"), g: Icones.dockBottom },
-          { id: "abrir", t: I18n.t("Abrir"), g: Icones.openInNew }
+          { id: "abrir", t: I18n.t("Abrir"), g: Icones.openInNew },
+          m.desinstalando[idApp] ? null : { id: "desinstalar", t: I18n.t("Desinstalar"), g: Icones.deleteOutline }
         ].filter(function(o) { return o !== null })
         x: m.contexto ? Math.min(m.contexto.x, w.width - width - 8) : 0
         y: m.contexto ? Math.min(m.contexto.y, w.height - height - 8) : 0
@@ -571,7 +593,7 @@ Scope {
                 hoverEnabled: true
                 onClicked: {
                   // lê tudo antes de fechar: fechar o menu destrói este item
-                  var id = ctx.idApp, op = modelData.id, mm = m
+                  var id = ctx.idApp, op = modelData.id, mm = m, cx = ctx.x, cy = ctx.y
                   mm.contexto = null
                   if (op === "fixar") mm.fixar(id)
                   else if (op === "desafixar") mm.desafixar(id)
@@ -579,9 +601,62 @@ Scope {
                   else if (op === "barra") mm.fixarBarra(id, true)
                   else if (op === "desbarra") mm.fixarBarra(id, false)
                   else if (op === "abrir") mm.abrirApp(id)
+                  else if (op === "desinstalar") mm.pedirDesinstalar(id, cx, cy)
                 }
               }
             }
+          }
+        }
+      }
+    
+
+      // ── confirmação de "Desinstalar" ───────────────────────────────────
+      Rectangle {
+        id: conf
+        visible: m.desinst !== null
+        readonly property var info: m.desinst ? m.desinst.info : null
+        readonly property bool pode: !!info && !!info.tipo && !info.motivo
+        readonly property string nome: info && info.nome ? info.nome : (m.desinst && m.app(m.desinst.id) ? m.app(m.desinst.id).name : "")
+        x: m.desinst ? Math.max(8, Math.min(m.desinst.x, w.width - width - 8)) : 0
+        y: m.desinst ? Math.max(8, Math.min(m.desinst.y, w.height - height - 8)) : 0
+        width: 320
+        height: colConf.implicitHeight + 28
+        radius: 10
+        color: Tema.mistura(Tema.fundo, Tema.texto, Tema.escuro ? 0.09 : 0.03)
+        border.width: 1
+        border.color: Tema.linhaForte
+        MouseArea { anchors.fill: parent }
+        Column {
+          id: colConf
+          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
+          spacing: 10
+          Texto {
+            width: parent.width; wrapMode: Text.WordWrap; font.bold: true
+            text: I18n.t("Desinstalar") + " " + conf.nome + "?"
+          }
+          Texto {
+            width: parent.width; wrapMode: Text.WordWrap; color: Tema.texto2
+            text: {
+              var i = conf.info
+              if (!i) return I18n.t("Verificando…")
+              if (!i.tipo || i.motivo) return I18n.t(i.motivo || "Este app não pode ser desinstalado por aqui.")
+              if (i.tipo === "pacman") return I18n.t("Remove o pacote") + " " + i.pacote + " " + I18n.t("e as dependências que só ele usava. Vai pedir sua senha.")
+              if (i.tipo === "flatpak") return I18n.t("Remove o Flatpak") + " " + i.pacote + "."
+              if (i.tipo === "steam") return I18n.t("A Steam vai abrir para confirmar a desinstalação do jogo.")
+              if (i.tipo === "webapp") return I18n.t("Remove o web app (atalho e ícone).")
+              return I18n.t("Move o atalho para a lixeira.")
+            }
+          }
+          Texto {
+            visible: !!(conf.info && conf.info.aviso && conf.pode)
+            width: parent.width; wrapMode: Text.WordWrap; color: Tema.perigo
+            text: conf.info && conf.info.aviso ? I18n.t(conf.info.aviso) + " — " + I18n.t("esse recurso para de funcionar.") : ""
+          }
+          Row {
+            anchors.right: parent.right
+            spacing: 8
+            Botao { texto: I18n.t("Cancelar"); tipo: "fantasma"; onClicado: m.desinst = null }
+            Botao { visible: conf.pode; texto: I18n.t("Desinstalar"); tipo: "perigo"; onClicado: m.desinstalar(m.desinst.id) }
           }
         }
       }

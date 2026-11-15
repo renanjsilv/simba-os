@@ -1,13 +1,15 @@
 [Unit]
-Description=Botões discretos de minimizar/maximizar/fechar nas janelas (Quickshell)
-Documentation=file://%h/.config/quickshell/botoes-janela/shell.qml
+Description=Botões de janela do Simba (ligados)
+# Só uma marca: o componente roda dentro das Configurações (qs -c configuracoes,
+# /etc/xdg/quickshell/botoes-janela/BotoesJanela.qml), que o carrega quando este
+# serviço está habilitado. Ligar/desligar: Configurações › Janelas.
 PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/qs -c botoes-janela -n
-Restart=on-failure
-RestartSec=2
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
 
 [Install]
 WantedBy=graphical-session.target

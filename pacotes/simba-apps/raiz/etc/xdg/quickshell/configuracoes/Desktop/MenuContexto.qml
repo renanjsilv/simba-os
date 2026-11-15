@@ -119,7 +119,7 @@ Scope {
     case "novoTexto": a.novoTexto(); break
     case "colar": a.colar(false); break
     case "colarAtalho": a.colar(true); break
-    case "mostrarArea": Sistema.solto(["qs", "-c", "botoes-janela", "ipc", "call", "botoes", "mostrarArea"]); break
+    case "mostrarArea": Sistema.solto(["qs", "-c", "configuracoes", "ipc", "call", "botoes", "mostrarArea"]); break
     case "terminal": Sistema.solto(["uwsm-app", "--", "xdg-terminal-exec", "--dir=" + a.pasta]); break
     case "pasta": Sistema.solto(["uwsm-app", "--", "nautilus", "--new-window", a.pasta]); break
     case "proximoFundo": Sistema.solto(["simba-theme-bg-next"]); break

@@ -548,6 +548,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         box_principal.add_controller(drop_imagem)
 
         # Margens laterais acompanham a largura da janela (breakpoints do Adwaita)
+        self._bps_detalhes_sobrepostos = []
         for condicao, margem in (("max-width: 720sp", 10), ("min-width: 1600sp", 48)):
             bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(condicao))
             for alvo in (self.box_mensagens, self.box_inferior):
@@ -556,11 +557,20 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             if condicao.startswith("max"):
                 bp.add_setter(self.split_barra, "collapsed", True)
                 bp.add_setter(self.split_detalhes, "collapsed", True)
+                self._bps_detalhes_sobrepostos.append(bp)
             self.add_breakpoint(bp)
         # janela média: só os detalhes viram sobrepostos (a conversa continua com espaço)
         bp = Adw.Breakpoint.new(Adw.BreakpointCondition.parse("max-width: 1180sp"))
         bp.add_setter(self.split_detalhes, "collapsed", True)
         self.add_breakpoint(bp)
+        self._bps_detalhes_sobrepostos.append(bp)
+        # Painel de código/navegador aberto: Conversas + conversa + painel + Detalhes
+        # não cabem numa tela comum (o painel de Detalhes era empurrado para fora da
+        # janela). Enquanto o painel lateral está aberto, os Detalhes ficam sobrepostos.
+        for bp in self._bps_detalhes_sobrepostos:
+            bp.connect("apply", self._ajustar_detalhes)
+            bp.connect("unapply", self._ajustar_detalhes)
+        self.lateral.connect("notify::visible", self._ajustar_detalhes)
         for split, chave in ((self.split_barra, "conversas"), (self.split_detalhes, "detalhes")):
             split.connect("notify::collapsed", self._painel_lateral_recolhido, chave)
         self._atualizar_detalhes_ambiente()
@@ -991,6 +1001,16 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             gravar_janela_cfg(cfg)
         if chave == "conversas" and botao.get_active():
             self.barra.marcar_atual(self.conversa_id)
+
+    def _ajustar_detalhes(self, *_a):
+        # depois do breakpoint aplicar/desfazer os setters dele (senão ele desfaz o nosso)
+        def fazer():
+            quer = (self.lateral.get_visible()
+                    or self.get_current_breakpoint() in self._bps_detalhes_sobrepostos)
+            if self.split_detalhes.get_collapsed() != quer:
+                self.split_detalhes.set_collapsed(quer)
+            return False
+        GLib.idle_add(fazer)
 
     def _painel_lateral_recolhido(self, split, _p, chave):
         # janela estreita: o painel vira sobreposto e fecha; ao alargar, volta como estava

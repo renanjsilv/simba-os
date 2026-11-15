@@ -319,7 +319,7 @@ Pagina {
     }
   }
 
-  // ── window buttons (separate component: ~/.config/quickshell/botoes-janela) ─
+  // ── window buttons (/etc/xdg/quickshell/botoes-janela, hospedado em shell.qml) ─
   property bool botoesAtivos: false
   property var botoesCfg: ({ mostrar: [], ocultar: [] })
   readonly property string botoesArquivo: Sistema.home + "/.config/botoes-janela/config.json"
@@ -348,6 +348,7 @@ Pagina {
         ligado: pg.botoesAtivos
         onAlternado: function(x) {
           pg.botoesAtivos = x
+          Sistema.botoesJanela = x   // o componente roda dentro deste processo (shell.qml)
           Sistema.rodar(["systemctl", "--user", x ? "enable" : "disable", "--now", "botoes-janela.service"], function() { pg.carregarBotoes() })
         }
       }

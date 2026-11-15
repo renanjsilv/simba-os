@@ -8,9 +8,15 @@
     iniciar arquivos <termo>    JSON: arquivos da pasta pessoal com o termo no nome (plocate)
     iniciar icones <nome>...    JSON: nome do ícone → arquivo no tema de ícones ativo
                                 (o Quickshell não enxerga o tema do sistema)
+    iniciar origem <desktop-id> JSON: de onde vem o app {tipo: pacman|flatpak|atalho, pacote, motivo}
+    iniciar desinstalar <id>    remove o app (pkexec pacman -Rns / flatpak uninstall / lixeira)
+                                e avisa por notificação; código de saída 0 = removido
 """
+import configparser
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -169,6 +175,130 @@ def arquivos(termo, n=6):
             break
     return res
 
+# Pacotes que seguram o sistema: o menu não oferece desinstalar.
+PROTEGIDOS = {"simba", "simba-apps", "simba-draco", "simba-keyring", "hyprland", "quickshell",
+              "uwsm", "systemd", "pacman", "linux", "linux-firmware", "base", "sudo", "polkit",
+              "networkmanager", "pipewire", "wireplumber", "sddm", "xdg-desktop-portal-hyprland",
+              "bazaar", "flatpak", "gtk4", "libadwaita", "python"}
+# Apps que algum componente do Simba usa por baixo (desinstalar quebraria o recurso).
+PONTE = "Usado pela ponte do AnyDesk (acesso remoto)"
+USADO_POR = {"tigervnc": PONTE, "wayvnc": PONTE, "xorg-server-xvfb": PONTE}
+
+
+def _pastas_apps():
+    dados = os.environ.get("XDG_DATA_HOME") or str(HOME / ".local/share")
+    sis = os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
+    return [Path(dados) / "applications"] + [Path(d) / "applications" for d in sis.split(":") if d]
+
+
+def achar_desktop(app_id):
+    """Todos os arquivos com esse id, do que vale (pasta pessoal) ao do sistema."""
+    nome = app_id if app_id.endswith(".desktop") else app_id + ".desktop"
+    return [p / nome for p in _pastas_apps() if (p / nome).is_file()]
+
+
+def _nome(ent, padrao):
+    lang = (os.environ.get("LANG") or "").split(".")[0]
+    for k in ("Name[%s]" % lang, "Name[%s]" % lang.split("_")[0], "Name"):
+        if ent.get(k):
+            return ent[k]
+    return padrao
+
+
+def _ler_entrada(f):
+    cp = configparser.ConfigParser(interpolation=None, strict=False)
+    cp.optionxform = str
+    try:
+        cp.read(f, encoding="utf-8")
+        return dict(cp["Desktop Entry"])
+    except (configparser.Error, KeyError, UnicodeDecodeError):
+        return {}
+
+
+def _sh(argv):
+    r = subprocess.run(argv, capture_output=True, text=True)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def origem(app_id):
+    todos = achar_desktop(app_id)
+    if not todos:
+        return {"tipo": None, "motivo": "Atalho do app não encontrado"}
+    f = todos[0]
+    ent = _ler_entrada(f)
+    nome = _nome(ent, app_id)
+    # Cópia na pasta pessoal que só personaliza um app do sistema: quem manda é o do sistema.
+    fora = [t for t in todos if not os.path.realpath(t).startswith(str(HOME))]
+    if fora and str(os.path.realpath(f)).startswith(str(HOME)) and not ent.get("X-Flatpak"):
+        f = fora[0]
+    real = Path(os.path.realpath(f))
+    flat = ent.get("X-Flatpak")
+    if flat and fora and not any(_sh(["flatpak", "info", e, flat])[0] == 0 for e in ("--user", "--system")):
+        f, flat = fora[0], None   # cópia velha de um Flatpak que virou pacote do sistema
+    if flat or "/flatpak/" in str(real):
+        app = flat or app_id
+        escopo = "--user" if _sh(["flatpak", "info", "--user", app])[0] == 0 else "--system"
+        return {"tipo": "flatpak", "pacote": app, "escopo": escopo, "nome": nome, "arquivo": str(f)}
+    if str(real).startswith(str(HOME)):
+        exe = ent.get("Exec", "")
+        jogo = re.search(r"steam://rungameid/(\d+)", exe)
+        if jogo:   # jogo da Steam: quem desinstala é a própria Steam (abre a confirmação dela)
+            return {"tipo": "steam", "pacote": jogo.group(1), "nome": nome, "arquivo": str(real)}
+        if re.search(r"simba-(launch-webapp|webapp-handler)", exe):
+            return {"tipo": "webapp", "pacote": real.stem, "nome": nome, "arquivo": str(real)}
+        return {"tipo": "atalho", "pacote": real.name, "nome": nome, "arquivo": str(real)}
+    code, pac, _ = _sh(["pacman", "-Qqo", str(real)])
+    if code != 0 or not pac:
+        return {"tipo": None, "nome": nome, "motivo": "Não pertence a nenhum pacote instalado"}
+    pac = pac.splitlines()[0]
+    res = {"tipo": "pacman", "pacote": pac, "nome": nome, "arquivo": str(f)}
+    if pac in PROTEGIDOS or pac.startswith("simba"):
+        res["motivo"] = "Faz parte do sistema"
+    elif pac in USADO_POR:
+        res["aviso"] = USADO_POR[pac]
+    else:
+        _, req, _ = _sh(["pacman", "-Qi", pac])
+        for linha in req.splitlines():
+            k, _, v = linha.partition(":")
+            if k.strip() in ("Required By", "Necessário para") and v.strip() not in ("", "None", "Nenhum"):
+                res["motivo"] = "Outros pacotes precisam dele: " + ", ".join(v.split()[:3])
+                break
+    return res
+
+
+def _avisar(titulo, texto, erro=False):
+    subprocess.run(["notify-send", "-a", "Iniciar", "-i", "dialog-error" if erro else "edit-delete",
+                    titulo, texto], check=False)
+
+
+def desinstalar(app_id):
+    o = origem(app_id)
+    nome = o.get("nome", app_id)
+    if not o.get("tipo") or o.get("motivo"):
+        _avisar("Não dá para desinstalar " + nome, o.get("motivo", ""), True)
+        return 1
+    if o["tipo"] == "pacman":
+        argv = ["pkexec", "pacman", "-Rns", "--noconfirm", o["pacote"]]
+    elif o["tipo"] == "flatpak":
+        argv = ["flatpak", "uninstall", "-y", "--noninteractive", o["escopo"], o["pacote"]]
+    elif o["tipo"] == "steam":
+        subprocess.Popen(["steam", "steam://uninstall/" + o["pacote"]],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        return 0
+    elif o["tipo"] == "webapp":
+        argv = ["simba-webapp-remove", o["pacote"]]
+    else:
+        argv = ["gio", "trash", o["arquivo"]]
+    code, out, err = _sh(argv)
+    if code == 0:
+        _avisar(nome + " desinstalado", "Removido: " + o["pacote"])
+        return 0
+    if code in (126, 127) and o["tipo"] == "pacman":   # pkexec: senha cancelada
+        return 1
+    msg = (err or out).splitlines()
+    _avisar("Não consegui desinstalar " + nome, msg[-1] if msg else "Erro " + str(code), True)
+    return 1
+
 
 def main():
     a = sys.argv[1:]
@@ -195,6 +325,10 @@ def main():
         print(json.dumps(loja(" ".join(a[1:])), ensure_ascii=False))
     elif a[0] == "arquivos":
         print(json.dumps(arquivos(" ".join(a[1:])), ensure_ascii=False))
+    elif a[0] == "origem" and len(a) > 1:
+        print(json.dumps(origem(a[1]), ensure_ascii=False))
+    elif a[0] == "desinstalar" and len(a) > 1:
+        return desinstalar(a[1])
     elif a[0] == "uso":
         print(json.dumps(ler_uso()))
     else:

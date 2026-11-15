@@ -49,5 +49,7 @@ Item {
       if (ev.button === Qt.RightButton) b.menu.menuApp(b.entrada.id, area, ev.x, ev.y)
       else b.menu.abrirApp(b.entrada.id)
     }
+    // Clicar e segurar também abre o menu (o clique solto não dispara depois).
+    onPressAndHold: function(ev) { if (b.entrada) b.menu.menuApp(b.entrada.id, area, ev.x, ev.y) }
   }
 }

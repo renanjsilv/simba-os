@@ -2702,5 +2702,19 @@
  "Pedido": "Request",
  "Resultado": "Result",
  "Ver o pedido e os comandos deste agente": "See this agent's request and commands",
- "Voltar para a lista de agentes": "Back to the agent list"
+ "Voltar para a lista de agentes": "Back to the agent list",
+ "Desinstalar": "Uninstall",
+ "Remove o pacote": "Removes the package",
+ "e as dependências que só ele usava. Vai pedir sua senha.": "and dependencies only it used. You'll be asked for your password.",
+ "Remove o Flatpak": "Removes the Flatpak",
+ "A Steam vai abrir para confirmar a desinstalação do jogo.": "Steam will open to confirm uninstalling the game.",
+ "Remove o web app (atalho e ícone).": "Removes the web app (shortcut and icon).",
+ "Move o atalho para a lixeira.": "Moves the shortcut to the trash.",
+ "esse recurso para de funcionar.": "that feature will stop working.",
+ "Este app não pode ser desinstalado por aqui.": "This app can't be uninstalled here.",
+ "Não consegui descobrir de onde vem este app": "Couldn't tell where this app comes from",
+ "Faz parte do sistema": "Part of the system",
+ "Atalho do app não encontrado": "App shortcut not found",
+ "Não pertence a nenhum pacote instalado": "Doesn't belong to any installed package",
+ "Usado pela ponte do AnyDesk (acesso remoto)": "Used by the AnyDesk bridge (remote access)"
 }

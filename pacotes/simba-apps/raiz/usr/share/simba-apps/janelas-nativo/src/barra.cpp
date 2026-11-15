@@ -355,8 +355,8 @@ void CBarra::avisarSnap(bool sobre) {
     if (sobre && IDX >= (int)BOT.size())
         return;
     const auto  MON = W->m_monitor.lock();
-    const char* QS  = getenv("JANELAS_QS"); // teste: aponta para outra instância do botoes-janela
-    Config::Supplementary::executor()->spawn(std::format("qs {} ipc call botoes sobreMaximizar {} {} {} {} {}", QS ? QS : "-c botoes-janela", enderecoDe(W), sobre ? "true" : "false",
+    const char* QS  = getenv("JANELAS_QS"); // teste: aponta para outra instância (botoes-janela vive em configuracoes)
+    Config::Supplementary::executor()->spawn(std::format("qs {} ipc call botoes sobreMaximizar {} {} {} {} {}", QS ? QS : "-c configuracoes", enderecoDe(W), sobre ? "true" : "false",
                                                          X, Y, MON ? MON->m_name : std::string{"-"}));
 }
 

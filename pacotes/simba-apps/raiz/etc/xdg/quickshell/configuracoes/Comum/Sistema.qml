@@ -8,6 +8,8 @@ Singleton {
   id: s
 
   readonly property string home: Quickshell.env("HOME")
+  // Botões de janela (BotoesJanela.qml hospedado em shell.qml): a página Janelas liga/desliga.
+  property bool botoesJanela: false
   readonly property string runtime: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/configuracoes"
   readonly property string bin: Quickshell.shellDir + "/bin"
   readonly property string tela: bin + "/tela"

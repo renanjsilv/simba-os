@@ -139,6 +139,47 @@ ShellRoot {
     Navegacao.identificar = identificar
   }
 
+  // ── componentes hospedados ───────────────────────────────────────────────
+  // Draco (orbe de voz) e botões de janela rodavam cada um num Quickshell próprio; cada
+  // processo custa ~85 MB só de motor QML + driver de vídeo. Aqui eles dividem este.
+  // Cada um continua tendo o seu shell.qml (qs -c draco / qs -c botoes-janela) que só
+  // roda se ninguém o hospeda — a marca é $XDG_RUNTIME_DIR/simba-hospede/<nome> (pid).
+  readonly property string hospedeDir: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/simba-hospede"
+  function componente(pasta, arquivo) {
+    var c = Qt.createComponent("file://" + Quickshell.shellDir + "/../" + pasta + "/" + arquivo)
+    if (c.status === Component.Error) { console.log("hospedado " + pasta + ": " + c.errorString()); return null }
+    return c
+  }
+  // Marca como hospedado e encerra a cópia sozinha que estiver rodando (login antigo,
+  // serviço botoes-janela de antes, autostart "qs -c draco").
+  function hospedar(nome) {
+    Quickshell.execDetached(["sh", "-c",
+      'mkdir -p "$1" && echo "$2" > "$1/$3" && for p in $(pgrep -f "^(/usr/bin/)?qs -c $3( |$)"); do [ "$p" != "$2" ] && kill "$p"; done',
+      "sh", hospedeDir, String(Quickshell.processId), nome])
+  }
+  function liberar(nome) { Quickshell.execDetached(["rm", "-f", hospedeDir + "/" + nome]) }
+
+  LazyLoader {
+    id: draco
+    readonly property var comp: raiz.componente("draco", "Draco.qml")   // vem do pacote simba-draco
+    active: comp !== null
+    component: comp
+    onItemChanged: if (item) raiz.hospedar("draco")
+  }
+  // Botões de janela: ligados/desligados pela página Janelas (serviço-marca botoes-janela).
+  LazyLoader {
+    id: botoes
+    readonly property var comp: raiz.componente("botoes-janela", "BotoesJanela.qml")
+    active: comp !== null && Sistema.botoesJanela
+    component: comp
+    onItemChanged: if (item) raiz.hospedar("botoes-janela"); else raiz.liberar("botoes-janela")
+  }
+  Process {
+    running: true
+    command: ["systemctl", "--user", "is-enabled", "botoes-janela.service"]
+    stdout: StdioCollector { onStreamFinished: Sistema.botoesJanela = this.text.trim() === "enabled" }
+  }
+
   // ── pieces ───────────────────────────────────────────────────────────────
   AreaDeTrabalho { id: desktop }
   Confirmacao { id: confirmacao }

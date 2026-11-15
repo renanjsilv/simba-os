@@ -49,5 +49,6 @@ Item {
       if (ev.button === Qt.RightButton) { if (l.idApp) l.menu.menuApp(l.idApp, area, ev.x, ev.y) }
       else l.ativada()
     }
+    onPressAndHold: function(ev) { if (l.idApp) l.menu.menuApp(l.idApp, area, ev.x, ev.y) }
   }
 }

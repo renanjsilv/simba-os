@@ -15,7 +15,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 
-ShellRoot {
+Scope {
   id: root
 
   readonly property string especial: "special:minimizadas"

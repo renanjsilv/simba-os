@@ -515,6 +515,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.split_detalhes.set_max_sidebar_width(380)
         self.split_detalhes.set_sidebar_width_fraction(0.24)
         self.split_detalhes.set_show_sidebar(bool(cfg_janela.get("detalhes", True)))
+        GLib.timeout_add_seconds(8, self._titulos_antigos)   # resume os títulos antigos aos poucos
         self.barra = conversas.BarraConversas(
             listar=self._listar_conversas, abrir=self._abrir_da_barra,
             nova=lambda: self._limpar_chat(), renomear=self._renomear_da_barra,
@@ -1655,6 +1656,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.conversa_id = None
         self.conversa_criada = None
         self.conversa_mensagens = []
+        self.conversa_titulo_manual = None   # o nome dado à conversa anterior não passa para a nova
         self.precisa_contexto = False
         if self.salvar_fonte:
             try:
@@ -2478,6 +2480,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         self.proc = None
         self._salvar_conversa()
+        self._pedir_titulo_ia()
         self._atualizar_uso_ui()
         self.btn_historico.set_sensitive(True)
         self.btn_parar.set_visible(False)

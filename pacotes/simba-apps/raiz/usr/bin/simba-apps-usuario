@@ -46,7 +46,7 @@ done
 [[ -d /usr/share/simba-apps/idiomas ]] && guardar "$HOME/.local/share/simba/idiomas"
 # Draco: só o código (venv, vozes, Whisper, gravações, logs, chaves e o modelo retreinado ficam)
 if [[ -d /usr/share/draco ]]; then
-  for f in lib bin extensions tessdata tests tts.py wake.py wake_edge.py wake_record.py wake_train.py prompt.md prompt.en.md; do
+  for f in lib bin extensions tessdata tests tts.py prompt.md prompt.en.md; do
     guardar "$HOME/.local/share/draco/$f"
   done
 fi

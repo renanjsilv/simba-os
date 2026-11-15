@@ -445,7 +445,7 @@ class Janela(Adw.ApplicationWindow):
     def p_draco(self):
         caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         dicas = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
-        for exemplo in (_t("“Draco, que horas são?”"), _t("“Draco, abre o Spotify”"), _t("“Draco, me lembra às 15h”")):
+        for exemplo in (_t("“Que horas são?”"), _t("“Abre o Spotify”"), _t("“Me lembra às 15h”")):
             c = Gtk.Label(label=exemplo)
             c.add_css_class("chip")
             dicas.append(c)
@@ -453,7 +453,7 @@ class Janela(Adw.ApplicationWindow):
         caixa.append(self.botao(_t("Configurar o Draco"), lambda: self.abrir(["draco", "config"]), True,
                                 "audio-input-microphone-symbolic"))
         return self.pagina(_t("Conheça o Draco, seu assistente de voz"),
-                           _t("Diga “Draco” e peça o que quiser — ou segure F10 para falar. Ele abre apps, "
+                           _t("Segure F10, peça o que quiser e solte. Ele abre apps, "
                            "pesquisa na web, controla a música, manda mensagens e cria lembretes."),
                            svg_draco, caixa, tamanho=170)
 

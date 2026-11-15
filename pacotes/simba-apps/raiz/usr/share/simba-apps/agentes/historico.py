@@ -1,10 +1,12 @@
 """Histórico persistente das conversas (salvar, listar, abrir, exportar)."""
+import collections
 from datetime import datetime
 import json
 import os
 from pathlib import Path
 import re
 import sys
+import threading
 import time
 import uuid
 
@@ -18,6 +20,7 @@ from simba_i18n import t as _t  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import motor as M  # noqa: E402
+import titulos as TIT  # noqa: E402
 import detalhes  # noqa: E402
 
 HOME = Path.home()
@@ -36,12 +39,114 @@ class HistoricoMixin:
     def _titulo_conversa(self):
         if getattr(self, "conversa_titulo_manual", None):
             return self.conversa_titulo_manual   # renomeada pela pessoa
+        ia = self._titulos_ia().get(self.conversa_id)
+        if ia:
+            return ia                            # resumido pela IA (titulos.py)
         for msg in self.conversa_mensagens:
             if msg.get("tipo") == "user":
                 texto = " ".join(str(msg.get("texto", "")).split())
                 if texto:
                     return texto[:57] + ("…" if len(texto) > 57 else "")
         return _t("Nova conversa")
+
+    # ── Títulos resumidos pela IA ──────────────────────────────────────────
+    # Uma fila só, numa thread: a conversa atual (depois da 1ª resposta) passa na frente;
+    # as antigas sem resumo entram aos poucos ao abrir o app.
+    def _titulos_ia(self):
+        if not hasattr(self, "_titulos_ia_dict"):
+            self._titulos_ia_dict = {}
+        return self._titulos_ia_dict
+
+    def _fila_titulos(self, cid, mensagens=None, prioridade=False):
+        if not hasattr(self, "_titulos_cv"):
+            self._titulos_cv = threading.Condition()
+            self._titulos_fila = collections.deque()
+            self._titulos_pendentes = set()
+            threading.Thread(target=self._titulos_trabalhar, daemon=True).start()
+        with self._titulos_cv:
+            if cid in self._titulos_pendentes:
+                return
+            self._titulos_pendentes.add(cid)
+            item = (cid, mensagens)
+            self._titulos_fila.appendleft(item) if prioridade else self._titulos_fila.append(item)
+            self._titulos_cv.notify()
+
+    def _titulos_trabalhar(self):
+        while True:
+            with self._titulos_cv:
+                while not self._titulos_fila:
+                    self._titulos_cv.wait()
+                cid, mensagens = self._titulos_fila.popleft()
+            if mensagens is None:
+                try:
+                    mensagens = json.loads((CONVERSAS / f"{cid}.json").read_text(encoding="utf-8")).get("mensagens") or []
+                except (OSError, ValueError, AttributeError):
+                    mensagens = []
+            try:
+                titulo = TIT.gerar(mensagens) if mensagens else None
+            except Exception:  # noqa: BLE001
+                titulo = None
+            GLib.idle_add(self._titulo_ia_pronto, cid, titulo)
+            with self._titulos_cv:
+                self._titulos_pendentes.discard(cid)
+
+    def _titulo_ia_pronto(self, cid, titulo):
+        if cid == self.conversa_id:
+            if titulo and not getattr(self, "conversa_titulo_manual", None):
+                self._titulos_ia()[cid] = titulo
+                self._salvar_conversa()      # grava e atualiza a lista (o título mudou)
+            return False
+        destino = CONVERSAS / f"{cid}.json"
+        try:
+            dados = json.loads(destino.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        if not isinstance(dados, dict) or dados.get("titulo_manual"):
+            return False
+        if titulo:
+            dados.update(titulo=titulo, titulo_ia=titulo, titulo_ia_v=TIT.VERSAO)
+        else:
+            dados["titulo_ia_tentou"] = time.time()   # sem caminho agora: tenta de novo amanhã
+        try:
+            temporario = destino.with_suffix(".json.tmp")
+            temporario.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+            os.chmod(temporario, 0o600)
+            os.replace(temporario, destino)
+        except OSError:
+            return False
+        if titulo and hasattr(self, "_conversas_mudaram"):
+            self._conversas_mudaram()
+        return False
+
+    def _pedir_titulo_ia(self):
+        """Depois de uma resposta: resume o assunto, se a conversa ainda não tem título."""
+        cid = self.conversa_id
+        if not cid or getattr(self, "conversa_titulo_manual", None) or self._titulos_ia().get(cid):
+            return
+        if not any(m.get("tipo") == "assistant" and str(m.get("texto") or "").strip()
+                   for m in self.conversa_mensagens):
+            return
+        self._fila_titulos(cid, [dict(m) for m in self.conversa_mensagens], prioridade=True)
+
+    def _titulos_antigos(self, limite=40):
+        """As conversas recentes ainda sem título resumido entram na fila (uma por vez)."""
+        if not TIT.disponivel():
+            return False
+        try:
+            arquivos = sorted(CONVERSAS.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:limite]
+        except OSError:
+            return False
+        for p in arquivos:
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if (not isinstance(d, dict) or d.get("titulo_manual") or d.get("titulo_ia_v") == TIT.VERSAO
+                    or time.time() - float(d.get("titulo_ia_tentou") or 0) < 86400
+                    or not any(m.get("tipo") == "assistant" for m in d.get("mensagens") or [])):
+                continue
+            self._fila_titulos(d.get("id") or p.stem)
+        return False
 
     def _sincronizar_ativo(self):
         """Copia o texto ainda não renderizado da resposta ativa para o registro."""
@@ -68,6 +173,8 @@ class HistoricoMixin:
             "id": cid,
             "titulo": titulo,
             "titulo_manual": bool(getattr(self, "conversa_titulo_manual", None)),
+            **({"titulo_ia": titulo, "titulo_ia_v": TIT.VERSAO}
+               if self._titulos_ia().get(cid) == titulo else {}),
             "criada": self.conversa_criada or time.time(),
             "atualizada": time.time(),
             "pasta": str(self.work_dir),
@@ -406,6 +513,8 @@ class HistoricoMixin:
         self._limpar_chat()
         self.conversa_id = dados.get("id")
         self.conversa_titulo_manual = dados.get("titulo") if dados.get("titulo_manual") else None
+        if dados.get("titulo_ia") and dados.get("titulo_ia_v") == TIT.VERSAO:
+            self._titulos_ia()[self.conversa_id] = dados["titulo_ia"]
         self._titulo_na_barra = (self.conversa_id, dados.get("titulo"))
         self.conversa_criada = dados.get("criada") or time.time()
         self.conversa_mensagens = list(mensagens)

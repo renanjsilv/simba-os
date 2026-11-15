@@ -1,7 +1,8 @@
 """Ditado por voz no chat: grava com pw-record e transcreve como o Draco.
 
 Usa o serviço de transcrição configurado no Draco (Groq/OpenAI em
-~/.config/draco) e, sem ele ou se falhar, o Whisper local (voxtype). Só
+~/.config/draco) e, sem ele ou se falhar, o Parakeet do Draco neste computador
+(draco-stt) e, por último, o Whisper do voxtype, se estiver instalado. Só
 fica disponível quando o pacote simba-draco está instalado.
 """
 import array
@@ -110,6 +111,14 @@ class Gravador:
             try:
                 texto = _nuvem(audio, *servico, lingua)
             except Exception:  # noqa: BLE001
+                texto = None
+        if texto is None:  # o reconhecimento local do Draco (Parakeet, já na memória: draco-stt)
+            try:
+                r = subprocess.run(["python3", "-I", "/usr/share/draco/lib/stt_server.py", "arquivo", str(audio), "30"],
+                                   capture_output=True, text=True, timeout=35)
+                if r.returncode == 0 and r.stdout.strip():
+                    texto = r.stdout.strip()
+            except (OSError, subprocess.SubprocessError):
                 texto = None
         if texto is None and shutil.which("voxtype"):
             r = subprocess.run(["voxtype", "-q", "--model", WHISPER_LOCAL, "--language", lingua,

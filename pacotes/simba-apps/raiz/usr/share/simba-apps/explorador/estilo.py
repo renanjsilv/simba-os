@@ -72,7 +72,10 @@ window.explorador { background: @FUNDO@; }
    claro as barras de cima/baixo ficavam com texto branco em fundo branco */
 window, dialog, popover > contents, popover > arrow { color: @TEXTO@; }
 /* barra de título com abas (medidas do TabView do WinUI: 40 px, abas de 32) */
-.barra-titulo { background: @BARRA@; min-height: 40px; }
+.barra-titulo { background: @BARRA@; min-height: 40px; margin: 0; }
+/* o ToolbarView do libadwaita põe 3 px em cima da barra: a barra de abas tem que
+   colar no topo, senão os 3 px de cima não são do botão Fechar */
+toolbarview > revealer.top-bar > windowhandle > box { padding-top: 0; margin-top: 0; }
 .faixa-abas { min-height: 40px; }
 .aba-win { background: transparent; }
 .aba-titulo { font-size: 12px; }
@@ -82,8 +85,10 @@ window, dialog, popover > contents, popover > arrow { color: @TEXTO@; }
 .aba-fechar image { -gtk-icon-size: 12px; }
 .aba-mais { min-width: 32px; min-height: 24px; padding: 0; border-radius: 4px; }
 .aba-mais image { -gtk-icon-size: 14px; }
-.controles-janela { margin: 0; }
-.controles-janela button { min-width: 46px; min-height: 32px; padding: 0; margin: 0; border-radius: 0;
+/* sem nenhum vão em cima/direita: com a janela no topo da tela, o mouse jogado no
+   canto tem que cair no botão (o Adwaita põe espaçamento nos windowcontrols) */
+windowcontrols.controles-janela { margin: 0; padding: 0; border-spacing: 0; }
+windowcontrols.controles-janela > button { min-width: 46px; min-height: 32px; padding: 0; margin: 0; border-radius: 0;
   background: transparent; box-shadow: none; }
 .controles-janela button image { -gtk-icon-size: 12px; background: none; box-shadow: none; padding: 0; }
 .controles-janela button:hover { background: @HOVER@; }

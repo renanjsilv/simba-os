@@ -175,9 +175,19 @@ ShellRoot {
     onItemChanged: if (item) raiz.hospedar("botoes-janela"); else raiz.liberar("botoes-janela")
   }
   Process {
+    id: botoesEstado
     running: true
     command: ["systemctl", "--user", "is-enabled", "botoes-janela.service"]
     stdout: StdioCollector { onStreamFinished: Sistema.botoesJanela = this.text.trim() === "enabled" }
+  }
+  // No 1º login o first-run (enable-user-units.sh) habilita o serviço DEPOIS que este shell
+  // subiu: conferindo uma vez só, a instalação nova ficava sem botões até o 2º login.
+  // Confere de novo a cada 5 s pelos primeiros 3 min enquanto estiver desligado.
+  Timer {
+    property int vezes: 0
+    interval: 5000; repeat: true
+    running: !Sistema.botoesJanela && vezes < 36
+    onTriggered: { vezes++; if (!botoesEstado.running) botoesEstado.running = true }
   }
 
   // ── pieces ───────────────────────────────────────────────────────────────

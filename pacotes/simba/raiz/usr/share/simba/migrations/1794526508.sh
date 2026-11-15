@@ -2,4 +2,4 @@
 # reinício numa instalação nova. Quem já preparou o Draco e não desligou a escuta: habilita.
 d=~/.local/share/draco
 [[ -x $d/venv/bin/python && ! -f $d/wake.disabled ]] || exit 0
-systemctl --user enable --now draco-wake.service draco-aquecer.service >/dev/null 2>&1 || true
+systemctl --user enable --now draco-aquecer.service >/dev/null 2>&1 || true

@@ -2745,5 +2745,18 @@
  "Papel de parede igual em todos os computadores": "Same wallpaper on every computer",
  "Som ao mudar o volume": "Sound when changing volume",
  "Toca um aviso curto já no volume novo, para você ouvir como ficou": "Plays a short chime at the new volume so you can hear how loud it is",
- "Aviso sonoro no volume novo, como no Windows": "Chime at the new volume, like on Windows"
+ "Aviso sonoro no volume novo, como no Windows": "Chime at the new volume, like on Windows",
+ "“Cria um site para minha loja”": "“Build a website for my shop”",
+ "“Organiza meus arquivos”": "“Organize my files”",
+ "“Por que o Wi-Fi caiu?”": "“Why did the Wi-Fi drop?”",
+ "Conferindo o OpenCode…": "Checking OpenCode…",
+ "Atualizar o OpenCode": "Update OpenCode",
+ "Abrir os Agentes": "Open Agents",
+ "Agentes de IA: peça, eles fazem": "AI Agents: ask, they do it",
+ "Converse com o Claude, o Codex, o OpenCode e outros: eles programam, criam documentos, pesquisam na web e resolvem problemas do computador por você. O OpenCode já vem instalado e dá para usar de graça, sem conta.": "Chat with Claude, Codex, OpenCode and others: they code, write documents, search the web and fix computer problems for you. OpenCode comes installed and can be used for free, no account needed.",
+ "O OpenCode não está instalado: abra os Agentes para instalar.": "OpenCode is not installed: open Agents to install it.",
+ "OpenCode %1 instalado · versão nova disponível: %2": "OpenCode %1 installed · new version available: %2",
+ "OpenCode %1 instalado e em dia": "OpenCode %1 installed and up to date",
+ "OpenCode instalado": "OpenCode installed",
+ "Atualizando o OpenCode… pode seguir, avisamos quando terminar.": "Updating OpenCode… you can continue, we'll let you know when it's done."
 }

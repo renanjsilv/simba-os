@@ -3,7 +3,7 @@
 # bloqueio, sistema de idiomas (catálogos), atualização ("Atualizar tudo") e utilitários.
 pkgname=simba-apps
 pkgver=1.1.12
-pkgrel=77
+pkgrel=78
 pkgdesc="Simba OS: apps e ferramentas próprios (Configurações, Explorador, Gerenciador de Tarefas…)"
 arch=('x86_64')   # calço da ponte do AnyDesk (shim.c) é compilado aqui
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -11,6 +11,8 @@ license=('MIT')
 makedepends=('gcc' 'glib2' 'pkgconf')
 options=('!debug' '!strip')
 depends=('simba>=1.1.9-8' 'quickshell' 'python' 'python-gobject' 'gtk4' 'libadwaita' 'jq' 'curl' 'yay' 'bazaar' 'mise'
+         # Agentes de IA: OpenCode vem instalado (modo grátis, sem conta); versão nova pelo mise
+         'opencode'
          'pacman-contrib' 'wl-clipboard' 'libnotify'
          # ponte do AnyDesk: libera o display virtual para o usuário (desk_rt_ipc_error)
          'xorg-xhost'

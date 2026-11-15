@@ -11,4 +11,9 @@ post_upgrade() {
       systemctl start fstrim.timer paccache.timer >/dev/null 2>&1 || true
     fi
   fi
+  # vigia do Wi-Fi sem IPv4 (habilitado pelo pacote em multi-user.target.wants): liga já
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl start simba-wifi-vigia.service >/dev/null 2>&1 || true
+  fi
 }

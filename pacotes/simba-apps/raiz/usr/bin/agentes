@@ -863,6 +863,14 @@ def atualizar(a):
             if a == "agy":
                 ok = subprocess.run(["agy", "update"], stdout=saida, stderr=subprocess.STDOUT,
                                     stdin=subprocess.DEVNULL).returncode == 0
+            elif a in INSTALAR and "mise" in INSTALAR[a] and not _do_mise(a):
+                # veio do pacote do sistema (OpenCode na ISO): a versão nova entra pelo mise, na
+                # conta da pessoa e sem senha; os atalhos do mise vêm antes de /usr/bin no PATH
+                _mise_linha(a, INSTALAR[a]["mise"])
+                env = dict(os.environ, MISE_YES="1")
+                ok = subprocess.run(["mise", "install", a], stdout=saida, stderr=subprocess.STDOUT, env=env,
+                                    stdin=subprocess.DEVNULL).returncode == 0
+                subprocess.run(["mise", "reshim"], stdout=saida, stderr=subprocess.STDOUT)
             elif a in INSTALAR and "mise" in INSTALAR[a]:
                 env = dict(os.environ, MISE_YES="1")
                 ok = subprocess.run(["mise", "upgrade", "--global", a], stdout=saida, stderr=subprocess.STDOUT, env=env,
@@ -879,6 +887,16 @@ def atualizar(a):
     else:
         _avisar(_t("Não deu para atualizar") + " " + nome, _t("Verifique a internet e tente de novo."), erro=True)
     return 0 if ok else 1
+
+
+def _do_mise(a):
+    """O agente instalado é o do mise (e não o do pacote do sistema)?"""
+    try:
+        r = subprocess.run(["mise", "which", AGENTES[a]["cmd"][0]], capture_output=True, text=True, timeout=20,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and r.stdout.strip() != ""
 
 
 def remover(a):
@@ -973,6 +991,10 @@ def main():
         gravar_config(c)
     elif a[0] == "instalar" and len(a) == 2 and a[1] in INSTALAR:
         return instalar(a[1])
+    elif a[0] == "versao" and len(a) == 2 and a[1] in AGENTES:
+        # {instalado, versao_atual, versao_nova, pendente, texto} (boas-vindas: 1ª inicialização)
+        info = _M.verificar_atualizacao(a[1], forcar=True) if _M and hasattr(_M, "verificar_atualizacao") else {}
+        print(json.dumps(info or {"instalado": bool(_achar(a[1]))}, ensure_ascii=False))
     elif a[0] == "atualizar" and len(a) == 2 and a[1] in AGENTES:
         return atualizar(a[1])
     elif a[0] == "remover" and len(a) == 2 and a[1] in INSTALAR:

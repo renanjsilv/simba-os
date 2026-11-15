@@ -1,0 +1,36 @@
+#!/bin/bash
+# simba-wifi-vigia — refaz a conexão Wi-Fi que ficou "conectada" sem IPv4.
+#
+# Visto em 2026-11-15 (Atheros ath10k, roteador com 2,4 e 5 GHz no mesmo nome): ao voltar do
+# 2,4 para o 5 GHz o DHCP nunca mais responde. O IPv6 continua de pé, então o NetworkManager
+# não derruba nada — a máquina fica sem IPv4 e sem DNS até reiniciar ("do nada o sistema
+# perde o DNS"). Conectar do zero (como no boot) sempre funciona: é o que este vigia faz
+# quando o Wi-Fi passa SEM_IPV4 segundos conectado sem endereço IPv4.
+SEM_IPV4=${SIMBA_WIFI_VIGIA_LIMITE:-30}
+PASSO=5
+declare -A desde ultimo
+
+while true; do
+  agora=$(date +%s)
+  while IFS=: read -r dev tipo estado con; do
+    [ "$tipo" = wifi ] || continue
+    if [ "$estado" != connected ] || ip -4 -o addr show dev "$dev" scope global | grep -q inet; then
+      unset "desde[$dev]"; continue
+    fi
+    # rede só IPv6 ou IPv4 desligado de propósito: não é falha
+    metodo=$(nmcli -g ipv4.method connection show "$con" 2>/dev/null)
+    case $metodo in disabled|link-local) continue ;; esac
+    : "${desde[$dev]:=$agora}"
+    if (( agora - ${desde[$dev]} >= SEM_IPV4 )) && (( agora - ${ultimo[$dev]:-0} >= 120 )); then
+      bssid=$(iw dev "$dev" link 2>/dev/null | awk '/Connected to/{print $3}')
+      freq=$(iw dev "$dev" link 2>/dev/null | awk '/freq:/{print $2}')
+      echo "$dev: conectado a \"$con\" ($bssid, $freq MHz) sem IPv4 há $((agora - ${desde[$dev]})) s — reconectando"
+      ultimo[$dev]=$agora
+      unset "desde[$dev]"
+      nmcli connection down "$con" >/dev/null 2>&1
+      sleep 2
+      nmcli connection up "$con" >/dev/null 2>&1 || nmcli device connect "$dev" >/dev/null 2>&1
+    fi
+  done < <(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null)
+  sleep "$PASSO"
+done

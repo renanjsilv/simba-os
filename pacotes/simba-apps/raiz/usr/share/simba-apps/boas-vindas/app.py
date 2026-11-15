@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 
 import gi
 import sys as _sys, os as _os  # noqa: E401
@@ -140,6 +141,19 @@ def svg_draco(fg, bg, ac):
     return _t("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 240 200\">\n  <defs>\n    <radialGradient id=\"o\" cx=\".38\" cy=\".32\" r=\".8\">\n      <stop offset=\"0\" stop-color=\"%1\"/><stop offset=\".6\" stop-color=\"%2\" stop-opacity=\".78\"/>\n      <stop offset=\"1\" stop-color=\"%3\" stop-opacity=\".45\"/></radialGradient>\n    <radialGradient id=\"h\" cx=\".5\" cy=\".5\" r=\".5\">\n      <stop offset=\".55\" stop-color=\"%4\" stop-opacity=\".16\"/><stop offset=\"1\" stop-color=\"%5\" stop-opacity=\"0\"/></radialGradient>\n  </defs>\n  <circle cx=\"120\" cy=\"100\" r=\"98\" fill=\"url(#h)\"/>\n  <circle cx=\"120\" cy=\"100\" r=\"78\" fill=\"none\" stroke=\"%6\" stroke-opacity=\".14\" stroke-width=\"2\"/>\n  <circle cx=\"120\" cy=\"100\" r=\"62\" fill=\"url(#o)\"/>\n  %7\n  <ellipse cx=\"100\" cy=\"66\" rx=\"20\" ry=\"9\" fill=\"%8\" fill-opacity=\".18\" transform=\"rotate(-24 100 66)\"/>\n</svg>", fg, fg, fg, fg, fg, fg, barras, bg)
 
 
+def svg_agentes(fg, bg, ac):
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 200">'
+            f'<circle cx="120" cy="100" r="96" fill="{fg}" fill-opacity=".06"/>'
+            f'<rect x="48" y="52" width="122" height="82" rx="22" fill="{fg}" fill-opacity=".92"/>'
+            f'<path d="M74 132 l-6 26 l28 -24 z" fill="{fg}" fill-opacity=".92"/>'
+            f'<rect x="68" y="76" width="66" height="9" rx="4.5" fill="{bg}" fill-opacity=".85"/>'
+            f'<rect x="68" y="94" width="82" height="9" rx="4.5" fill="{bg}" fill-opacity=".6"/>'
+            f'<rect x="68" y="112" width="48" height="9" rx="4.5" fill="{bg}" fill-opacity=".4"/>'
+            f'<path d="M182 46 q4 18 22 22 q-18 4 -22 22 q-4 -18 -22 -22 q18 -4 22 -22 z" fill="{ac}"/>'
+            f'<path d="M196 104 q2 9 11 11 q-9 2 -11 11 q-2 -9 -11 -11 q9 -2 11 -11 z" fill="{ac}" fill-opacity=".7"/>'
+            '</svg>')
+
+
 def svg_loja(fg, bg, ac):
     tiles = ""
     for i, (x, y) in enumerate(((84, 92), (122, 92), (84, 130), (122, 130))):
@@ -240,7 +254,7 @@ class Janela(Adw.ApplicationWindow):
 
         self.carrossel = Adw.Carousel(allow_scroll_wheel=False, spacing=0, hexpand=True, vexpand=True)
         self.carrossel.connect("page-changed", self.pagina_mudou)
-        for montar in (self.p_inicio, self.p_wifi, self.p_conta, self.p_draco, self.p_aparencia,
+        for montar in (self.p_inicio, self.p_wifi, self.p_conta, self.p_draco, self.p_agentes, self.p_aparencia,
                        self.p_loja, self.p_escritorio, self.p_atalhos, self.p_pronto):
             self.carrossel.append(montar())
         vista.set_content(self.carrossel)
@@ -457,6 +471,78 @@ class Janela(Adw.ApplicationWindow):
                            "pesquisa na web, controla a música, manda mensagens e cria lembretes."),
                            svg_draco, caixa, tamanho=170)
 
+    def p_agentes(self):
+        caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        dicas = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
+        for exemplo in (_t("“Cria um site para minha loja”"), _t("“Organiza meus arquivos”"),
+                        _t("“Por que o Wi-Fi caiu?”")):
+            c = Gtk.Label(label=exemplo)
+            c.add_css_class("chip")
+            dicas.append(c)
+        caixa.append(dicas)
+        # OpenCode já vem instalado: aqui a pessoa confere se há versão nova (1ª inicialização)
+        self.oc_status = Gtk.Label(label=_t("Conferindo o OpenCode…"), wrap=True, justify=Gtk.Justification.CENTER)
+        self.oc_status.add_css_class("dim-label")
+        caixa.append(self.oc_status)
+        botoes = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
+        self.oc_atualizar = self.botao(_t("Atualizar o OpenCode"), self.opencode_atualizar, False,
+                                       "software-update-available-symbolic")
+        self.oc_atualizar.set_visible(False)
+        botoes.append(self.oc_atualizar)
+        botoes.append(self.botao(_t("Abrir os Agentes"), lambda: self.abrir(["simba-agentes"]), True,
+                                 "user-available-symbolic"))
+        caixa.append(botoes)
+        return self.pagina(_t("Agentes de IA: peça, eles fazem"),
+                           _t("Converse com o Claude, o Codex, o OpenCode e outros: eles programam, criam "
+                              "documentos, pesquisam na web e resolvem problemas do computador por você. "
+                              "O OpenCode já vem instalado e dá para usar de graça, sem conta."),
+                           svg_agentes, caixa, tamanho=150)
+
+    def opencode_conferir(self):
+        if getattr(self, "oc_conferindo", False):
+            return
+        self.oc_conferindo = True
+
+        def ler():
+            r = subprocess.run(["/usr/bin/agentes", "versao", "opencode"], capture_output=True, text=True, timeout=60)
+            return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+
+        def pronto(info):
+            self.oc_conferindo = False
+            if not info:                       # consulta falhou (sem internet etc.): não afirma nada
+                self.oc_status.set_label("")
+                self.oc_atualizar.set_visible(False)
+                return False
+            if not info.get("instalado"):
+                self.oc_status.set_label(_t("O OpenCode não está instalado: abra os Agentes para instalar."))
+                self.oc_atualizar.set_visible(False)
+            elif info.get("pendente"):
+                self.oc_status.set_label(_t("OpenCode %1 instalado · versão nova disponível: %2",
+                                            info.get("versao_atual", ""), info.get("versao_nova", "")))
+                self.oc_atualizar.set_visible(True)
+            else:
+                v = info.get("versao_atual", "")
+                self.oc_status.set_label(_t("OpenCode %1 instalado e em dia", v) if v else _t("OpenCode instalado"))
+                self.oc_atualizar.set_visible(False)
+            return False
+        em_segundo_plano(ler, pronto)
+
+    def opencode_atualizar(self):
+        self.oc_atualizar.set_sensitive(False)
+        self.oc_status.set_label(_t("Atualizando o OpenCode… pode seguir, avisamos quando terminar."))
+
+        def atualizar():
+            return subprocess.run(["/usr/bin/agentes", "atualizar", "opencode"], capture_output=True,
+                                  timeout=900).returncode
+
+        def pronto(rc):
+            self.oc_atualizar.set_sensitive(True)
+            if rc == 0:
+                self.oc_atualizar.set_visible(False)
+            self.opencode_conferir()
+            return False
+        em_segundo_plano(atualizar, pronto)
+
     def p_aparencia(self):
         linha = Gtk.Box(spacing=22, halign=Gtk.Align.CENTER)
         for tema, rotulo, claro in (("black", _t("Escuro"), False), ("white", _t("Claro"), True)):
@@ -555,16 +641,32 @@ class Janela(Adw.ApplicationWindow):
 
     # ── navegação ─────────────────────────────────────────────────────
     def ir(self, passo):
-        # Conta a partir da página de DESTINO, não da posição: durante a animação a posição
-        # ainda está na página anterior, e um clique rápido "voltava" para ela (parecia travar).
+        # Durante a animação conta a partir do DESTINO (a posição ainda está na página anterior e
+        # um clique rápido "voltava"); fora dela, a partir da página REAL. Antes o destino valia
+        # sempre: se a animação parava no meio (a lista do Wi-Fi mudando o tamanho da página),
+        # um clique não avançava e o seguinte pulava duas páginas.
         n = self.carrossel.get_n_pages()
-        alvo = getattr(self, "destino", round(self.carrossel.get_position())) + passo
+        animando = time.monotonic() - getattr(self, "ultimo_ir", 0) < 0.5
+        base = self.destino if animando and hasattr(self, "destino") else round(self.carrossel.get_position())
+        alvo = base + passo
         if alvo >= n:
             self.concluir()
             return
         if 0 <= alvo < n:
             self.destino = alvo
+            self.ultimo_ir = time.monotonic()
             self.carrossel.scroll_to(self.carrossel.get_nth_page(alvo), True)
+            if getattr(self, "conferir_id", 0):
+                GLib.source_remove(self.conferir_id)
+            self.conferir_id = GLib.timeout_add(700, self._conferir_pagina)
+
+    def _conferir_pagina(self):
+        """A animação foi interrompida no caminho: termina sem animar, na página pedida."""
+        self.conferir_id = 0
+        alvo = getattr(self, "destino", 0)
+        if abs(self.carrossel.get_position() - alvo) > 0.01:
+            self.carrossel.scroll_to(self.carrossel.get_nth_page(alvo), False)
+        return False
 
     def pagina_mudou(self, carrossel, indice):
         self.destino = indice  # também quando a pessoa arrasta o carrossel
@@ -574,18 +676,24 @@ class Janela(Adw.ApplicationWindow):
         self.voltar.set_opacity(1 if indice > 0 else 0)
         self.proximo.set_label(_t("Começar a usar") if ultima else (_t("Vamos lá") if indice == 0 else _t("Próximo")))
         self.pular.set_visible(not ultima)
-        # 0 início · 1 Wi-Fi · 2 conta · 3 Draco · 4 aparência · 5 Loja · 6 Escritório · 7 atalhos · 8 pronto
+        # 0 início · 1 Wi-Fi · 2 conta · 3 Draco · 4 Agentes · 5 aparência · 6 Loja · 7 Escritório
+        # 8 atalhos · 9 pronto
         if indice == 1:
             self.wifi_atualizar()
         if indice == 2:
             self.atualizar_conta()
-        if indice == 6:
+        if indice == 4:
+            self.opencode_conferir()
+        if indice == 7:
             self.atualizar_office()
         self.proximo.grab_focus()
 
     def tecla(self, _c, keyval, _code, estado):
         if estado & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.ALT_MASK):
             return False
+        foco = self.get_focus()
+        if isinstance(foco, Gtk.Editable) or isinstance(getattr(foco, "get_parent", lambda: None)(), Gtk.Editable):
+            return False   # digitando (senha do Wi-Fi): as setas movem o cursor, não a página
         if keyval in (Gdk.KEY_Right, Gdk.KEY_Page_Down):
             self.ir(1)
             return True

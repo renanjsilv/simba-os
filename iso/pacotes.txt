@@ -43,4 +43,4 @@ steam lib32-mesa lib32-vulkan-intel lib32-vulkan-radeon
 wine-staging wine-mono wine-gecko umu-launcher gamemode mangohud icoutils
 
 # Simba
-simba simba-apps simba-draco simba-keyring
+simba simba-apps simba-draco simba-keyring opencode

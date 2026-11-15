@@ -191,8 +191,8 @@ class CentralMixin:
         else:
             self._atualizar_linhas_central(instalados)
 
-        # Enquanto houver instalação em andamento, acompanha o progresso.
-        if any(a.get("instalando") for a in agentes):
+        # Enquanto houver instalação ou atualização em andamento, acompanha o progresso.
+        if any(a.get("instalando") or a.get("atualizando") for a in agentes):
             if not self.central_poll_id:
                 self.central_poll_id = GLib.timeout_add(2000, self._poll_instalacao)
         elif self.central_poll_id:
@@ -302,12 +302,24 @@ class CentralMixin:
         )
         exp.add_row(combo)
 
+        versao_row = Adw.ActionRow(title=_t("Versão"), subtitle=self._texto_versao(a))
+        btn_atualizar = Gtk.Button(label=_t("Atualizar"))
+        btn_atualizar.set_valign(Gtk.Align.CENTER)
+        btn_atualizar.connect(
+            "clicked",
+            lambda _b, aid=a["id"], nome=a["nome"]: self._atualizar_agente(aid, nome),
+        )
+        spinner_up = Gtk.Spinner()
+        spinner_up.set_valign(Gtk.Align.CENTER)
+        versao_row.add_suffix(btn_atualizar)
+        versao_row.add_suffix(spinner_up)
+        exp.add_row(versao_row)
+
         conta = Adw.ActionRow(title=_t("Conta"), subtitle=self._texto_conta(a))
         btn_login = Gtk.Button(label=_t("Entrar"))
         btn_login.set_valign(Gtk.Align.CENTER)
         btn_login.connect("clicked", lambda _b, aid=a["id"]: self._entrar_agente(aid))
         conta.add_suffix(btn_login)
-        conta.set_visible(a.get("conectado") is not True)
         exp.add_row(conta)
 
         remover = None
@@ -337,9 +349,15 @@ class CentralMixin:
             "switch_handler": switch_handler,
             "combo": combo,
             "combo_opcoes": opcoes,
+            "versao": versao_row,
+            "btn_atualizar": btn_atualizar,
+            "spinner_up": spinner_up,
             "conta": conta,
+            "btn_login": btn_login,
             "remover": remover,
         }
+        self._atualizar_widget_versao(self.central_widgets[a["id"]], a)
+        self._atualizar_widget_conta(self.central_widgets[a["id"]], a)
 
         if self.agente_atual == a["id"] or (not self.agente_atual and indice == 0):
             exp.set_expanded(True)
@@ -377,6 +395,49 @@ class CentralMixin:
             GLib.idle_add(self._definir_modelo, aid, opcoes[indice]["valor"])
             self._toast_central(_t("Modelo atualizado"))
 
+    def _atualizar_widget_versao(self, w, a):
+        if not w or not w.get("versao"):
+            return
+        w["versao"].set_subtitle(self._texto_versao(a))
+        btn_up = w.get("btn_atualizar")
+        sp_up = w.get("spinner_up")
+        atualizacao = a.get("atualizacao") or {}
+        pendente = bool(atualizacao.get("pendente"))
+        atualizando = bool(a.get("atualizando"))
+
+        if btn_up:
+            btn_up.set_visible(pendente and not atualizando)
+            btn_up.set_sensitive(not atualizando)
+            btn_up.remove_css_class("flat")
+            btn_up.add_css_class("suggested-action")
+            btn_up.set_label(_t("Atualizar"))
+        if sp_up:
+            sp_up.set_visible(atualizando)
+            if atualizando:
+                sp_up.start()
+            else:
+                sp_up.stop()
+
+    def _atualizar_widget_conta(self, w, a):
+        if not w or not w.get("conta"):
+            return
+        w["conta"].set_subtitle(self._texto_conta(a))
+        btn_login = w.get("btn_login")
+        if not btn_login:
+            return
+        btn_login.remove_css_class("suggested-action")
+        btn_login.remove_css_class("flat")
+        login_st = a.get("loginStatus") or {}
+        if login_st.get("expirando"):
+            btn_login.set_label(_t("Renovar"))
+            btn_login.add_css_class("suggested-action")
+        elif a.get("conectado") is True:
+            btn_login.set_label(_t("Reconectar"))
+            btn_login.add_css_class("flat")
+        else:
+            btn_login.set_label(_t("Entrar"))
+            btn_login.add_css_class("suggested-action")
+
     def _atualizar_linhas_central(self, instalados):
         for i, a in enumerate(instalados):
             w = self.central_widgets.get(a["id"])
@@ -389,18 +450,22 @@ class CentralMixin:
             w["switch"].handler_block(w["switch_handler"])
             w["switch"].set_active(bool(a.get("ativo")))
             w["switch"].handler_unblock(w["switch_handler"])
-            conectado = a.get("conectado")
-            w["conta"].set_visible(conectado is not True)
-            w["conta"].set_subtitle(self._texto_conta(a))
+            self._atualizar_widget_versao(w, a)
+            self._atualizar_widget_conta(w, a)
             if w.get("remover") is not None:
                 w["remover"].set_visible(bool(a.get("instalavel")))
 
     def _descrever_agente(self, a):
-        if a.get("conectado") is False:
-            return _t("Sem conta conectada — use Entrar abaixo")
         partes = []
         if not a.get("ativo"):
             partes.append(_t("Desligado na cascata"))
+        login_st = a.get("loginStatus") or {}
+        if login_st.get("expirando"):
+            partes.append(login_st.get("texto", _t("Login expirando")))
+        elif a.get("conectado") is False:
+            return _t("Sem conta conectada — use Entrar abaixo")
+        if a.get("atualizacao", {}).get("pendente"):
+            partes.append(_t("Atualização disponível"))
         if a.get("esgotadoTexto"):
             partes.append(f"{_t('Sem limite até')} {a['esgotadoTexto']}")
         uso = a.get("uso") or {}
@@ -413,12 +478,30 @@ class CentralMixin:
         return " · ".join(partes) or _t("Conectado")
 
     def _texto_conta(self, a):
+        login_st = a.get("loginStatus") or {}
+        if login_st.get("texto"):
+            return login_st["texto"]
         conectado = a.get("conectado")
         if conectado is True:
             return _t("Conta conectada")
         if conectado is False:
             return _t("Sem conta conectada")
         return _t("Login não verificável — entre só se já usou este agente")
+
+    def _texto_versao(self, a):
+        atualizacao = a.get("atualizacao") or {}
+        v_atual = a.get("versao") or atualizacao.get("versao_atual") or ""
+        v_nova = atualizacao.get("versao_nova") or ""
+        pendente = bool(atualizacao.get("pendente"))
+        atualizando = bool(a.get("atualizando"))
+
+        if atualizando:
+            return _t("Versão %1 · atualizando…", v_atual) if v_atual else _t("Atualizando…")
+        if pendente and v_nova and v_atual:
+            return _t("Versão %1 · atualização disponível (%2)", v_atual, v_nova)
+        if v_atual:
+            return _t("Versão %1 (em dia)", v_atual)
+        return _t("Não detectada")
 
     def _central_troca_alterada(self, row, _param):
         self._rodar_agentes(
@@ -517,6 +600,19 @@ class CentralMixin:
 
     def _entrar_agente(self, aid):
         self._rodar_agentes(["entrar", aid], _t("Login aberto em um terminal"), timeout=30)
+
+    def _atualizar_agente(self, aid, nome):
+        self._toast_central(f"{_t('Atualizando')} {nome}…")
+        w = self.central_widgets.get(aid)
+        if w and w.get("btn_atualizar"):
+            w["btn_atualizar"].set_sensitive(False)
+            w["btn_atualizar"].set_label(_t("Atualizando…"))
+        if w and w.get("spinner_up"):
+            w["spinner_up"].set_visible(True)
+            w["spinner_up"].start()
+        self._rodar_agentes(["atualizar", aid], f"{nome} {_t('atualizado com sucesso')}", timeout=600)
+        if not self.central_poll_id:
+            self.central_poll_id = GLib.timeout_add(1500, self._poll_instalacao)
 
     def _instalar_agente(self, aid, nome):
         self._toast_central(f"{_t('Instalando')} {nome}…")

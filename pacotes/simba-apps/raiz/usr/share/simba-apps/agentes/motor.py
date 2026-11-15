@@ -604,6 +604,190 @@ def conectado(a, verificar=True):
     return any((HOME / f).exists() and (HOME / f).stat().st_size > 2 for f in info["conta"])
 
 
+def status_login(a):
+    """Retorna detalhes sobre a conexão e expiração de login do agente.
+
+    Devolve:
+        {
+            "conectado": bool ou None,
+            "expirando": bool,
+            "expirado": bool,
+            "dias": float ou None,
+            "expira_em": float ou None,
+            "texto": str
+        }
+    """
+    if a not in AGENTES:
+        return {"conectado": None, "expirando": False, "expirado": False, "dias": None, "expira_em": None, "texto": ""}
+
+    if a == "claude":
+        f = HOME / ".claude/.credentials.json"
+        if f.exists():
+            try:
+                d = json.loads(f.read_text())
+                oauth = d.get("claudeAiOauth") or {}
+                exp_ms = oauth.get("refreshTokenExpiresAt") or oauth.get("expiresAt")
+                if exp_ms:
+                    exp_s = exp_ms / 1000.0
+                    dias = (exp_s - time.time()) / 86400.0
+                    data_str = datetime.fromtimestamp(exp_s).strftime("%d/%m")
+                    if dias <= 0:
+                        return {"conectado": False, "expirando": True, "expirado": True, "dias": dias,
+                                "expira_em": exp_s, "texto": _t("Login expirado")}
+                    if dias <= 7:
+                        dias_int = max(1, round(dias))
+                        if dias_int <= 1:
+                            txt = _t("Login expira amanhã (%1)", data_str)
+                        else:
+                            txt = _t("Login expira em %1 dias (%2)", dias_int, data_str)
+                        return {"conectado": True, "expirando": True, "expirado": False, "dias": dias,
+                                "expira_em": exp_s, "texto": txt}
+                    return {"conectado": True, "expirando": False, "expirado": False, "dias": dias,
+                            "expira_em": exp_s, "texto": _t("Conectado · expira em %1", data_str)}
+            except Exception:
+                pass
+
+    if a == "grok":
+        f = HOME / ".grok/auth.json"
+        if f.exists():
+            try:
+                d = json.loads(f.read_text())
+                for k, v in d.items():
+                    if isinstance(v, dict) and "expires_at" in v:
+                        iso = v["expires_at"]
+                        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+                        exp_s = dt.timestamp()
+                        dias = (exp_s - time.time()) / 86400.0
+                        if not v.get("refresh_token") and dias <= 0:
+                            return {"conectado": False, "expirando": True, "expirado": True, "dias": dias,
+                                    "expira_em": exp_s, "texto": _t("Login expirado")}
+            except Exception:
+                pass
+
+    if a == "opencode" and modo_gratis(a):
+        return {"conectado": None, "expirando": False, "expirado": False, "dias": None, "expira_em": None,
+                "texto": _t("Modo grátis (sem conta)")}
+
+    conn = conectado(a, verificar=False)
+    if conn is True:
+        nome_conta = _t("Conta conectada")
+        if a == "agy":
+            nome_conta = _t("Conta Google conectada")
+        elif a == "codex":
+            nome_conta = _t("Conta OpenAI conectada")
+        elif a == "grok":
+            nome_conta = _t("Conta Grok conectada")
+        return {"conectado": True, "expirando": False, "expirado": False, "dias": None, "expira_em": None,
+                "texto": nome_conta}
+    if conn is False:
+        return {"conectado": False, "expirando": False, "expirado": False, "dias": None, "expira_em": None,
+                "texto": _t("Sem conta conectada")}
+    return {"conectado": None, "expirando": False, "expirado": False, "dias": None, "expira_em": None,
+            "texto": _t("Login não verificado")}
+
+
+CACHE_ATUALIZACOES = ESTADO / "atualizacoes.json"
+
+
+def versao_instalada(a):
+    """Retorna a versão do executável instalado (ex: '2.1.325', '1.5.9')."""
+    cmd = _achar(a)
+    if not cmd:
+        return ""
+    try:
+        r = subprocess.run([cmd, "--version"], capture_output=True, text=True, timeout=5)
+        out = (r.stdout or "") + " " + (r.stderr or "")
+        m = re.search(r"(\d{4}\.\d{2}\.\d{2}-[a-f0-9]+|\d+(\.\d+)+[a-zA-Z0-9.\-]*)", out)
+        return m.group(1).rstrip(".") if m else out.strip()[:20]
+    except Exception:
+        return ""
+
+
+def _versao_recente_remota(a):
+    """Consulta versão remota no mise ou via update_status para agy."""
+    if a == "agy":
+        st = HOME / ".gemini/antigravity-cli/updater/update_status.json"
+        if st.exists():
+            try:
+                d = json.loads(st.read_text())
+                if d.get("success") and "Already on the latest" in d.get("message", ""):
+                    return versao_instalada("agy")
+                if d.get("latest_version"):
+                    return d["latest_version"]
+            except Exception:
+                pass
+        return versao_instalada("agy")
+
+    if a in INSTALAR and "mise" in INSTALAR[a]:
+        if shutil.which("mise"):
+            try:
+                r = subprocess.run(["mise", "latest", a], capture_output=True, text=True, timeout=6)
+                v = r.stdout.strip()
+                if v and not v.startswith("error"):
+                    return v
+            except Exception:
+                pass
+    return ""
+
+
+def verificar_atualizacao(a, forcar=False):
+    """Verifica se há atualização pendente para o agente a.
+
+    Devolve:
+        {
+            "instalado": bool,
+            "versao_atual": str,
+            "versao_nova": str,
+            "pendente": bool,
+            "texto": str
+        }
+    """
+    if a not in AGENTES or not _achar(a):
+        return {"instalado": False, "versao_atual": "", "versao_nova": "", "pendente": False, "texto": ""}
+
+    cache = {}
+    try:
+        cache = json.loads(CACHE_ATUALIZACOES.read_text()) if CACHE_ATUALIZACOES.exists() else {}
+    except Exception:
+        cache = {}
+
+    item = cache.get(a) if isinstance(cache.get(a), dict) else None
+    if item and not forcar:
+        ttl = 7200  # 2 horas
+        if time.time() - float(item.get("quando", 0)) < ttl:
+            return item.get("dados") or {}
+
+    v_atual = versao_instalada(a)
+    v_nova = _versao_recente_remota(a) or v_atual
+    pendente = bool(v_atual and v_nova and v_atual != v_nova)
+
+    if pendente:
+        texto = _t("Atualização disponível (%1 → %2)", v_atual, v_nova)
+    elif v_atual:
+        texto = _t("Versão %1 (em dia)", v_atual)
+    else:
+        texto = ""
+
+    dados = {
+        "instalado": True,
+        "versao_atual": v_atual,
+        "versao_nova": v_nova,
+        "pendente": pendente,
+        "texto": texto,
+    }
+
+    cache[a] = {"quando": time.time(), "dados": dados}
+    try:
+        CACHE_ATUALIZACOES.parent.mkdir(parents=True, exist_ok=True)
+        tmp = CACHE_ATUALIZACOES.with_suffix(".tmp")
+        tmp.write_text(json.dumps(cache, ensure_ascii=False))
+        tmp.replace(CACHE_ATUALIZACOES)
+    except Exception:
+        pass
+
+    return dados
+
+
 def uso(a):
     """Fração usada (0–1) das janelas de limite, lida do widget de agentes do Simba.
 

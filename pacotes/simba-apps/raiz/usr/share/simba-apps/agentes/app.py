@@ -329,6 +329,12 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         header = Adw.HeaderBar()
         toolbar_view.add_top_bar(header)
 
+        self.banner_alerta = Adw.Banner()
+        self.banner_alerta.set_revealed(False)
+        self.banner_alerta.connect("button-clicked", self._ao_clicar_banner_alerta)
+        toolbar_view.add_top_bar(self.banner_alerta)
+        self.banner_alerta_acao = None
+
         # Seletor de agente: pílula com logo + nome; a lista abre num popover com
         # o logo, o modelo e o estado do limite de cada agente.
         # Barra de conversas (esquerda): Nova conversa, Procurar, Recentes
@@ -1064,8 +1070,108 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             return
         agente, nome, modelo = self._info_agente_atual()
         seguro = bool(M.ler_config(verificar=False).get("seguro"))
+        login_st = M.status_login(agente) if agente else None
+        up_info = M.verificar_atualizacao(agente) if agente else None
         self.detalhes.ambiente(pasta=self.work_dir, agente=nome, modelo=modelo, seguro=seguro,
-                               icone=marcas.icone_agente(agente, modelo) if agente else "simba-agente")
+                               icone=marcas.icone_agente(agente, modelo) if agente else "simba-agente",
+                               login_status=login_st, atualizacao=up_info)
+
+    def _verificar_alertas_ambiente(self):
+        """Verifica se o agente atual ou agentes da cascata têm login expirando ou atualização pendente."""
+        if not hasattr(self, "banner_alerta"):
+            return
+
+        def worker():
+            try:
+                agente = self.agente_atual or (self.candidatos[0] if self.candidatos else None)
+                if not agente:
+                    GLib.idle_add(lambda: self.banner_alerta.set_revealed(False))
+                    return
+
+                login_info = M.status_login(agente)
+                update_info = M.verificar_atualizacao(agente)
+                nome = M.AGENTES.get(agente, {}).get("nome", agente)
+
+                titulo, acao, btn = "", None, ""
+
+                # Prioridade 1: Login do agente atual expirando ou expirado
+                if login_info.get("expirando"):
+                    dias = login_info.get("dias")
+                    dias_int = max(1, round(dias)) if dias is not None else 1
+                    if login_info.get("expirado"):
+                        titulo = _t("%1: seu login expirou. Conecte sua conta para continuar.", nome)
+                    elif dias_int <= 1:
+                        titulo = _t("%1: seu login expira amanhã. Renove para não perder o acesso.", nome)
+                    else:
+                        titulo = _t("%1: seu login expira em %2 dias. Renove para não perder o acesso.", nome, dias_int)
+                    acao = ("login", agente)
+                    btn = _t("Entrar")
+                # Prioridade 2: Atualização pendente do agente atual
+                elif update_info.get("pendente"):
+                    v_atual = update_info.get("versao_atual")
+                    v_nova = update_info.get("versao_nova")
+                    titulo = _t("%1: atualização disponível (%2 → %3).", nome, v_atual, v_nova)
+                    acao = ("atualizar", agente)
+                    btn = _t("Atualizar")
+                else:
+                    # Verificar outros agentes instalados e ativos
+                    for outro in (self.candidatos or []):
+                        if outro == agente:
+                            continue
+                        l_outro = M.status_login(outro)
+                        if l_outro.get("expirando"):
+                            nome_outro = M.AGENTES.get(outro, {}).get("nome", outro)
+                            dias = l_outro.get("dias")
+                            d_int = max(1, round(dias)) if dias is not None else 1
+                            titulo = _t("%1: login expira em %2 dias.", nome_outro, d_int)
+                            acao = ("login", outro)
+                            btn = _t("Entrar")
+                            break
+                        u_outro = M.verificar_atualizacao(outro)
+                        if u_outro.get("pendente"):
+                            nome_outro = M.AGENTES.get(outro, {}).get("nome", outro)
+                            titulo = _t("%1: atualização disponível.", nome_outro)
+                            acao = ("central", outro)
+                            btn = _t("Ver na Central")
+                            break
+
+                def aplicar():
+                    if titulo:
+                        self.banner_alerta.set_title(titulo)
+                        self.banner_alerta.set_button_label(btn)
+                        self.banner_alerta_acao = acao
+                        self.banner_alerta.set_revealed(True)
+                    else:
+                        self.banner_alerta.set_revealed(False)
+                        self.banner_alerta_acao = None
+                    return False
+
+                GLib.idle_add(aplicar)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _ao_clicar_banner_alerta(self, _banner):
+        if not getattr(self, "banner_alerta_acao", None):
+            return
+        tipo, aid = self.banner_alerta_acao
+        if tipo == "login":
+            self._entrar_agente(aid)
+        elif tipo == "atualizar":
+            nome = M.AGENTES.get(aid, {}).get("nome", aid)
+            self.banner_alerta.set_title(_t("Atualizando %1…", nome))
+            self.banner_alerta.set_button_label("")
+            def worker():
+                try:
+                    subprocess.run(["/usr/bin/agentes", "atualizar", aid],
+                                   stdin=subprocess.DEVNULL, capture_output=True, timeout=600)
+                except Exception:
+                    pass
+                GLib.idle_add(self._verificar_alertas_ambiente)
+            threading.Thread(target=worker, daemon=True).start()
+        elif tipo == "central":
+            self._abrir_central()
 
     def _detalhes_bloco(self, bloco, abrir=True):
         """O painel de detalhes passa a mostrar a atividade deste bloco "Pensando"."""
@@ -1486,17 +1592,29 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._atualizar_modelo_dropdown()
         self._atualizar_uso_ui()
         self._atualizar_estado_gratis()
+        self._verificar_alertas_ambiente()
+        self._atualizar_detalhes_ambiente()
 
     def _itens_agentes_atuais(self):
-        """Itens do seletor com o aviso "volta …" em dia (o limite pode ter zerado desde a montagem)."""
+        """Itens do seletor com o aviso "volta …", expiração de login ou atualização em dia."""
         for it in self.dropdown_items:
             a = it.get("id")
             if a in M.AGENTES:
                 ate = M.esgotado_ate(a)
                 if ate:
                     it["aviso"] = f"{_t('volta')} {M.hora(ate)}"
-                elif it.get("aviso", "").startswith(_t("volta")):
-                    it.pop("aviso", None)
+                else:
+                    l_st = M.status_login(a)
+                    if l_st.get("expirando"):
+                        dias = l_st.get("dias")
+                        d_int = max(1, round(dias)) if dias is not None else 1
+                        it["aviso"] = _t("login em %1d", d_int)
+                    else:
+                        up = M.verificar_atualizacao(a)
+                        if up.get("pendente"):
+                            it["aviso"] = _t("atualizar")
+                        elif it.get("aviso") and (it["aviso"].startswith(_t("volta")) or it["aviso"].startswith(_t("login em")) or it["aviso"] == _t("atualizar")):
+                            it.pop("aviso", None)
         return self.dropdown_items
 
     def _on_agente_selecionado(self, _i, item):
@@ -1506,6 +1624,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             self.agente_atual = None if escolhido == "auto" else escolhido
         self._atualizar_modelo_dropdown()
         self._atualizar_uso_ui()
+        self._verificar_alertas_ambiente()
+        self._atualizar_detalhes_ambiente()
 
     def _atualizar_modelo_dropdown(self):
         if not hasattr(self, "modelo_dropdown"):

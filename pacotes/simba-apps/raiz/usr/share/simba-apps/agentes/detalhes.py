@@ -165,6 +165,20 @@ class PainelDetalhes(Gtk.Box):
         self.lbl_modo.set_ellipsize(Pango.EllipsizeMode.END)
         self.linha_modo = self._linha(None, self.lbl_modo, imagem=self.img_modo)
         amb.append(self.linha_modo)
+        self.img_conta = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+        self.img_conta.set_pixel_size(16)
+        self.lbl_conta = _rotulo("", ("detalhes-valor",))
+        self.lbl_conta.set_ellipsize(Pango.EllipsizeMode.END)
+        self.linha_conta = self._linha(None, self.lbl_conta, imagem=self.img_conta)
+        self.linha_conta.set_visible(False)
+        amb.append(self.linha_conta)
+        self.img_versao = Gtk.Image.new_from_icon_name("software-update-available-symbolic")
+        self.img_versao.set_pixel_size(16)
+        self.lbl_versao = _rotulo("", ("detalhes-valor",))
+        self.lbl_versao.set_ellipsize(Pango.EllipsizeMode.END)
+        self.linha_versao = self._linha(None, self.lbl_versao, imagem=self.img_versao)
+        self.linha_versao.set_visible(False)
+        amb.append(self.linha_versao)
         conteudo.append(amb)
 
         # ── Contexto ──
@@ -252,7 +266,8 @@ class PainelDetalhes(Gtk.Box):
         return caixa
 
     # ── dados de fora ────────────────────────────────────────────────────────
-    def ambiente(self, pasta=None, agente=None, icone=None, modelo=None, seguro=None):
+    def ambiente(self, pasta=None, agente=None, icone=None, modelo=None, seguro=None,
+                 login_status=None, atualizacao=None):
         if pasta is not None:
             self.pasta = Path(pasta)
             self.lbl_pasta.set_label(caminho_curto(pasta))
@@ -268,6 +283,35 @@ class PainelDetalhes(Gtk.Box):
         if seguro is not None:
             self.lbl_modo.set_label(_t("Somente leitura") if seguro else _t("Livre · executa sem pedir aprovação"))
             self.img_modo.set_from_icon_name("changes-prevent-symbolic" if seguro else "changes-allow-symbolic")
+        if login_status is not None:
+            txt = login_status.get("texto") or ""
+            if txt:
+                self.lbl_conta.set_label(txt)
+                self.lbl_conta.set_tooltip_text(txt)
+                if login_status.get("expirando"):
+                    self.img_conta.set_from_icon_name("dialog-warning-symbolic")
+                else:
+                    self.img_conta.set_from_icon_name("avatar-default-symbolic")
+                self.linha_conta.set_visible(True)
+            else:
+                self.linha_conta.set_visible(False)
+        if atualizacao is not None:
+            if atualizacao.get("pendente"):
+                v_at = atualizacao.get("versao_atual") or ""
+                v_nv = atualizacao.get("versao_nova") or ""
+                txt = f"{v_at} → {v_nv}" if (v_at and v_nv) else _t("Nova versão disponível")
+                self.lbl_versao.set_label(_t("Atualização: %1", txt))
+                self.lbl_versao.set_tooltip_text(_t("Atualização disponível: %1", txt))
+                self.img_versao.set_from_icon_name("software-update-available-symbolic")
+                self.linha_versao.set_visible(True)
+            elif atualizacao.get("versao_atual"):
+                v_at = atualizacao.get("versao_atual")
+                self.lbl_versao.set_label(f"v{v_at} ({_t('em dia')})")
+                self.lbl_versao.set_tooltip_text(f"v{v_at}")
+                self.img_versao.set_from_icon_name("emblem-ok-symbolic")
+                self.linha_versao.set_visible(True)
+            else:
+                self.linha_versao.set_visible(False)
 
     def contexto(self, tokens, janela):
         """tokens = tamanho da conversa que o modelo lê agora; janela = limite do modelo."""

@@ -13,6 +13,7 @@ continua o trabalho com o contexto (Configurações › Agentes de IA).
     agentes opcao <chave> <json> trocaAutomatica (bool), esperar (segundos)
     agentes entrar <id>          abre o login do agente num terminal
     agentes instalar <id>        baixa e instala o agente (sem terminal; avisa ao terminar)
+    agentes atualizar <id>       atualiza o agente para a versão mais recente
     agentes remover <id>         desinstala o agente
 
 Como troca: o agente roda num pseudo-terminal; a saída passa direto para a tela e é
@@ -837,6 +838,49 @@ def instalar(a):
     return 0 if ok else 1
 
 
+def _atualizando(a):
+    marca = ESTADO / f"atualizando-{a}"
+    try:
+        os.kill(int(marca.read_text()), 0)
+        return True
+    except (OSError, ValueError):
+        marca.unlink(missing_ok=True)
+        return False
+
+
+def atualizar(a):
+    """Atualiza o agente para a versão mais recente."""
+    if a not in AGENTES:
+        return 1
+    nome = AGENTES[a]["nome"]
+    ESTADO.mkdir(parents=True, exist_ok=True)
+    marca = ESTADO / f"atualizando-{a}"
+    marca.write_text(str(os.getpid()))
+    log = ESTADO / f"atualizar-{a}.log"
+    ok = False
+    try:
+        with open(log, "w") as saida:
+            if a == "agy":
+                ok = subprocess.run(["agy", "update"], stdout=saida, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL).returncode == 0
+            elif a in INSTALAR and "mise" in INSTALAR[a]:
+                env = dict(os.environ, MISE_YES="1")
+                ok = subprocess.run(["mise", "upgrade", "--global", a], stdout=saida, stderr=subprocess.STDOUT, env=env,
+                                    stdin=subprocess.DEVNULL).returncode == 0
+                subprocess.run(["mise", "reshim"], stdout=saida, stderr=subprocess.STDOUT)
+            else:
+                ok = False
+    finally:
+        marca.unlink(missing_ok=True)
+        (ESTADO / "atualizacoes.json").unlink(missing_ok=True)
+
+    if ok:
+        _avisar(_t("Agente atualizado"), nome + " " + _t("foi atualizado para a versão mais recente."))
+    else:
+        _avisar(_t("Não deu para atualizar") + " " + nome, _t("Verifique a internet e tente de novo."), erro=True)
+    return 0 if ok else 1
+
+
 def remover(a):
     info = INSTALAR[a]
     if "mise" in info:
@@ -868,9 +912,13 @@ def estado():
         inst = bool(_achar(a))
         ate = esgotado_ate(a) if inst else None
         icone = f"/usr/share/simba/shell/plugins/agents/assets/{a}.svg"
+        login_st = _M.status_login(a) if _M and hasattr(_M, "status_login") else {}
+        up_info = _M.verificar_atualizacao(a) if _M and hasattr(_M, "verificar_atualizacao") and inst else {}
+        v_atual = up_info.get("versao_atual") or (_M.versao_instalada(a) if _M and hasattr(_M, "versao_instalada") else "")
         out.append({"id": a, "nome": AGENTES[a]["nome"], "instalado": inst, "conectado": conectado(a) if inst else False,
                     "instalavel": a in INSTALAR, "sobre": _t(INSTALAR.get(a, {}).get("sobre", "")),
-                    "instalando": _instalando(a), "modelo": _modelo(a, c),
+                    "instalando": _instalando(a), "atualizando": _atualizando(a), "versao": v_atual,
+                    "atualizacao": up_info, "loginStatus": login_st, "modelo": _modelo(a, c),
                     "modelos": _modelos_estaticos(a) if inst else [],
                     "ativo": a not in c["inativos"] and a in c["ordem"], "uso": uso(a), "esgotadoAte": ate,
                     "esgotadoTexto": hora(ate) if ate else "", "icone": icone if os.path.exists(icone) else ""})
@@ -925,6 +973,8 @@ def main():
         gravar_config(c)
     elif a[0] == "instalar" and len(a) == 2 and a[1] in INSTALAR:
         return instalar(a[1])
+    elif a[0] == "atualizar" and len(a) == 2 and a[1] in AGENTES:
+        return atualizar(a[1])
     elif a[0] == "remover" and len(a) == 2 and a[1] in INSTALAR:
         return remover(a[1])
     elif a[0] == "entrar" and len(a) == 2 and a[1] in AGENTES:

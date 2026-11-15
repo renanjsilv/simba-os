@@ -1,20 +1,15 @@
 #!/usr/bin/env python3
-"""wake.py reading the mic (raw and AU streams) and the "só assistente de voz" permissions.
+"""The "só assistente de voz" permissions (opencode and Claude Code).
 
-  ~/.local/share/draco/venv/bin/python -I tests/test_mic_permissoes.py
+  python3 -I tests/test_permissoes.py
 """
-import io
 import os
 import subprocess
 import sys
 
-import numpy as np
-
 CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, CODE)
 sys.path.insert(0, os.path.join(CODE, "lib"))
-sys.argv = [sys.argv[0], "--teste"]
-import wake  # noqa: E402
 import config  # noqa: E402
 
 ok = bad = 0
@@ -26,34 +21,6 @@ def check(name, cond):
     bad += not cond
     print(("ok   " if cond else "FALHA"), name)
 
-
-class FakeProc:
-    def __init__(self, data):
-        self.stdout = io.BytesIO(data)
-
-    def terminate(self):
-        pass
-
-    def wait(self):
-        pass
-
-
-def mic_from(data):
-    m = wake.Mic.__new__(wake.Mic)
-    m.proc = FakeProc(data)
-    m.swap = False
-    m.zi = np.zeros((len(wake.Mic.HIGHPASS), 2))
-    m.skip_au_header()
-    return m
-
-
-tone = (np.sin(np.arange(16000) * 2 * np.pi * 440 / 16000) * 8000).astype(np.int16)
-raw = mic_from(tone.tobytes()).read(1280)
-au_head = b".snd" + (24).to_bytes(4, "big") + (0xFFFFFFFF).to_bytes(4, "big") + (3).to_bytes(4, "big") \
-    + (16000).to_bytes(4, "big") + (1).to_bytes(4, "big")
-au = mic_from(au_head + tone.astype(">i2").tobytes()).read(1280)
-check("mic: PCM cru é lido como está", np.abs(np.frombuffer(raw, np.int16)).max() > 4000)
-check("mic: fluxo AU (pw-record sem --raw) vira o mesmo PCM", np.array_equal(raw, au))
 
 # Permissions
 total = config.opencode_permission({"PERMISSAO": "total"})

@@ -6,7 +6,7 @@
 //   - first use (no AI chosen yet): a welcome with one big path ("Começar grátis", when
 //     config.py offers a brain with semConta) and a secondary one (account or key);
 //   - afterwards: a clean panel. Essentials on top (AI, voice, how to call it), the rest
-//     (model, transcription, timings, wake word sensitivity) folded under "Avançado".
+//     (model, transcription, conversation memory) folded under "Avançado".
 // Everything shown comes from `config.py status`: nothing about the providers is fixed here.
 //
 // Everything goes through /usr/share/draco/lib/config.py:
@@ -138,21 +138,6 @@ ShellRoot {
       }
     }
   }
-
-  // Wake word threshold: config.py status doesn't report it yet, so read config.env
-  // (read only; writes go through `config.py set LIMIAR`).
-  property string limiarRaw: ""
-  FileView {
-    path: shell.home + "/.config/draco/config.env"
-    watchChanges: true
-    printErrors: false
-    onFileChanged: reload()
-    onLoaded: {
-      var m = text().match(/^LIMIAR=['"]?([0-9.]*)/m)
-      shell.limiarRaw = m ? m[1] : ""
-    }
-  }
-  readonly property string limiar: st && st.limiar !== undefined ? String(st.limiar || "") : limiarRaw
 
   // ── backend ─────────────────────────────────────────────────────────────
   function refresh() { statusProc.running = false; statusProc.running = true }
@@ -1032,7 +1017,7 @@ ShellRoot {
           Layout.topMargin: 8
           Layout.fillWidth: true
           horizontalAlignment: Text.AlignHCenter
-          text: I18n.t("Seu assistente de voz. Segure F10 ou diga “Draco” e peça: abrir um app, mudar o volume, tirar uma dúvida.")
+          text: I18n.t("Seu assistente de voz. Segure F10 e peça: abrir um app, mudar o volume, tirar uma dúvida.")
           color: shell.text2
           font.pixelSize: 14
           lineHeight: 1.15
@@ -1302,7 +1287,7 @@ ShellRoot {
               Glyph { g: "\u{f05e0}"; size: 20; color: shell.good }
               Label {
                 Layout.fillWidth: true
-                text: I18n.t("Tudo pronto! Segure F10 e fale, ou diga “Draco”.")
+                text: I18n.t("Tudo pronto! Segure F10 e fale.")
                 font.pixelSize: 13; font.weight: Font.DemiBold
               }
               Btn { glyph: "\u{f0156}"; kind: "ghost"; compact: true; onClicked: shell.celebrate = false }
@@ -1491,18 +1476,6 @@ ShellRoot {
           // ── Voice ───────────────────────────────────────────────────────
           SectionLabel { text: I18n.t("Voz") }
           Card {
-            SettingRow {
-              title: I18n.t("Escuta em segundo plano (“Draco”)")
-              hint: (shell.st && shell.st.escuta)
-                ? (shell.st.escuta_mb > 0 ? I18n.t("Ouvindo em segundo plano (%1 MB de memória RAM). Desligue para economizar memória; você ainda pode usar o Draco pelo atalho F10 ou pelo ícone.").replace("%1", shell.st.escuta_mb) : I18n.t("Ouvindo em segundo plano. Desligue para economizar memória RAM; o atalho F10 e o ícone continuam funcionando."))
-                : I18n.t("Serviço desligado (economiza memória RAM). O Draco não fica esperando em segundo plano; use o atalho F10 ou clique no ícone para falar.")
-              Toggle {
-                id: wakeToggle
-                on: shell.st ? shell.st.escuta : false
-                onToggled: { busy = true; shell.run([shell.draco, "escuta", on ? "desliga" : "liga"], null, () => { busy = false; shell.refresh() }) }
-              }
-            }
-            Divider {}
             RowLayout {
               Layout.fillWidth: true
               spacing: 16
@@ -1586,7 +1559,6 @@ ShellRoot {
               rowSpacing: 12
               Repeater {
                 model: [[["F10"], I18n.t("Segure enquanto fala e solte para enviar")],
-                        [["“Draco”"], I18n.t("Diga o nome e depois o pedido")],
                         [[I18n.t("Esc")], I18n.t("Cancela o que ele estiver fazendo")],
                         [["Super", "F10"], I18n.t("Abre estas configurações")]]
                 RowLayout {
@@ -1684,7 +1656,7 @@ ShellRoot {
                   spacing: 4
                   Layout.fillWidth: true
                   Label { text: I18n.t("Reconhecimento de voz"); font.pixelSize: 14; font.weight: Font.DemiBold }
-                  Label { text: I18n.t("Transforma a sua fala em texto e confirma que você disse “Draco”."); color: shell.muted; font.pixelSize: 12; Layout.fillWidth: true }
+                  Label { text: I18n.t("Transforma a sua fala em texto."); color: shell.muted; font.pixelSize: 12; Layout.fillWidth: true }
                 }
                 Btn {
                   text: shell.testingVoice ? I18n.t("Ouvindo…") : I18n.t("Testar microfone")
@@ -1710,62 +1682,13 @@ ShellRoot {
               }
             }
 
-            // Timings and sensitivity
+            // Conversation memory
             Card {
-              SliderRow {
-                title: I18n.t("Espera para você começar a falar")
-                hint: I18n.t("Depois de “Draco”, quanto tempo ele aguarda o pedido antes de desistir.")
-                key: "ESPERA"; from: 2; to: 15; step: 1
-                value: shell.st ? shell.st.espera : 5
-              }
-              Divider {}
-              SliderRow {
-                title: I18n.t("Silêncio que encerra o pedido")
-                hint: I18n.t("Pausa que ele entende como “terminei de falar”. Aumente se ele te corta no meio.")
-                key: "SILENCIO"; from: 0.8; to: 5; step: 0.1
-                value: shell.st ? shell.st.silencio : 2
-              }
-              Divider {}
               SliderRow {
                 title: I18n.t("Memória da conversa")
                 hint: I18n.t("Dentro desse tempo ele lembra do pedido anterior (“e agora aumenta o volume”). 0 = esquece sempre.")
                 key: "MEMORIA"; from: 0; to: 60; step: 1; unit: "min"
                 value: shell.st ? shell.st.memoria : 10
-              }
-              Divider {}
-              // LIMIAR: wake word score needed (0.5–0.99, lower = more sensitive);
-              // shown as sensitivity 0–100 %. Empty = the model's own.
-              ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 6
-                SliderRow {
-                  id: sens
-                  title: I18n.t("Sensibilidade ao “Draco”")
-                  hint: I18n.t("Mais sensível atende mesmo de longe, mas pode acordar por engano.")
-                  from: 0; to: 100; step: 5; unit: "%"
-                  value: shell.limiar !== "" ? Math.round((0.99 - parseFloat(shell.limiar)) / 0.49 * 100) : 50
-                  display: shell.limiar !== "" ? Math.round(value) + " %" : I18n.t("Automática")
-                  leftLabel: I18n.t("Menos sensível")
-                  rightLabel: I18n.t("Mais sensível")
-                  onReleased: v => {
-                    var lim = (0.99 - v / 100 * 0.49).toFixed(2)
-                    shell.limiarRaw = lim
-                    shell.config(["set", "LIMIAR", lim], null, () => {
-                      shell.refresh()
-                    })
-                  }
-                }
-                Btn {
-                  visible: shell.limiar !== ""
-                  text: I18n.t("Voltar para a automática")
-                  kind: "ghost"; compact: true
-                  onClicked: {
-                    shell.limiarRaw = ""
-                    shell.config(["set", "LIMIAR", ""], null, () => {
-                      shell.refresh()
-                    })
-                  }
-                }
               }
             }
           }

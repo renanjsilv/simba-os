@@ -1,0 +1,17 @@
+[Unit]
+Description=Draco: reconhecimento de fala neste computador (Parakeet na memória, transcreve enquanto o F10 está pressionado)
+PartOf=graphical-session.target
+After=graphical-session.target
+# modelo baixado por `draco preparar`; sem ele o Draco usa a nuvem ou o Whisper local
+ConditionPathExists=%h/.local/share/draco/models/parakeet/encoder-model.int8.onnx
+
+[Service]
+ExecStart=/usr/bin/draco servidor-stt
+Restart=on-failure
+RestartSec=5
+# o modelo é carregado uma vez (~5 s, ~1 GB); ao transcrever, prioridade sobre o resto
+CPUWeight=200
+MemoryHigh=2G
+
+[Install]
+WantedBy=graphical-session.target

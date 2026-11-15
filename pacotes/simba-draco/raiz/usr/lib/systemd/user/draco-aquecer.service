@@ -1,7 +1,7 @@
 [Unit]
 Description=Draco: deixa o Claude Code pronto na memória (1ª resposta rápida depois do boot)
 PartOf=graphical-session.target
-After=graphical-session.target draco-wake.service
+After=graphical-session.target
 
 [Service]
 Type=oneshot

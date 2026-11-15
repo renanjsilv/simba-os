@@ -4,7 +4,7 @@
 // it has acted (or has an answer) the orb collapses into a small voice line at
 // the bottom so you can see the result, and the reply plays as a caption.
 //
-// Driven by /usr/bin/draco and wake.py through $XDG_RUNTIME_DIR/draco/orb.cmd: one JSON
+// Driven by /usr/bin/draco through $XDG_RUNTIME_DIR/draco/orb.cmd: one JSON
 // line per command, {"s": "<ns timestamp>", "c": "<command>", "a": [args]}, appended; the
 // file is watched (inotify), so the orb reacts in milliseconds, where each
 // `qs ipc call` costs ~260 ms just to start. Same commands over IPC still work:

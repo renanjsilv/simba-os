@@ -2,7 +2,9 @@
 # draco-preparar [--quieto] — prepara o Draco para este usuário (o pacote traz só o código):
 #   ~/.local/share/draco/venv   ambiente Python com as dependências de requirements.txt
 #   ~/.local/share/draco/voices vozes Piper do idioma da sessão (pt: Faber; en: Ryan)
-# O Whisper local é baixado sozinho no primeiro uso. Rodar de novo só completa o que faltar.
+#   ~/.local/share/draco/models/parakeet  reconhecimento de fala local (Parakeet Ultra, ONNX
+#                               w4a8/int8, ~400 MB; servido por draco-stt.service)
+# O Whisper local (reserva antiga, MODELO_LOCAL=tiny/base/small) é baixado sozinho no primeiro uso. Rodar de novo só completa o que faltar.
 set -uo pipefail
 CODIGO=${DRACO_CODIGO:-/usr/share/draco}
 DATA="$HOME/.local/share/draco"
@@ -10,7 +12,7 @@ Q=${1:-}
 msg() { [[ $Q == --quieto ]] || printf '%s\n' "$*"; }
 mkdir -p "$DATA"/{voices,models,workdir}
 
-if [[ ! -x $DATA/venv/bin/python ]] || ! "$DATA/venv/bin/python" -c 'import piper, faster_whisper, openwakeword' 2>/dev/null; then
+if [[ ! -x $DATA/venv/bin/python ]] || ! "$DATA/venv/bin/python" -c 'import piper, faster_whisper, onnx_asr' 2>/dev/null; then
   msg "$(simba-t "Preparando o ambiente do Draco (alguns minutos, só na primeira vez)…")"
   python3 -m venv "$DATA/venv" || exit 1
   "$DATA/venv/bin/pip" install -q --upgrade pip
@@ -31,9 +33,49 @@ for v in "${vozes[@]}"; do
       mv "$DATA/voices/$n.$ext.part" "$DATA/voices/$n.$ext"
   done
 done
-# Escuta do "Draco" e o aquecimento ligados de verdade (enable): antes eram só iniciados e,
-# numa instalação nova, paravam a cada reinício.
-if [[ ! -f $DATA/wake.disabled ]]; then
-  systemctl --user enable --now draco-wake.service draco-aquecer.service >/dev/null 2>&1 || true
+# Parakeet: o reconhecimento de fala local (lib/stt_server.py), ~400 MB, uma vez só.
+# Parakeet Ultra (moondream, pós-treino do NVIDIA Parakeet TDT 0.6B v3), exportado em ONNX por
+# Olicorne, licença CC-BY-4.0. Codificador w4a8 (pesos de 4 bits): mesma taxa de erro do int8
+# nos testes (3,3% das palavras em pt-BR; Groq 3,8%) com ~400 MB a menos de RAM. Fica com o
+# nome *.int8.onnx porque o onnx-asr escolhe os arquivos pelo sufixo da quantização.
+# Revisão fixa e sha256 conferido: uma mudança no repositório não troca o modelo sem aviso.
+PK="$DATA/models/parakeet"
+PK_REV=b27f93c2238aa35e138996c005a62f1e8430f801
+PK_REPO="https://huggingface.co/Olicorne/parakeet-tdt-0.6b-v3-ultra-onnx/resolve/$PK_REV"
+mkdir -p "$PK"
+# modelo de outra revisão (ou o Parakeet v3 original das versões anteriores): baixa de novo
+if [[ $(cat "$PK/REVISAO" 2>/dev/null) != "$PK_REV" ]]; then
+  rm -f "$PK"/*.onnx "$PK"/*.part "$PK"/config.json "$PK"/vocab.txt
 fi
+while read -r destino origem sha; do
+  [[ -s $PK/$destino ]] && continue
+  [[ $destino == encoder* ]] && msg "$(simba-t "Baixando o reconhecimento de fala (~400 MB, só na primeira vez)…")"
+  if curl -fsSL --retry 3 -C - -o "$PK/$destino.part" "$PK_REPO/$origem" &&
+     { [[ $sha == - ]] || echo "$sha  $PK/$destino.part" | sha256sum -c --quiet - >/dev/null 2>&1; }; then
+    mv "$PK/$destino.part" "$PK/$destino"
+  else
+    rm -f "$PK/$destino.part"
+    msg "$(simba-t "falha ao baixar") $origem"
+  fi
+done <<'LISTA'
+config.json config.json -
+vocab.txt vocab.txt -
+nemo128.onnx nemo128.onnx a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f
+decoder_joint-model.int8.onnx int8/decoder_joint-model.int8.onnx 667ffde2242a560923cba6bc7f69ef03d736f8a36ca9588f2e6f9fa818cf2fc1
+encoder-model.int8.onnx w4a8/encoder-model.w4a8.onnx 500fe613585f866a9c96bfcea11219d3694eaf1f619e99e92ade788005fb8f35
+LISTA
+if [[ -s $PK/encoder-model.int8.onnx && -s $PK/decoder_joint-model.int8.onnx && -s $PK/nemo128.onnx ]]; then
+  echo "$PK_REV" >"$PK/REVISAO"
+  systemctl --user try-restart draco-stt.service >/dev/null 2>&1 || true
+fi
+systemctl --user enable --now draco-stt.service >/dev/null 2>&1 || true
+# IA grátis (o padrão): o OpenCode é instalado por usuário (mise), uma vez só.
+if [[ $(python3 -I "$CODIGO/lib/config.py" env 2>/dev/null | grep -o "DRACO_MOTOR=[a-z]*") == DRACO_MOTOR=opencode ]] &&
+   ! python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import config; sys.exit(0 if config.opencode_bin() else 1)' "$CODIGO/lib"; then
+  msg "$(simba-t "Instalando a IA grátis (OpenCode)…")"
+  agentes instalar opencode </dev/null >/dev/null 2>&1 || msg "$(simba-t "falha ao instalar o OpenCode")"
+fi
+# Aquecimento do Claude Code ligado de verdade (enable): antes era só iniciado e, numa
+# instalação nova, parava a cada reinício.
+systemctl --user enable --now draco-aquecer.service >/dev/null 2>&1 || true
 msg "✓ $(simba-t "Draco pronto")"

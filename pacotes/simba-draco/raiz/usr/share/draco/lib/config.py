@@ -17,8 +17,6 @@ and the draco script both go through this file.
   config.py modelo <provedor> <id>   choose one (saved per provider: MODELO_<PROVEDOR>)
   config.py ouvir [segundos]   record the mic (default 5 s) and transcribe it with the chosen
                                service, as JSON {"ok", "msg", "texto", "tempo"} (the "Testar" button)
-  config.py escuta liga|desliga   the background "Draco" listener (draco-wake.service): desliga
-                               disables the service (frees its memory), not just pauses it
 """
 import json
 import os
@@ -78,19 +76,24 @@ STTS = [
     {"id": "openai", "nome": "OpenAI", "desc": "Whisper da OpenAI, pago por uso",
      "base": "https://api.openai.com/v1", "modelo": "whisper-1",
      "url_chave": "https://platform.openai.com/api-keys"},
-    # faster-whisper int8 (lib/stt_local.py); the model is MODELO_LOCAL (tiny/base/small)
-    {"id": "local", "nome": "Neste computador", "desc": "Sem internet nem chave; um pouco mais lento e erra mais que a nuvem"},
+    # Parakeet on this computer (lib/stt_server.py, draco-stt.service; MODELO_LOCAL). With a
+    # cloud service chosen, it is also the automatic reserve (no network, slow, key refused).
+    {"id": "local", "nome": "Neste computador", "desc": "Sem internet nem chave; quase tão preciso quanto a nuvem"},
 ]
 # Model chosen per provider (MODELO_<ID>); empty = this default. Claude: measured on
 # Draco's own requests, Opus ~2 s slower per request than Sonnet and Haiku no faster
 # once a tool is involved, so Sonnet ("sonnet" = always the newest Sonnet).
 DEFAULT_MODEL = {"assinatura": "sonnet", "anthropic": "sonnet", "nvidia": "moonshotai/kimi-k2.6",
-                 "groq": "whisper-large-v3-turbo", "openai": "whisper-1", "local": "base"}
-# Whisper on this computer (lib/stt_local.py), measured on an i5-8250U with 4-6 s requests.
+                 "groq": "whisper-large-v3-turbo", "openai": "whisper-1", "local": "parakeet"}
+# Speech recognition on this computer, measured on an i5-8250U (pt-BR, 124 clips of 2-10 s;
+# ~/.cache/stt-bench). Parakeet stays loaded (draco-stt.service) and transcribes while F10
+# is held; the Whisper ones load on every request (lib/stt_local.py).
 LOCAL_MODELS = [
-    {"id": "base", "nome": "Equilibrado (base)", "tags": ["recomendado"], "desc": "~1 s, erra ~14% das palavras, ~600 MB ao transcrever"},
-    {"id": "small", "nome": "Mais preciso (small)", "tags": [], "desc": "~3 s, erra ~9%, ~1,2 GB ao transcrever"},
-    {"id": "tiny", "nome": "Mais leve (tiny)", "tags": ["mais leve"], "desc": "~0,5 s, erra ~26%, ~450 MB ao transcrever"},
+    {"id": "parakeet", "nome": "Parakeet Ultra", "tags": ["recomendado"],
+     "desc": "~0,7 s depois de soltar o F10, erra ~5% das palavras (a nuvem: ~4%), ~850 MB sempre na memória"},
+    {"id": "base", "nome": "Whisper base", "tags": [], "desc": "~1 s, erra ~14% das palavras, ~600 MB ao transcrever"},
+    {"id": "small", "nome": "Whisper small", "tags": [], "desc": "~3 s, erra ~9%, ~1,2 GB ao transcrever"},
+    {"id": "tiny", "nome": "Whisper tiny", "tags": ["mais leve"], "desc": "~0,5 s, erra ~26%, ~450 MB ao transcrever"},
 ]
 # PERMISSAO: what the AI may do. "total" = anything (files, terminal, keys); "voz" = only a
 # voice assistant: answers, web, media, reminders, apps and volume; no files, no terminal
@@ -122,13 +125,16 @@ EDGE_POR_LINGUA = {
 EDGE_VOICES = EDGE_POR_LINGUA.get(LING, EDGE_POR_LINGUA["en"])
 PIPER_PREFIXO = {"pt": "pt_BR-", "en": "en_US-"}.get(LING, LING + "_")
 VOZ_PADRAO = {"pt": ("pt_BR-faber-medium", "pt_BR-faber-medium"), "en": ("edge:en-US-AndrewNeural", "en_US-ryan-medium")}
-DEFAULTS = {"CEREBRO": "", "TRANSCRICAO": "local", "VOZ": "pt_BR-faber-medium", "VOZ_LOCAL": "pt_BR-faber-medium",
+# Out of the box (new install, nothing chosen yet): the free AI (OpenCode, no account;
+# draco-preparar installs it) and speech recognition on this computer (Parakeet).
+DEFAULTS = {"CEREBRO": "gratis", "TRANSCRICAO": "local", "VOZ": "pt_BR-faber-medium", "VOZ_LOCAL": "pt_BR-faber-medium",
             "VOZ_EN": VOZ_PADRAO["en"][0], "VOZ_LOCAL_EN": VOZ_PADRAO["en"][1],
-            "ESPERA": "5", "SILENCIO": "2", "MEMORIA": "10",
-            "LIMIAR": "",  # wake word score needed; empty = the model's own (lower = more sensitive)
+            "MEMORIA": "10",
             "PERMISSAO": "total",  # "total" | "voz" (see VOICE_ONLY_TOOLS)
             **{f"MODELO_{p['id'].upper()}": "" for p in BRAINS + STTS}}
-LIMITS = {"ESPERA": (2, 15), "SILENCIO": (0.8, 5), "MEMORIA": (0, 120), "LIMIAR": (0.5, 0.99)}
+LIMITS = {"MEMORIA": (0, 120)}
+# Settings of the removed "Draco" wake word (2026-11): dropped from config.env on the next save.
+OBSOLETE = ("ESPERA", "SILENCIO", "LIMIAR")
 
 
 def provider(pid):
@@ -179,7 +185,7 @@ def load(raw=False):
 def save(changes, drop=()):
     cfg = load()
     cfg.update(changes)
-    for k in drop:
+    for k in (*drop, *OBSOLETE):
         cfg.pop(k, None)
     os.makedirs(DIR, exist_ok=True)
     tmp = ENV + ".tmp"
@@ -411,50 +417,9 @@ def status():
         "cerebros": [card(p, "cerebro") for p in BRAINS],
         "transcricoes": [card(p, "transcricao") for p in STTS],
         "voz": cfg.get(VOZ_KEY) or DEFAULTS.get(VOZ_KEY, ""), "vozes": voices(), "lingua": LING,
-        "escuta": not os.path.exists(os.path.join(DATA, "wake.disabled")),
-        "espera": number(cfg, "ESPERA"), "silencio": number(cfg, "SILENCIO"), "memoria": number(cfg, "MEMORIA"),
-        "limiar": cfg.get("LIMIAR", ""),  # "" = o padrão do modelo da palavra de ativação
+        "memoria": number(cfg, "MEMORIA"),
         "permissao": "voz" if cfg.get("PERMISSAO") == "voz" else "total",
-        **wake_service(),
     }
-
-
-def wake_service():
-    """The background listener: on (enabled and not paused) and the memory it uses now (MB)."""
-    try:
-        out = subprocess.run(["systemctl", "--user", "show", "draco-wake.service", "draco-aquecer.service",
-                              "-p", "UnitFileState,ActiveState,MemoryCurrent"],
-                             capture_output=True, text=True, timeout=5).stdout
-    except (OSError, subprocess.SubprocessError):
-        out = ""
-    units = [dict(l.split("=", 1) for l in block.splitlines() if "=" in l) for block in out.strip().split("\n\n")]
-    wake = units[0] if units else {}
-    mem = 0
-    for u in units:
-        try:
-            mem += int(u.get("MemoryCurrent", "")) if u.get("ActiveState") == "active" else 0
-        except ValueError:
-            pass
-    return {"escuta": wake.get("UnitFileState") == "enabled" and not os.path.exists(os.path.join(DATA, "wake.disabled")),
-            "escuta_ativa": wake.get("ActiveState") == "active",
-            "escuta_mb": round(mem / 1048576)}
-
-
-def set_wake(on):
-    """On: enable + start the listener (and the warm-up). Off: stop and disable both, so
-    nothing waits in the background (memory freed); wake.disabled keeps it off across
-    logins, package updates, `draco preparar` and the Simba migrations."""
-    flag = os.path.join(DATA, "wake.disabled")
-    units = ["draco-wake.service", "draco-aquecer.service"]
-    if on:
-        if os.path.exists(flag):
-            os.unlink(flag)
-        r = subprocess.run(["systemctl", "--user", "enable", "--now", *units], capture_output=True, text=True)
-    else:
-        os.makedirs(DATA, exist_ok=True)
-        open(flag, "a").close()
-        r = subprocess.run(["systemctl", "--user", "disable", "--now", *units], capture_output=True, text=True)
-    return r.returncode == 0
 
 
 def env():
@@ -626,7 +591,7 @@ def fetch_models(pid):
         return out, "NVIDIA (grátis)", None
     if pid == "local":
         return [{"id": m["id"], "nome": m["nome"], "tags": m["tags"], "desc": m["desc"]} for m in LOCAL_MODELS], \
-            "Whisper neste computador", None
+            "Neste computador", None
     if pid in ("groq", "openai"):
         p = provider(pid)
         if key:
@@ -668,6 +633,12 @@ def test(pid):
     if pid == "local":
         if not local_stt_ok():
             return {"ok": False, "msg": "falta preparar o Draco (draco preparar)"}
+        if model_of(load(), "local") == "parakeet":
+            if not os.path.exists(os.path.join(DATA, "models", "parakeet", "encoder-model.int8.onnx")):
+                return {"ok": False, "msg": "falta baixar o modelo (draco preparar)"}
+            r = subprocess.run([sys.executable, "-I", os.path.join(CODIGO, "lib", "stt_server.py"), "ping"],
+                               capture_output=True, text=True)
+            return {"ok": True, "msg": "pronto, na memória" if r.returncode == 0 else "pronto (o serviço draco-stt está parado)"}
         ok = subprocess.run([VENV_PY, "-c", "import faster_whisper"], capture_output=True).returncode == 0
         return {"ok": ok, "msg": "pronto" if ok else "falta o faster-whisper (draco preparar)"}
     if p.get("login"):
@@ -906,8 +877,6 @@ def main():
         save({k: v, **({VOZ_LOCAL_KEY: v} if k == VOZ_KEY and not v.startswith("edge:") else {})})
         if k == VOZ_KEY:
             restart_voice()
-        if k == "LIMIAR":  # wake.py só lê o limiar ao iniciar
-            subprocess.run(["systemctl", "--user", "try-restart", "draco-wake.service"], capture_output=True)
     elif cmd == "chave":
         if not provider(args[1]):
             sys.exit("provedor desconhecido")
@@ -928,8 +897,6 @@ def main():
             except ValueError:
                 pid = a
         print(json.dumps(listen_test(sec, pid), ensure_ascii=False))
-    elif cmd == "escuta":
-        print(json.dumps({"ok": set_wake(args[1:] == ["liga"]), **wake_service()}, ensure_ascii=False))
     elif cmd == "login":
         login()
     elif cmd == "modelos":

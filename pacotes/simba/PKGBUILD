@@ -3,7 +3,7 @@
 # Derivado do Omarchy (MIT, ver /usr/share/licenses/simba/omarchy-MIT.txt).
 pkgname=simba
 pkgver=1.1.9
-pkgrel=24
+pkgrel=26
 pkgdesc="Simba OS: área de trabalho, ferramentas e configurações do sistema"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"
@@ -17,6 +17,7 @@ optdepends=('simba-apps: Configurações, Explorador, Gerenciador de Tarefas e o
 replaces=('omarchy' 'omarchy-nvim' 'omarchy-settings' 'omarchy-themes-intros')
 conflicts=('omarchy' 'omarchy-nvim' 'omarchy-settings' 'omarchy-themes-intros')
 backup=('etc/sddm.conf.d/99-simba-login.conf')
+install=simba.install
 
 package() {
   cp -a "$startdir/raiz/." "$pkgdir/"

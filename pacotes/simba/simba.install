@@ -1,0 +1,14 @@
+# Simba OS — scriptlet do pacote base.
+
+# O 50-simba.preset pede fstrim.timer e paccache.timer, mas o Arch não aplica presets ao
+# atualizar: instalações anteriores a 1.1.9-26 ficaram com os dois desligados (cache do
+# pacman sem limite, SSD sem TRIM periódico). Liga uma vez só, na passagem por esta versão;
+# quem desligar depois não é religado.
+post_upgrade() {
+  if (( $(vercmp "$2" 1.1.9-26) < 0 )); then
+    systemctl enable fstrim.timer paccache.timer >/dev/null 2>&1 || true
+    if [ -d /run/systemd/system ]; then
+      systemctl start fstrim.timer paccache.timer >/dev/null 2>&1 || true
+    fi
+  fi
+}

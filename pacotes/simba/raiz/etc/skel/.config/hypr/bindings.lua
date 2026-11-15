@@ -50,7 +50,7 @@ o.bind("SUPER + LEFT", "Encaixar janela à esquerda", function() hl.dispatch(jan
 o.bind("SUPER + RIGHT", "Encaixar janela à direita", function() hl.dispatch(janelas.lado(nil, "direita")) end)
 o.bind("SUPER + UP", "Maximizar janela", function() hl.dispatch(janelas.maximizar(nil)) end)
 o.bind("SUPER + DOWN", "Restaurar ou minimizar janela", function() hl.dispatch(janelas.baixo(nil)) end)
-o.bind("SUPER + Z", "Layouts de encaixe da janela", "qs -c botoes-janela ipc call botoes layouts")
+o.bind("SUPER + Z", "Layouts de encaixe da janela", "qs -c configuracoes ipc call botoes layouts")
 o.bind("SUPER + SHIFT + LEFT", "Focar janela da esquerda", hl.dsp.focus({ direction = "l" }))
 o.bind("SUPER + SHIFT + RIGHT", "Focar janela da direita", hl.dsp.focus({ direction = "r" }))
 o.bind("SUPER + SHIFT + UP", "Focar janela de cima", hl.dsp.focus({ direction = "u" }))

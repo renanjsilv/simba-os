@@ -1,8 +1,8 @@
 -- Extra autostart processes.
 -- o.launch_on_start("my-service")
 
--- Draco on-screen orb, preloaded so F10 shows it instantly.
-o.launch_on_start("qs -c draco -n")
+-- Draco on-screen orb: runs inside the Configurações shell below (one Quickshell
+-- less, ~85 MB); `qs -c draco -n` still works on its own if that one is missing.
 -- Draco speech server: keeps the Piper voice loaded so replies start instantly.
 o.launch_on_start("draco servidor-voz")
 -- Configurações (~/.config/quickshell/configuracoes): settings window, Super+P

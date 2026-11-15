@@ -58,12 +58,13 @@ prompt_file() {
   [[ ${DRACO_LINGUA:-pt} != pt && -f $f ]] && echo "$f" || echo "$CODIGO/prompt.md"
 }
 
-# On-screen orb (Quickshell config in ~/.config/quickshell/draco). Commands go through
+# On-screen orb (/etc/xdg/quickshell/draco/Draco.qml, hosted by the Configurações shell). Commands go through
 # $RUN/orb.cmd, which the orb watches: milliseconds, where `qs ipc call` costs ~260 ms.
 orb_running() { # pid cached in $RUN/orb.pid: pgrep alone costs ~120 ms
   local pid
   pid=$(cat "$RUN/orb.pid" 2>/dev/null)
-  [[ -n $pid && $(cat "/proc/$pid/comm" 2>/dev/null) == qs ]] && return 0
+  # qs or quickshell: the orb usually lives inside the Configurações shell (qs -c configuracoes)
+  [[ -n $pid && $(cat "/proc/$pid/comm" 2>/dev/null) == @(qs|quickshell) ]] && return 0
   pid=$(pgrep -f '^(/usr/bin/)?qs -c draco -n' | head -n1)
   [[ -n $pid ]] && echo "$pid" >"$RUN/orb.pid"
 }

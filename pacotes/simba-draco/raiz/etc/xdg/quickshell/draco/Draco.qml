@@ -24,7 +24,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 
-ShellRoot {
+Scope {
   id: shell
 
   // hidden | listening | transcribing | thinking | background | speaking | done | error
@@ -146,13 +146,20 @@ ShellRoot {
   }
 
   FileView {
+    id: orbCmd
     path: Quickshell.env("XDG_RUNTIME_DIR") + "/draco/orb.cmd"
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
-    onLoaded: shell.runCommands(text())
-    onLoadFailed: shell.cmdPrimed = true
+    onLoaded: { shell.runCommands(text()); orbCmdRetry.stop() }
+    // Not there yet: inotify can't watch a missing file, so look again until it shows up.
+    onLoadFailed: { shell.cmdPrimed = true; orbCmdRetry.start() }
   }
+  Timer { id: orbCmdRetry; interval: 1000; repeat: true; onTriggered: orbCmd.reload() }
+
+  // /usr/bin/draco finds the orb through this pid (standalone `qs -c draco` or hosted
+  // inside the Configurações shell, which saves a whole Quickshell process).
+  Component.onCompleted: Quickshell.execDetached(["sh", "-c", 'mkdir -p "$XDG_RUNTIME_DIR/draco" && echo ' + Quickshell.processId + ' > "$XDG_RUNTIME_DIR/draco/orb.pid"'])
 
   function setPhase(next) {
     hideTimer.stop()

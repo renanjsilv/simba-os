@@ -33,7 +33,7 @@ criar_factory() {
   echo
   if ! gum confirm "Deseja criar o snapshot @factory a partir do sistema atual?"; then
     echo "Operação cancelada."
-    return
+    return 1
   fi
   local dev top
   dev=$(findmnt -no SOURCE / 2>/dev/null | sed 's/\[.*\]//')
@@ -71,18 +71,21 @@ case "$opcao" in
       exec sudo simba-system-factory-reset
     else
       gum style --bold --foreground 3 "Aviso: Esta máquina não possui o snapshot inicial @factory."
-      gum style "Máquinas migradas de versões antigas não têm esse snapshot por padrão."
+      gum style "Ele é criado pelo instalador; máquinas instaladas antes disso não têm."
+      echo
+      gum style "Sem ele, dá para usar o sistema de HOJE como ponto de fábrica: os aplicativos"
+      gum style "instalados continuam, mas contas de usuário, arquivos e redes são apagados."
       echo
       sub=$(gum choose \
-        "Criar o snapshot @factory agora a partir do estado atual e continuar" \
+        "Usar o sistema atual como ponto de fábrica e continuar" \
         "Usar restauração de pacotes e configurações (mantém /home)" \
         "Cancelar")
       case "$sub" in
-        Criar*)
-          criar_factory
+        Usar\ o*)
+          criar_factory || exit 0
           exec sudo simba-system-factory-reset
           ;;
-        Usar*)
+        Usar\ restauração*)
           exec simba reinstall
           ;;
         *)
@@ -108,7 +111,7 @@ case "$opcao" in
     fi
     ;;
   3*)
-    criar_factory
+    criar_factory || true
     ;;
   *)
     echo "Operação cancelada."

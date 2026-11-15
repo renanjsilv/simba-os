@@ -665,6 +665,17 @@ progresso 99 "$(t "Finalizando" "Finishing")"
 # o registro da instalação fica no sistema (o do pendrive some ao desligar)
 install -m 600 "$LOG" "$T/var/log/simba-instalacao.log" 2>/dev/null || true
 sync
+# Ponto de fábrica: cópia somente leitura do sistema recém-instalado. A "Restauração de
+# fábrica" das Configurações (simba-system-factory-reset) volta para ela, sem pendrive.
+# Os dados ficam compartilhados com o sistema; só ocupa espaço o que mudar depois.
+if [ "${ROOT_SUBVOL#/}" = "@" ]; then
+  F=$(mktemp -d)
+  if mount -o subvolid=5 /dev/mapper/root "$F" 2>>"$LOG"; then
+    x btrfs subvolume snapshot -r "$F/@" "$F/@factory" || echo "aviso: @factory" >> "$LOG"
+    umount "$F"
+  fi
+  rmdir "$F" 2>/dev/null || true
+fi
 umount -R "$T"
 cryptsetup close root
 progresso 100 "$(t "Pronto" "Done")"

@@ -109,6 +109,7 @@ Pagina {
         habilitado: pg.saida !== null
         sufixo: "%"
         onMovido: function(x) { if (pg.saida && pg.saida.audio) pg.saida.audio.volume = x / 100 }
+        onSolto: if (pg.somVolume) Sistema.solto(["simba-som-volume"])
       }
     }
     Item {
@@ -187,6 +188,26 @@ Pagina {
           width: 220; de: 0; ate: 100; passo: 1; sufixo: "%"
           valor: modelData.audio ? Math.round(modelData.audio.volume * 100) : 0
           onMovido: function(x) { if (modelData.audio) modelData.audio.volume = x / 100 }
+        }
+      }
+    }
+  }
+
+  // "plim" ao mudar o volume (teclas, Central e aqui), como no Windows 11
+  property bool somVolume: true
+  Component.onCompleted: Sistema.rodar(["sh", "-c", "[ -e \"$HOME/.config/simba/sem-som-volume\" ] && echo 0 || echo 1"],
+                                       function(o) { pg.somVolume = o.trim() !== "0" })
+  Cartao {
+    Linha {
+      chave: "somVolume"; glifo: Icones.volumeHigh
+      titulo: I18n.t("Som ao mudar o volume")
+      descricao: I18n.t("Toca um aviso curto já no volume novo, para você ouvir como ficou")
+      Interruptor {
+        ligado: pg.somVolume
+        onAlternado: function(x) {
+          pg.somVolume = x
+          Sistema.rodar(["sh", "-c", x ? "rm -f \"$HOME/.config/simba/sem-som-volume\" && simba-som-volume"
+                                       : "mkdir -p \"$HOME/.config/simba\" && touch \"$HOME/.config/simba/sem-som-volume\""])
         }
       }
     }

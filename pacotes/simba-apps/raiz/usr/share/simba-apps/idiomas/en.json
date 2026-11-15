@@ -2742,5 +2742,8 @@
  "Sincronizar papel de parede": "Sync wallpaper",
  "Ao trocar o papel de parede aqui, ele muda na hora nos seus outros computadores conectados a esta conta.": "When you change the wallpaper here, it changes right away on your other computers signed in to this account.",
  "papel de parede: %1": "wallpaper: %1",
- "Papel de parede igual em todos os computadores": "Same wallpaper on every computer"
+ "Papel de parede igual em todos os computadores": "Same wallpaper on every computer",
+ "Som ao mudar o volume": "Sound when changing volume",
+ "Toca um aviso curto já no volume novo, para você ouvir como ficou": "Plays a short chime at the new volume so you can hear how loud it is",
+ "Aviso sonoro no volume novo, como no Windows": "Chime at the new volume, like on Windows"
 }

@@ -105,12 +105,27 @@ Item {
     id: ler
     command: [root.ajudante, "estado"]
     stdout: StdioCollector {
-      onStreamFinished: { try { var v = JSON.parse(text); if (!root.arrastando) root.st = v; else root.stPendente = v } catch (e) {} }
+      onStreamFinished: { try { var v = JSON.parse(text); if (!root.arrastando) root.aplicarLido(v); else root.stPendente = v } catch (e) {} }
     }
   }
   property bool arrastando: false
   property var stPendente: null
-  onArrastandoChanged: if (!arrastando && stPendente) { st = stPendente; stPendente = null }
+  onArrastandoChanged: if (!arrastando && stPendente) { aplicarLido(stPendente); stPendente = null }
+  // Leitura que saiu ANTES de uma mudança feita aqui volta com o valor antigo: sem esta trava o
+  // controle piscava no volume anterior e só depois ia para o clicado. Enquanto a trava vale,
+  // volume/mudo/brilho da leitura são ignorados (o valor local é o que acabou de ser aplicado).
+  property double travaVol: 0
+  property double travaBri: 0
+  function travarVol() { travaVol = Date.now() + 1500 }
+  function travarBri() { travaBri = Date.now() + 1500 }
+  function aplicarLido(v) {
+    var agora = Date.now()
+    if (agora < travaVol) { v.volume = st.volume; v.mudo = st.mudo }
+    if (agora < travaBri) v.brilho = st.brilho
+    st = v
+  }
+  // "plim" no volume novo, como no Windows 11 (ao soltar o controle / a cada giro da roda)
+  Timer { id: somVol; interval: 160; onTriggered: Quickshell.execDetached(["simba-som-volume"]) }
   function atualizar() { if (!ler.running) ler.running = true }
   Timer { interval: painel.visible ? 1500 : 6000; running: true; repeat: true; triggeredOnStart: true; onTriggered: root.atualizar() }
   function acao(args, depois) {
@@ -183,8 +198,10 @@ Item {
     onClicked: { if (painel.visible) painel.visible = false; else { root.atualizar(); painel.visible = true } }
     onWheel: function(w) {
       var v = Math.max(0, Math.min(100, root.st.volume + (w.angleDelta.y > 0 ? 5 : -5)))
+      root.travarVol()
       root.st = Object.assign({}, root.st, { volume: v, mudo: false })
       root.acao(["volume", String(v)])
+      somVol.restart()
     }
   }
 
@@ -407,6 +424,7 @@ Item {
           property string glifoDireita: ""
           property bool ativaDireita: false
           signal mudou(int v)
+          signal soltou()
           signal clicouGlifo()
           signal clicouDireita()
           width: parent.width; height: 34
@@ -440,8 +458,8 @@ Item {
               function valorEm(x) { return Math.round(Math.max(d.minimo, Math.min(100, (x - 6) / (trilho.width) * 100))) }
               onPressed: function(e) { root.arrastando = true; d.mudou(valorEm(e.x)) }
               onPositionChanged: function(e) { if (pressed) d.mudou(valorEm(e.x)) }
-              onReleased: root.arrastando = false
-              onWheel: function(w) { d.mudou(Math.max(d.minimo, Math.min(100, d.valor + (w.angleDelta.y > 0 ? 5 : -5)))) }
+              onReleased: { root.arrastando = false; d.soltou() }
+              onWheel: function(w) { d.mudou(Math.max(d.minimo, Math.min(100, d.valor + (w.angleDelta.y > 0 ? 5 : -5)))); d.soltou() }
             }
           }
           Text {
@@ -485,8 +503,9 @@ Item {
           temAcaoDireita: true
           glifoDireita: root.mostrarSaidas ? "\u{F0140}" : root.gSaidaAtual
           ativaDireita: root.mostrarSaidas
-          onMudou: function(v) { root.st = Object.assign({}, root.st, { volume: v, mudo: false }); if (!aplicaVol.running) aplicaVol.start() }
-          onClicouGlifo: { root.acao(["mudo"]); root.st = Object.assign({}, root.st, { mudo: !root.st.mudo }) }
+          onMudou: function(v) { root.travarVol(); root.st = Object.assign({}, root.st, { volume: v, mudo: false }); if (!aplicaVol.running) aplicaVol.start() }
+          onSoltou: somVol.restart()
+          onClicouGlifo: { root.travarVol(); root.acao(["mudo"]); root.st = Object.assign({}, root.st, { mudo: !root.st.mudo }) }
           onClicouDireita: { root.mostrarSaidas = !root.mostrarSaidas }
         }
 
@@ -655,7 +674,7 @@ Item {
           glifo: "\u{F00E0}"
           minimo: 1
           valor: root.st.brilho
-          onMudou: function(v) { root.st = Object.assign({}, root.st, { brilho: v }); if (!aplicaBri.running) aplicaBri.start() }
+          onMudou: function(v) { root.travarBri(); root.st = Object.assign({}, root.st, { brilho: v }); if (!aplicaBri.running) aplicaBri.start() }
         }
 
         // rodapé: bateria e atalhos

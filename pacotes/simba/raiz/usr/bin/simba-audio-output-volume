@@ -84,3 +84,8 @@ else
 fi
 
 simba-osd -i "$icon" -p "${percent:-0}"
+
+# "plim" no volume novo (como no Windows 11); simba-som-volume vem do simba-apps
+if [[ $action != "mute-toggle" ]] && command -v simba-som-volume >/dev/null; then
+  simba-som-volume
+fi

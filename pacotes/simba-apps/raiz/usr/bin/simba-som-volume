@@ -1,0 +1,19 @@
+#!/bin/bash
+# simba-som-volume — o "plim" de quando o volume muda (como no Windows 11): toca já no volume
+# novo do alto-falante, para a pessoa ouvir como ficou. Toques seguidos (tecla segurada) não
+# se empilham: o anterior é cortado. Mudo ou volume 0: não toca.
+# Desligar: Configurações › Som › "Som ao mudar o volume" (marca ~/.config/simba/sem-som-volume).
+[ -e "$HOME/.config/simba/sem-som-volume" ] && exit 0
+SOM=/usr/share/sounds/simba/volume.oga
+[ -f "$SOM" ] || exit 0
+info=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null) || exit 0
+case $info in *MUTED*) exit 0 ;; esac
+v=$(awk '{print $2}' <<<"$info")
+awk -v v="$v" 'BEGIN { exit !(v > 0) }' || exit 0
+pid_arq="${XDG_RUNTIME_DIR:-/tmp}/simba-som-volume.pid"
+if [ -r "$pid_arq" ]; then
+  read -r p <"$pid_arq"
+  [ -n "$p" ] && kill "$p" 2>/dev/null
+fi
+pw-play --media-role=Notification "$SOM" >/dev/null 2>&1 &
+echo $! >"$pid_arq"

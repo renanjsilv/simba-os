@@ -135,6 +135,7 @@ var itens = [
   // Som
   ["som", "saida", "Dispositivo de saída", "Alto-falantes, fones, HDMI", "alto falante fone saida hdmi audio som"],
   ["som", "volume", "Volume", "", "volume som alto baixo"],
+  ["som", "somVolume", "Som ao mudar o volume", "Aviso sonoro no volume novo, como no Windows", "som volume plim aviso bip tecla"],
   ["som", "entradaDisp", "Microfone", "Dispositivo de entrada", "microfone entrada gravar mic"],
   ["som", "volumeMic", "Volume do microfone", "", "microfone ganho volume entrada"],
   ["som", "appsVolume", "Volume por aplicativo", "Mixer de volume", "mixer aplicativo volume programas"],

@@ -18,6 +18,7 @@ Pagina {
   property bool criando: false
   property int apagarConfirma: -1
   property bool reiniciarConfirma: false
+  property bool fabricaConfirma: false
 
   function atualizar() { Sistema.json([bin, "estado"], function(v) { if (v) pg.s = v }) }
   function data(t) {
@@ -31,7 +32,7 @@ Pagina {
 
   Component.onCompleted: atualizar()
   Timer { interval: 10000; running: true; repeat: true; onTriggered: pg.atualizar() }
-  Timer { id: desarmar; interval: 5000; onTriggered: { pg.apagarConfirma = -1; pg.reiniciarConfirma = false } }
+  Timer { id: desarmar; interval: 5000; onTriggered: { pg.apagarConfirma = -1; pg.reiniciarConfirma = false; pg.fabricaConfirma = false } }
 
   Aviso {
     visible: pg.s !== null && !pg.s.permitido
@@ -85,6 +86,27 @@ Pagina {
           if (!pg.reiniciarConfirma) { pg.reiniciarConfirma = true; desarmar.restart(); return }
           pg.reiniciarConfirma = false
           pg.admin(["menu-restauracao"], function(code) { if (code === 0) Sistema.solto(["systemctl", "reboot"]) })
+        }
+      }
+    }
+  }
+
+  Secao {
+    titulo: I18n.t("Restaurar de fábrica")
+    detalhe: I18n.t("Restaura o computador ao estado original de fábrica sem precisar de pendrive.")
+  }
+  Cartao {
+    Linha {
+      chave: "restaurarFabrica"; glifo: Icones.alertOctagonOutline
+      titulo: I18n.t("Restaurar para os padrões de fábrica")
+      descricao: I18n.t("Restaura o sistema e configurações originais do Simba OS sem precisar de pendrive · abre o assistente seguro")
+      Botao {
+        texto: pg.fabricaConfirma ? I18n.t("Restaurar agora?") : I18n.t("Restaurar…")
+        tipo: pg.fabricaConfirma ? "perigo" : "normal"
+        onClicado: {
+          if (!pg.fabricaConfirma) { pg.fabricaConfirma = true; desarmar.restart(); return }
+          pg.fabricaConfirma = false
+          Sistema.solto(["simba-launch-floating-terminal-with-presentation", "simba-restaurar-fabrica"])
         }
       }
     }

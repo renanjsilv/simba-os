@@ -914,8 +914,9 @@ row.barra-conversa:selected .barra-conversa-avatar {
 }
 
 .barra-conversa-titulo {
-  font-size: 13px;
+  font-size: 11.5px;
   font-weight: 550;
+  line-height: 1.18;
   color: alpha(@window_fg_color, 0.92);
 }
 .barra-conversa-sub {

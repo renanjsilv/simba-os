@@ -24,10 +24,10 @@ HOME = Path.home()
 CWD = HOME / ".cache/simba/agentes/titulos"   # pasta neutra: as sessões não caem num projeto
 GROQ_KEY = HOME / ".config/draco/chaves/groq"
 GROQ_MODELO = "openai/gpt-oss-20b"
-VERSAO = 1   # sobe quando o jeito de resumir mudar: os títulos antigos são refeitos
+VERSAO = 2   # sobe quando o jeito de resumir mudar: os títulos antigos são refeitos
 
-PROMPT = """Crie um título curto em português para esta conversa, de 2 a 5 palavras, que diga o assunto principal (como o título de uma conversa no ChatGPT). Sem aspas, sem ponto final, sem emojis. Responda só o título.
-Exemplos de bons títulos: Botão fechar do Explorador · Transcrição local do Draco · Erro ao gerar a ISO · Ícone novo na barra
+PROMPT = """Crie um título curto em português para esta conversa, de 2 a 4 palavras, que resuma o assunto principal de forma concisa para caber no menu lateral. Sem aspas, sem ponto final, sem emojis. Responda só o título.
+Exemplos de bons títulos: Botão fechar · Transcrição local · Erro na ISO · Ícone na barra · Microfone ativo
 
 {contexto}"""
 

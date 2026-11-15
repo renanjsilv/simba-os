@@ -174,6 +174,7 @@ var itens = [
   // Restauração
   ["restauracao", "pontoCriar", "Criar ponto de restauração", "", "restauracao ponto backup snapshot criar"],
   ["restauracao", "restaurar", "Restaurar o sistema", "Voltar para um ponto de restauração", "restaurar voltar desfazer snapshot recuperar quebrou"],
+  ["restauracao", "restaurarFabrica", "Restaurar de fábrica", "Formatar ou restaurar para os padrões de fábrica sem pendrive", "formatar restaurar fabrica reset resetar padroes redefinir limpar reinstalar pendrive"],
   ["restauracao", "pontosAuto", "Pontos de restauração automáticos", "", "automatico diario snapshot backup"],
   // Rede: firewall
   ["rede", "firewall", "Firewall", "Bloqueia conexões de entrada", "firewall seguranca ufw proteger bloquear"],

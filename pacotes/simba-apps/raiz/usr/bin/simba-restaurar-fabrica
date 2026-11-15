@@ -1,0 +1,117 @@
+#!/bin/bash
+# simba:summary=Assistente de restauração e formatação de fábrica do Simba OS
+# simba:group=setup
+set -euo pipefail
+
+# Exporta tema do gum se disponível
+if command -v simba-restart-gum >/dev/null 2>&1; then
+  source simba-restart-gum 2>/dev/null || true
+fi
+
+echo
+gum style --bold --foreground 4 "  Restauração de Fábrica — Simba OS"
+gum style --foreground 8 "  Restaure o sistema para o estado original sem precisar de pendrive de instalação."
+echo
+
+has_factory() {
+  local dev top res=1
+  dev=$(findmnt -no SOURCE / 2>/dev/null | sed 's/\[.*\]//')
+  [[ -n $dev ]] || return 1
+  top=$(mktemp -d /tmp/simba-chk.XXXXXX)
+  if sudo mount -o subvolid=5,ro "$dev" "$top" 2>/dev/null; then
+    [[ -d "$top/@factory" ]] && res=0
+    sudo umount "$top" 2>/dev/null || true
+  fi
+  rmdir "$top" 2>/dev/null || true
+  return $res
+}
+
+criar_factory() {
+  echo
+  gum style --bold "Criar Ponto de Fábrica (@factory)"
+  gum style "Este snapshot servirá como base limpa para qualquer restauração de fábrica futura."
+  echo
+  if ! gum confirm "Deseja criar o snapshot @factory a partir do sistema atual?"; then
+    echo "Operação cancelada."
+    return
+  fi
+  local dev top
+  dev=$(findmnt -no SOURCE / 2>/dev/null | sed 's/\[.*\]//')
+  top=$(mktemp -d /tmp/simba-fac.XXXXXX)
+  sudo mount -o subvolid=5 "$dev" "$top"
+  if [[ -d "$top/@factory" ]]; then
+    sudo btrfs subvolume delete "$top/@factory"
+  fi
+  sudo btrfs subvolume snapshot -r "$top/@" "$top/@factory"
+  sudo sync
+  sudo umount "$top"
+  rmdir "$top"
+  echo
+  gum style --foreground 2 "✓ Snapshot de fábrica (@factory) criado com sucesso!"
+  echo
+}
+
+opcao=$(gum choose \
+  "1. Restauração Completa de Fábrica (apaga contas/apps e reinicia como novo)" \
+  "2. Restaurar Configurações e Pacotes Padrão (mantém seus arquivos pessoais)" \
+  "3. Criar ou renovar o Snapshot de Fábrica (@factory) desta máquina" \
+  "4. Cancelar")
+
+case "$opcao" in
+  1*)
+    echo
+    gum style --bold --foreground 1 "Atenção: A Restauração Completa de Fábrica apagará:"
+    gum style "  • Todas as contas de usuário e o conteúdo de /home"
+    gum style "  • Todos os aplicativos e pacotes instalados após a instalação"
+    gum style "  • Configurações de rede, chaves e dados do sistema"
+    echo
+    gum style "O computador reiniciará no assistente de primeiro uso (como um PC novo)."
+    echo
+    if has_factory; then
+      exec sudo simba-system-factory-reset
+    else
+      gum style --bold --foreground 3 "Aviso: Esta máquina não possui o snapshot inicial @factory."
+      gum style "Máquinas migradas de versões antigas não têm esse snapshot por padrão."
+      echo
+      sub=$(gum choose \
+        "Criar o snapshot @factory agora a partir do estado atual e continuar" \
+        "Usar restauração de pacotes e configurações (mantém /home)" \
+        "Cancelar")
+      case "$sub" in
+        Criar*)
+          criar_factory
+          exec sudo simba-system-factory-reset
+          ;;
+        Usar*)
+          exec simba reinstall
+          ;;
+        *)
+          echo "Cancelado."
+          exit 0
+          ;;
+      esac
+    fi
+    ;;
+  2*)
+    echo
+    gum style --bold --foreground 3 "A Restauração de Configurações e Pacotes irá:"
+    gum style "  • Reinstalar todos os pacotes padrão oficiais do Simba OS"
+    gum style "  • Redefinir as configurações padrão do sistema e do usuário"
+    gum style "  • Manter seus arquivos pessoais em /home intactos"
+    echo
+    if gum confirm "Deseja continuar com a restauração de configurações e pacotes?"; then
+      echo
+      exec simba reinstall
+    else
+      echo "Cancelado."
+      exit 0
+    fi
+    ;;
+  3*)
+    criar_factory
+    ;;
+  *)
+    echo "Operação cancelada."
+    exit 0
+    ;;
+esac

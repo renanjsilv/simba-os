@@ -46,7 +46,7 @@ class HistoricoMixin:
             if msg.get("tipo") == "user":
                 texto = " ".join(str(msg.get("texto", "")).split())
                 if texto:
-                    return texto[:57] + ("…" if len(texto) > 57 else "")
+                    return texto[:38] + ("…" if len(texto) > 38 else "")
         return _t("Nova conversa")
 
     # ── Títulos resumidos pela IA ──────────────────────────────────────────

@@ -281,8 +281,10 @@ class BarraConversas(Gtk.Box):
         textos.set_valign(Gtk.Align.CENTER)
 
         lbl = Gtk.Label(label=titulo, xalign=0)
+        lbl.set_wrap(True)
+        lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        lbl.set_lines(2)
         lbl.set_ellipsize(Pango.EllipsizeMode.END)
-        lbl.set_single_line_mode(True)
         lbl.add_css_class("barra-conversa-titulo")
         textos.append(lbl)
 

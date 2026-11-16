@@ -513,7 +513,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         # Em janelas estreitas viram sobrepostos e começam fechados.
         cfg_janela = ler_janela_cfg()
         self.detalhes = detalhes.PainelDetalhes(ao_fechar=lambda: self.btn_detalhes.set_active(False),
-                                                abrir_pasta=lambda p: self._abrir_arquivo(str(p)))
+                                                abrir_pasta=lambda p: self._abrir_arquivo(str(p)),
+                                                usar_skill=self._usar_skill)
         self.split_detalhes = Adw.OverlaySplitView()
         self.split_detalhes.set_sidebar_position(Gtk.PackType.END)
         self.split_detalhes.set_sidebar(self.detalhes)
@@ -1721,6 +1722,15 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 + _t("Ele vai reler a conversa inteira no próximo pedido; a primeira resposta pode demorar mais."),
                 registro=False)
         return False
+
+    def _usar_skill(self, nome, descricao=""):
+        """Botão Usar de uma skill: escreve o começo do pedido no campo e põe o cursor no fim."""
+        buf = self.text_input.get_buffer()
+        texto = _t("Use a skill “%1” para ", nome)
+        atual = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        buf.set_text((atual.rstrip() + "\n" if atual.strip() else "") + texto)
+        buf.place_cursor(buf.get_end_iter())
+        self.text_input.grab_focus()
 
     def _escolher_pasta(self, _btn):
         dialog = Gtk.FileDialog(title=_t("Selecionar Pasta de Trabalho"))

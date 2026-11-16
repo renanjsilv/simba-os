@@ -1,0 +1,3 @@
+#!/bin/bash
+# simba-skills — skills de agentes de IA vindas do GitHub (ver /usr/share/simba-apps/agentes/skills.py)
+exec python3 /usr/share/simba-apps/agentes/skills.py "$@"

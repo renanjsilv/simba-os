@@ -1,0 +1,8 @@
+[Unit]
+Description=Atualiza as skills dos agentes de IA instaladas do GitHub
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/simba-skills atualizar --silencioso
+Nice=10

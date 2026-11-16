@@ -1,0 +1,11 @@
+[Unit]
+Description=Atualização diária das skills dos agentes de IA
+
+[Timer]
+OnBootSec=10min
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

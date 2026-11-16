@@ -94,7 +94,7 @@ def _rotulo(texto="", classes=(), **kw):
 
 
 class PainelDetalhes(Gtk.Box):
-    def __init__(self, ao_fechar=None, abrir_pasta=None):
+    def __init__(self, ao_fechar=None, abrir_pasta=None, usar_skill=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("painel-detalhes")
         self.set_size_request(280, -1)
@@ -136,6 +136,11 @@ class PainelDetalhes(Gtk.Box):
         self.telas.add_named(geral, "geral")
         self.tela_agente = TelaAgente(self._voltar)
         self.telas.add_named(self.tela_agente, "agente")
+        # Skills (SKILL.md) do GitHub: descobrir, instalar nos agentes, usar
+        import skills_ui
+        self.tela_skills = skills_ui.TelaSkills(lambda: self.telas.set_visible_child_name("geral"), usar=usar_skill)
+        self.tela_skills.ao_mudar = self._contar_skills
+        self.telas.add_named(self.tela_skills, "skills")
         self.agente_aberto = None   # chave do cartão cuja tela está aberta
 
         # ── Ambiente ──
@@ -181,6 +186,24 @@ class PainelDetalhes(Gtk.Box):
         amb.append(self.linha_versao)
         conteudo.append(amb)
 
+        # ── Skills ──
+        conteudo.append(self._secao(_t("Skills")))
+        sk = self._caixa_cartao()
+        self.btn_skills = Gtk.Button()
+        self.btn_skills.add_css_class("flat")
+        self.btn_skills.add_css_class("detalhes-linha-botao")
+        self.btn_skills.set_tooltip_text(_t("Buscar skills no GitHub e instalar nos seus agentes"))
+        self.lbl_skills = _rotulo(_t("Skills"), ("detalhes-valor",))
+        linha_sk = self._linha("applications-science-symbolic", self.lbl_skills)
+        seta = Gtk.Image.new_from_icon_name("go-next-symbolic")
+        seta.set_pixel_size(12)
+        linha_sk.append(seta)
+        self.btn_skills.set_child(linha_sk)
+        self.btn_skills.connect("clicked", lambda _b: self.abrir_skills())
+        sk.append(self.btn_skills)
+        conteudo.append(sk)
+        GLib.idle_add(lambda: (self.tela_skills.carregar_instaladas(), False)[1])
+
         # ── Contexto ──
         linha_ctx = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         linha_ctx.add_css_class("detalhes-secao")
@@ -225,6 +248,13 @@ class PainelDetalhes(Gtk.Box):
 
         self.contexto(None, None)
         self._remontar()
+
+    def abrir_skills(self):
+        self.tela_skills.abrir()
+        self.telas.set_visible_child_name("skills")
+
+    def _contar_skills(self, n):
+        self.lbl_skills.set_label(_t("Skills · %1 instaladas", n) if n else _t("Skills · descobrir no GitHub"))
 
     # ── montagem ─────────────────────────────────────────────────────────────
     def _secao(self, texto):

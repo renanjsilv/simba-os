@@ -35,6 +35,7 @@ Scope {
   property var desinst: null           // { id, x, y, info } — confirmação de "Desinstalar"
   property var desinstalando: ({})     // id → true enquanto remove
   property bool energiaAberta: false
+  property var confEnergia: null       // { acao, titulo, descricao, cmd, rotulo, glifo, perigo }
   property var energiaPos: ({ x: 0, y: 0, direita: true })
   property var barraFixados: []
   property bool desfoque: false        // decoration:blur:enabled (fundo acrílico de verdade)
@@ -268,7 +269,7 @@ Scope {
     if (aberto) return
     telaNome = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
     Hyprland.refreshMonitors()
-    texto = ""; pagina = "inicio"; contexto = null; energiaAberta = false
+    texto = ""; pagina = "inicio"; contexto = null; energiaAberta = false; confEnergia = null
     aberturas++
     aberto = true
     buscarIcones()
@@ -276,7 +277,7 @@ Scope {
     extras.restart()
     conta.restart()
   }
-  function fechar() { aberto = false; contexto = null; desinst = null; energiaAberta = false }
+  function fechar() { aberto = false; contexto = null; desinst = null; energiaAberta = false; confEnergia = null }
   // Resolve (uma vez) os ícones de apps e arquivos que ainda não estão no cache.
   function buscarIcones() {
     var faltam = {}
@@ -315,9 +316,52 @@ Scope {
     else if (r.tipo === "draco") { Quickshell.execDetached(["draco", "perguntar", r.texto]); fechar() }
   }
   function energia(acao) {
+    if (acao === "bloquear") {
+      fechar()
+      Quickshell.execDetached(["simba-system-lock"])
+    } else if (acao === "suspender") {
+      fechar()
+      Quickshell.execDetached(["systemctl", "suspend"])
+    } else if (acao === "sair") {
+      energiaAberta = false
+      confEnergia = {
+        acao: "sair",
+        titulo: I18n.t("Sair da sessão?"),
+        descricao: I18n.t("Todos os aplicativos abertos serão fechados. Salve seus arquivos antes de continuar."),
+        cmd: ["simba-system-logout"],
+        rotulo: I18n.t("Sair"),
+        glifo: Icones.logout,
+        perigo: true
+      }
+    } else if (acao === "reiniciar") {
+      energiaAberta = false
+      confEnergia = {
+        acao: "reiniciar",
+        titulo: I18n.t("Reiniciar o computador?"),
+        descricao: I18n.t("Todos os aplicativos abertos serão fechados e o computador será reiniciado."),
+        cmd: ["simba-system-reboot"],
+        rotulo: I18n.t("Reiniciar"),
+        glifo: Icones.restart,
+        perigo: false
+      }
+    } else if (acao === "desligar") {
+      energiaAberta = false
+      confEnergia = {
+        acao: "desligar",
+        titulo: I18n.t("Desligar o computador?"),
+        descricao: I18n.t("Todos os aplicativos abertos serão fechados e o computador será desligado."),
+        cmd: ["simba-system-shutdown"],
+        rotulo: I18n.t("Desligar"),
+        glifo: Icones.power,
+        perigo: true
+      }
+    }
+  }
+
+  function executarEnergiaConfirmada() {
+    if (!confEnergia) return
+    var cmd = confEnergia.cmd
     fechar()
-    var cmd = { bloquear: ["simba-system-lock"], suspender: ["systemctl", "suspend"], sair: ["simba-system-logout"],
-                reiniciar: ["simba-system-reboot"], desligar: ["simba-system-shutdown"] }[acao]
     if (cmd) Quickshell.execDetached(cmd)
   }
   function fixarBarra(id, sim) {
@@ -369,7 +413,7 @@ Scope {
   // Teclas comuns a todos os estilos (o campo de pesquisa recebe o foco).
   function tecla(ev) {
     if (ev.key === Qt.Key_Escape) {
-      if (contexto || energiaAberta) { contexto = null; desinst = null; energiaAberta = false }
+      if (contexto || energiaAberta || confEnergia) { contexto = null; desinst = null; energiaAberta = false; confEnergia = null }
       else if (texto) texto = ""
       else if (pagina !== "inicio") pagina = "inicio"
       else fechar()
@@ -498,7 +542,7 @@ Scope {
           anchors.fill: parent
           acceptedButtons: Qt.LeftButton | Qt.RightButton
           // Tela cheia: clicar no vazio fecha, como no Windows.
-          onClicked: { if (m.contexto || m.desinst || m.energiaAberta) { m.contexto = null; m.desinst = null; m.energiaAberta = false } else if (w.telaCheia) m.fechar() }
+          onClicked: { if (m.contexto || m.desinst || m.energiaAberta || m.confEnergia) { m.contexto = null; m.desinst = null; m.energiaAberta = false; m.confEnergia = null } else if (w.telaCheia) m.fechar() }
         }
 
         Loader {
@@ -657,6 +701,60 @@ Scope {
             spacing: 8
             Botao { texto: I18n.t("Cancelar"); tipo: "fantasma"; onClicado: m.desinst = null }
             Botao { visible: conf.pode; texto: I18n.t("Desinstalar"); tipo: "perigo"; onClicado: m.desinstalar(m.desinst.id) }
+          }
+        }
+      }
+
+      // ── confirmação de energia (Sair / Reiniciar / Desligar) ───────────
+      Rectangle {
+        id: cxConfEnergia
+        visible: m.confEnergia !== null
+        readonly property var info: m.confEnergia
+        width: 320
+        height: colConfE.implicitHeight + 28
+        x: Math.max(8, Math.min(m.energiaPos.direita ? m.energiaPos.x - width : m.energiaPos.x, w.width - width - 8))
+        y: Math.max(8, m.energiaPos.y - height - 6)
+        radius: 10
+        color: Tema.mistura(Tema.fundo, Tema.texto, Tema.escuro ? 0.09 : 0.03)
+        border.width: 1
+        border.color: Tema.linhaForte
+        MouseArea { anchors.fill: parent }
+        Column {
+          id: colConfE
+          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
+          spacing: 12
+          Row {
+            spacing: 10
+            Glifo {
+              g: cxConfEnergia.info ? cxConfEnergia.info.glifo : ""
+              tamanho: 22
+              color: cxConfEnergia.info && cxConfEnergia.info.perigo ? Tema.perigo : Tema.realce
+              anchors.verticalCenter: parent.verticalCenter
+            }
+            Texto {
+              width: colConfE.width - 34
+              wrapMode: Text.WordWrap
+              font.bold: true
+              font.pixelSize: Tema.tTitulo
+              text: cxConfEnergia.info ? cxConfEnergia.info.titulo : ""
+              anchors.verticalCenter: parent.verticalCenter
+            }
+          }
+          Texto {
+            width: parent.width
+            wrapMode: Text.WordWrap
+            color: Tema.texto2
+            text: cxConfEnergia.info ? cxConfEnergia.info.descricao : ""
+          }
+          Row {
+            anchors.right: parent.right
+            spacing: 8
+            Botao { texto: I18n.t("Cancelar"); tipo: "fantasma"; onClicado: m.confEnergia = null }
+            Botao {
+              texto: cxConfEnergia.info ? cxConfEnergia.info.rotulo : ""
+              tipo: cxConfEnergia.info && cxConfEnergia.info.perigo ? "perigo" : "primario"
+              onClicado: m.executarEnergiaConfirmada()
+            }
           }
         }
       }

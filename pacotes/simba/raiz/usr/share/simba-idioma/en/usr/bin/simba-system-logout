@@ -4,10 +4,27 @@
 # simba:examples=simba logout | simba system logout
 # simba:aliases=simba logout
 
-nohup bash -c "sleep 2 && uwsm stop" >/dev/null 2>&1 &
+# Garante que o SDDM não fará login automático de novo nesta saída
+if [[ -f /etc/sddm.conf.d/autologin.conf ]] && ! grep -q "Relogin=false" /etc/sddm.conf.d/autologin.conf 2>/dev/null; then
+  sudo -n sed -i '/\[Autologin\]/a Relogin=false' /etc/sddm.conf.d/autologin.conf 2>/dev/null || true
+fi
 
-simba-osd -i logout -m "Logging out" -d 5000
+simba-osd -i logout -m "Signing out…" -d 8000 2>/dev/null || true
 
-# Now close all windows
+# Fecha todas as janelas abertas
 simba-hyprland-window-close-all
-sleep 1 # Allow apps like Chrome to shutdown correctly
+
+# Aguarda até 2 segundos para os aplicativos encerrarem
+for ((i = 0; i < 20; i++)); do
+  count=$(hyprctl clients -j 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+  [[ "$count" -eq 0 ]] && break
+  sleep 0.1
+done
+
+sleep 0.5
+
+if command -v uwsm >/dev/null 2>&1 && uwsm check is-active 2>/dev/null; then
+  uwsm stop
+else
+  hyprctl dispatch exit 2>/dev/null || true
+fi

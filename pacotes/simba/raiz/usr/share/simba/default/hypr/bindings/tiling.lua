@@ -1,5 +1,6 @@
 o.bind("SUPER + W", "Fechar janela", hl.dsp.window.close())
-o.bind("CTRL + ALT + DELETE", "Fechar todas as janelas", "simba-hyprland-window-close-all")
+o.bind("CTRL + ALT + DELETE", "Menu do sistema", "simba-menu toggle system")
+o.bind("SUPER + SHIFT + W", "Fechar todas as janelas", "simba-hyprland-window-close-all")
 
 o.bind("SUPER + J", "Alternar divisão da janela", hl.dsp.layout("togglesplit"))
 o.bind("SUPER + P", "Pseudo-janela", hl.dsp.window.pseudo())

@@ -773,7 +773,7 @@ configure_login() {
   # Autologin straight into the desktop after first-boot setup — the owner just
   # authenticated in the form, so we don't make them retype at SDDM.
   mkdir -p /etc/sddm.conf.d
-  printf '[Autologin]\nUser=%s\nSession=simba.desktop\n' "$username" >/etc/sddm.conf.d/autologin.conf
+  printf '[Autologin]\nUser=%s\nSession=simba.desktop\nRelogin=false\n' "$username" >/etc/sddm.conf.d/autologin.conf
 
   # Encrypted installs keep autologin permanently (the LUKS prompt is the auth
   # boundary). Unencrypted installs autologin only this first boot, then a

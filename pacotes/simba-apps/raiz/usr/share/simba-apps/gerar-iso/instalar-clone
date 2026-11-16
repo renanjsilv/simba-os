@@ -614,7 +614,7 @@ fi
 # entrada automática (SDDM)
 if [ "$AUTO_LOGIN" = s ]; then
   mkdir -p "$T/etc/sddm.conf.d"
-  printf '[Autologin]\nUser=%s\nSession=simba.desktop\n' "$NEW_USER" > "$T/etc/sddm.conf.d/autologin.conf"
+  printf '[Autologin]\nUser=%s\nSession=simba.desktop\nRelogin=false\n' "$NEW_USER" > "$T/etc/sddm.conf.d/autologin.conf"
 else
   rm -f "$T/etc/sddm.conf.d/autologin.conf"
 fi

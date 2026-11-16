@@ -300,10 +300,11 @@ SInfoDeco modoDecoracao(PHLWINDOW w) {
         return {DECO_NENHUM, "sem xdg_toplevel"};
 
     const auto TL = hc::toplevel(w);
-    if (PROTO::xdgDecoration) {
-        for (const auto& [res, deco] : PROTO::xdgDecoration->m_decorations) {
-            if (!deco || CXDGToplevelResource::fromResource(res) != TL)
-                continue;
+    const auto RES = (TL && TL->m_resource) ? TL->m_resource->resource() : nullptr;
+    if (PROTO::xdgDecoration && RES) {
+        const auto IT = PROTO::xdgDecoration->m_decorations.find(RES);
+        if (IT != PROTO::xdgDecoration->m_decorations.end() && IT->second) {
+            const auto& deco = IT->second;
             if (deco->mostRecentlyRequested == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE)
                 return {DECO_CLIENTE, "xdg-decoration: app pediu lado do cliente"};
             if (deco->mostRecentlySent == ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE)
@@ -1145,12 +1146,14 @@ static std::string cmdJanelas(std::string req) {
         if (!W || !hc::toplevel(W))
             return "janela não encontrada\n";
         const auto TL = hc::toplevel(W);
-        for (const auto& [res, deco] : PROTO::xdgDecoration->m_decorations) {
-            if (!deco || CXDGToplevelResource::fromResource(res) != TL)
-                continue;
-            if (auto R = hc::recursoDecoracao(deco.get())) {
-                R->sendConfigure(ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
-                deco->mostRecentlySent = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+        const auto RES = (TL && TL->m_resource) ? TL->m_resource->resource() : nullptr;
+        if (PROTO::xdgDecoration && RES) {
+            const auto IT = PROTO::xdgDecoration->m_decorations.find(RES);
+            if (IT != PROTO::xdgDecoration->m_decorations.end() && IT->second) {
+                if (auto R = hc::recursoDecoracao(IT->second.get())) {
+                    R->sendConfigure(ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE);
+                    IT->second->mostRecentlySent = ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE;
+                }
             }
         }
         TL->setSize(TL->m_pendingApply.size);
@@ -1396,7 +1399,8 @@ APICALL EXPORT void PLUGIN_EXIT() {
 #endif
     // as decorações voltam ao comportamento do Hyprland (sempre servidor) só em objetos novos;
     // os hooks são removidos pelo próprio Hyprland ao descarregar.
-    if (g)
+    if (g) {
         g->ouvintesEstado.clear();
         g->ouvintesAlvo.clear();
+    }
 }

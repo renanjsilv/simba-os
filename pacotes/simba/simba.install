@@ -4,7 +4,12 @@
 # atualizar: instalações anteriores a 1.1.9-26 ficaram com os dois desligados (cache do
 # pacman sem limite, SSD sem TRIM periódico). Liga uma vez só, na passagem por esta versão;
 # quem desligar depois não é religado.
+post_install() {
+  glib-compile-schemas /usr/share/glib-2.0/schemas/ >/dev/null 2>&1 || true
+}
+
 post_upgrade() {
+  glib-compile-schemas /usr/share/glib-2.0/schemas/ >/dev/null 2>&1 || true
   if (( $(vercmp "$2" 1.1.9-26) < 0 )); then
     systemctl enable fstrim.timer paccache.timer >/dev/null 2>&1 || true
     if [ -d /run/systemd/system ]; then

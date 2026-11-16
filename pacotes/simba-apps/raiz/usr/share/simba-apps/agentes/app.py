@@ -327,6 +327,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         # Header Bar
         header = Adw.HeaderBar()
+        header.set_decoration_layout("appmenu:minimize,maximize,close")
         toolbar_view.add_top_bar(header)
 
         self.banner_alerta = Adw.Banner()
@@ -3127,6 +3128,12 @@ class App(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
+        try:
+            s = Gtk.Settings.get_default()
+            if s:
+                s.set_property("gtk-decoration-layout", "appmenu:minimize,maximize,close")
+        except Exception:
+            pass
         css_prov = Gtk.CssProvider()
         css_prov.load_from_data(CSS.encode("utf-8"))
         Gtk.StyleContext.add_provider_for_display(

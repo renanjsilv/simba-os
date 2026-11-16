@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Services.Mpris
+import Quickshell.Networking
 import qs.Commons
 
 // Central de controle do Simba OS (como a do Windows 11 / macOS).
@@ -30,6 +31,67 @@ Item {
                       economia: false, volume: 50, mudo: false, brilho: 100, bateria: null, carregando: false,
                       saidas_audio: [], entradas_audio: [] })
   property bool mostrarSaidas: false
+  property bool mostrarRedes: false
+
+  // ── redes Wi-Fi dentro da central (seta no botão do Wi-Fi, como no Windows 11) ──
+  readonly property var wifiDev: {
+    var ds = Networking.devices ? Networking.devices.values : []
+    for (var i = 0; i < ds.length; i++) if (ds[i].type === DeviceType.Wifi) return ds[i]
+    return null
+  }
+  readonly property var redes: {
+    if (!wifiDev || !wifiDev.networks) return []
+    var v = wifiDev.networks.values.filter(function(n) { return n.name })
+    v.sort(function(a, b) { return (b.connected - a.connected) || (b.known - a.known) || (b.signalStrength - a.signalStrength) })
+    return v.slice(0, 10)
+  }
+  Binding { target: root.wifiDev; property: "scannerEnabled"; value: true; when: root.wifiDev !== null && root.mostrarRedes && painel.visible }
+  property string redeAberta: ""      // rede com a linha expandida (senha / desconectar)
+  property string tentando: ""        // rede que mandamos conectar
+  property string avisoPara: ""
+  property string aviso: ""
+  property bool avisoErro: false
+  function sinal(n) { var s = n.signalStrength <= 1 ? n.signalStrength * 100 : n.signalStrength
+                      return s >= 75 ? "\u{F0928}" : s >= 50 ? "\u{F0925}" : s >= 25 ? "\u{F0922}" : "\u{F091F}" }
+  function conectarRede(n, senha) {
+    tentando = n.name; avisoPara = n.name; aviso = I18n.t("Conectando…"); avisoErro = false; redeAberta = ""
+    limiteRede.restart()
+    if (senha !== undefined) n.connectWithPsk(senha); else n.connect()
+  }
+  function falhouRede(nome, texto) {
+    if (tentando !== nome) return
+    limiteRede.stop(); tentando = ""
+    avisoPara = nome; aviso = texto; avisoErro = true
+  }
+  function textoFalha(reason, protegida) {
+    if (protegida && (reason === ConnectionFailReason.NoSecrets || reason === ConnectionFailReason.WifiAuthTimeout))
+      return I18n.t("Senha incorreta. Confira (maiúsculas contam) e tente de novo.")
+    if (reason === ConnectionFailReason.WifiNetworkLost) return I18n.t("A rede saiu do alcance. Chegue mais perto do roteador e tente de novo.")
+    if (reason === ConnectionFailReason.WifiClientDisconnected || reason === ConnectionFailReason.WifiClientFailed)
+      return I18n.t("O roteador recusou a conexão. Tente de novo; se continuar, reinicie o roteador.")
+    return I18n.t("Não foi possível conectar. Tente de novo.")
+  }
+  Process {
+    id: conferirIp
+    property string nome: ""
+    command: ["sh", "-c", "ip -4 -o addr show scope global | grep -q inet"]
+    onExited: function(code) {
+      if (root.avisoPara !== nome) return
+      if (code === 0) { root.aviso = I18n.t("Conectado"); root.avisoErro = false; apagarAvisoRede.restart() }
+      else { root.aviso = I18n.t("Conectado, mas o roteador não entregou um endereço (IPv4): sem internet. Desconecte e conecte de novo; se repetir, reinicie o roteador."); root.avisoErro = true }
+    }
+  }
+  Timer { id: esperarIp; interval: 12000; onTriggered: conferirIp.running = true }
+  Timer { id: apagarAvisoRede; interval: 4000; onTriggered: if (!root.avisoErro) { root.avisoPara = ""; root.aviso = "" } }
+  Timer {
+    id: limiteRede
+    interval: 45000
+    onTriggered: {
+      var nome = root.tentando
+      for (var i = 0; i < root.redes.length; i++) if (root.redes[i].name === nome && !root.redes[i].connected) root.redes[i].disconnect()
+      root.falhouRede(nome, I18n.t("A rede não respondeu em 45 segundos. A senha pode estar certa, mas o roteador não liberou a conexão (não entregou endereço). Tente de novo, chegue mais perto ou reinicie o roteador."))
+    }
+  }
   readonly property var saidasAudio: st.saidas_audio || []
   readonly property var entradasAudio: st.entradas_audio || []
   readonly property var saidaAtual: {
@@ -225,7 +287,7 @@ Item {
     anchor.rect.y: root.vertical ? root.height - implicitHeight : (root.bar && root.bar.position === "bottom" ? -implicitHeight - 6 : root.height + 6)
 
     property bool grabPronto: false
-    onVisibleChanged: { grabPronto = false; if (!visible) mostrarSaidas = false; if (visible) ativarGrab.restart() }
+    onVisibleChanged: { grabPronto = false; if (!visible) { mostrarSaidas = false; mostrarRedes = false; redeAberta = "" } if (visible) ativarGrab.restart() }
     Timer { id: ativarGrab; interval: 60; onTriggered: painel.grabPronto = painel.visible }
     HyprlandFocusGrab { active: painel.grabPronto; windows: [painel]; onCleared: painel.visible = false }
 
@@ -384,7 +446,7 @@ Item {
               Behavior on scale { NumberAnimation { duration: 90 } }
               readonly property color cor: modelData.on ? root.sobreRealce : root.texto
               Column {
-                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 10; rightMargin: 8 }
+                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 10; rightMargin: bloco.modelData.id === "wifi" ? 30 : 8 }
                 spacing: 2
                 Text { text: bloco.modelData.g; color: bloco.cor; font.family: root.fonte; font.pixelSize: 19 }
                 Text { width: parent.width; text: bloco.modelData.t; color: bloco.cor; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
@@ -409,6 +471,192 @@ Item {
                   o[k === "escuro" ? "claro" : k] = k === "escuro" ? !r.st.claro : !r.st[k]
                   r.st = Object.assign({}, r.st, o)   // responde na hora; o estado real vem logo depois
                 }
+              }
+              // seta: abre a lista de redes aqui mesmo (só no Wi-Fi)
+              Rectangle {
+                visible: bloco.modelData.id === "wifi"
+                anchors { right: parent.right; top: parent.top; bottom: parent.bottom; margins: 4 }
+                width: 24; radius: 9
+                color: ms2.containsMouse ? root.alfa(bloco.cor, 0.16) : "transparent"
+                Rectangle {
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: 1
+                  height: parent.height - 16
+                  color: root.alfa(bloco.cor, 0.22)
+                }
+                Text {
+                  anchors.centerIn: parent
+                  text: root.mostrarRedes ? "\u{F0140}" : "\u{F0142}"
+                  color: bloco.cor; font.family: root.fonte; font.pixelSize: 15
+                }
+                MouseArea {
+                  id: ms2
+                  anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    root.mostrarRedes = !root.mostrarRedes
+                    if (root.mostrarRedes) root.mostrarSaidas = false
+                    root.redeAberta = ""
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // lista de redes Wi-Fi (seta do botão do Wi-Fi)
+        Rectangle {
+          id: painelRedes
+          visible: root.mostrarRedes
+          width: parent.width
+          height: visible ? colRedes.implicitHeight + 16 : 0
+          radius: 12
+          color: root.alfa(root.texto, root.escuro ? 0.08 : 0.05)
+          border.width: 1; border.color: root.alfa(root.texto, 0.10)
+          clip: true
+          Column {
+            id: colRedes
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+            spacing: 2
+            Text {
+              text: I18n.t("Redes Wi-Fi"); color: root.texto; opacity: 0.65; font.pixelSize: 11; font.weight: Font.DemiBold
+              bottomPadding: 4
+            }
+            Text {
+              visible: !root.st.wifi || root.redes.length === 0
+              width: parent.width; wrapMode: Text.WordWrap
+              text: !root.st.wifi ? I18n.t("O Wi-Fi está desligado. Toque no botão do Wi-Fi para ligar.") : I18n.t("Procurando redes…")
+              color: root.texto; opacity: 0.7; font.pixelSize: 12; topPadding: 4; bottomPadding: 6
+            }
+            Flickable {
+              visible: root.st.wifi && root.redes.length > 0
+              width: parent.width
+              height: Math.min(contentHeight, 300)
+              contentHeight: listaRedes.implicitHeight
+              clip: true; boundsBehavior: Flickable.StopAtBounds
+              Column {
+                id: listaRedes
+                width: parent.width
+                spacing: 2
+                Repeater {
+                  model: root.redes
+                  delegate: Rectangle {
+                    id: linhaRede
+                    required property var modelData
+                    readonly property bool protegida: modelData.security !== WifiSecurityType.Open
+                    readonly property bool aberta: root.redeAberta === modelData.name
+                    readonly property bool comAviso: root.avisoPara === modelData.name && root.aviso !== ""
+                    width: listaRedes.width
+                    height: 40 + (aberta ? 42 : 0) + (comAviso ? avisoRede.implicitHeight + 6 : 0)
+                    radius: 8
+                    color: modelData.connected ? root.alfa(root.realce, 0.18) : (mr.containsMouse ? root.alfa(root.texto, 0.08) : "transparent")
+                    Connections {
+                      target: linhaRede.modelData
+                      function onConnectionFailed(reason) { root.falhouRede(linhaRede.modelData.name, root.textoFalha(reason, linhaRede.protegida)) }
+                      function onConnectedChanged() {
+                        if (linhaRede.modelData.connected && root.tentando === linhaRede.modelData.name) {
+                          limiteRede.stop(); root.tentando = ""; root.aviso = I18n.t("Conectado · conferindo a internet…")
+                          conferirIp.nome = linhaRede.modelData.name; esperarIp.restart()
+                        }
+                      }
+                    }
+                    Item {
+                      id: topoRede
+                      width: parent.width; height: 40
+                      Row {
+                        anchors { left: parent.left; leftMargin: 10; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                        spacing: 10
+                        Text { anchors.verticalCenter: parent.verticalCenter; text: root.sinal(linhaRede.modelData); color: linhaRede.modelData.connected ? root.realce : root.texto; font.family: root.fonte; font.pixelSize: 16 }
+                        Column {
+                          anchors.verticalCenter: parent.verticalCenter
+                          width: parent.width - 60
+                          Text { width: parent.width; text: linhaRede.modelData.name; color: root.texto; font.pixelSize: 12; font.weight: linhaRede.modelData.connected ? Font.DemiBold : Font.Normal; elide: Text.ElideRight }
+                          Text {
+                            width: parent.width; color: root.texto; opacity: 0.6; font.pixelSize: 10; elide: Text.ElideRight
+                            text: root.tentando === linhaRede.modelData.name ? I18n.t("Conectando…")
+                                  : linhaRede.modelData.connected ? I18n.t("Conectada") : (linhaRede.modelData.known ? I18n.t("Salva") : (linhaRede.protegida ? I18n.t("Protegida") : I18n.t("Aberta")))
+                          }
+                        }
+                        Text { anchors.verticalCenter: parent.verticalCenter; visible: linhaRede.protegida; text: "\u{F033E}"; color: root.texto; opacity: 0.5; font.family: root.fonte; font.pixelSize: 12 }
+                      }
+                      MouseArea {
+                        id: mr
+                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        enabled: root.tentando === ""
+                        onClicked: {
+                          var n = linhaRede.modelData
+                          if (n.connected || (!n.known && linhaRede.protegida)) {
+                            root.redeAberta = linhaRede.aberta ? "" : n.name
+                            if (root.redeAberta && !n.connected) focoSenha.restart()
+                          } else root.conectarRede(n)
+                        }
+                      }
+                    }
+                    // expandida: senha (rede nova protegida) ou Desconectar (conectada)
+                    Item {
+                      visible: linhaRede.aberta
+                      x: 10; y: 40; width: parent.width - 20; height: 36
+                      Rectangle {
+                        visible: !linhaRede.modelData.connected
+                        anchors { left: parent.left; right: btnRede.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+                        height: 32; radius: 8
+                        color: root.alfa(root.texto, 0.06)
+                        border.width: 1; border.color: senhaRede.activeFocus ? root.realce : root.alfa(root.texto, 0.16)
+                        TextInput {
+                          id: senhaRede
+                          anchors { fill: parent; leftMargin: 10; rightMargin: 10 }
+                          verticalAlignment: TextInput.AlignVCenter
+                          echoMode: TextInput.Password
+                          color: root.texto; font.pixelSize: 12; clip: true
+                          onAccepted: btnRede.acionar()
+                          Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: senhaRede.text === ""; text: I18n.t("Senha da rede")
+                            color: root.texto; opacity: 0.4; font.pixelSize: 12
+                          }
+                        }
+                        Timer { id: focoSenha; interval: 60; onTriggered: senhaRede.forceActiveFocus() }
+                      }
+                      Rectangle {
+                        id: btnRede
+                        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                        width: textoBtnRede.implicitWidth + 24; height: 32; radius: 8
+                        color: linhaRede.modelData.connected ? root.alfa(root.texto, 0.12) : root.realce
+                        function acionar() {
+                          var n = linhaRede.modelData
+                          if (n.connected) { n.disconnect(); root.redeAberta = ""; return }
+                          if (senhaRede.text.length < 8) { root.avisoPara = n.name; root.aviso = I18n.t("A senha do Wi-Fi tem pelo menos 8 caracteres."); root.avisoErro = true; return }
+                          var senha = senhaRede.text; senhaRede.text = ""
+                          root.conectarRede(n, senha)
+                        }
+                        Text {
+                          id: textoBtnRede
+                          anchors.centerIn: parent
+                          text: linhaRede.modelData.connected ? I18n.t("Desconectar") : I18n.t("Conectar")
+                          color: linhaRede.modelData.connected ? root.texto : root.sobreRealce
+                          font.pixelSize: 12; font.weight: Font.DemiBold
+                        }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: btnRede.acionar() }
+                      }
+                    }
+                    Text {
+                      id: avisoRede
+                      visible: linhaRede.comAviso
+                      x: 36; y: 40 + (linhaRede.aberta ? 42 : 0); width: parent.width - 46
+                      text: root.aviso; wrapMode: Text.WordWrap
+                      color: root.avisoErro ? "#e5484d" : root.texto; opacity: root.avisoErro ? 1 : 0.7; font.pixelSize: 11
+                    }
+                  }
+                }
+              }
+            }
+            Text {
+              text: I18n.t("Mais configurações de Wi-Fi")
+              color: root.realce; font.pixelSize: 11; font.weight: Font.DemiBold
+              topPadding: 6; leftPadding: 4
+              MouseArea {
+                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                onClicked: { painel.visible = false; Quickshell.execDetached(["/usr/bin/configuracoes", "rede"]) }
               }
             }
           }
@@ -506,7 +754,7 @@ Item {
           onMudou: function(v) { root.travarVol(); root.st = Object.assign({}, root.st, { volume: v, mudo: false }); if (!aplicaVol.running) aplicaVol.start() }
           onSoltou: somVol.restart()
           onClicouGlifo: { root.travarVol(); root.acao(["mudo"]); root.st = Object.assign({}, root.st, { mudo: !root.st.mudo }) }
-          onClicouDireita: { root.mostrarSaidas = !root.mostrarSaidas }
+          onClicouDireita: { root.mostrarSaidas = !root.mostrarSaidas; if (root.mostrarSaidas) root.mostrarRedes = false }
         }
 
         // seletor de saída e entrada de áudio (fone, microfone, bluetooth, alto-falante)

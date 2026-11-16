@@ -2769,5 +2769,17 @@
  "Conectado a %1, mas o roteador não entregou um endereço: sem internet. Tente de novo; se repetir, reinicie o roteador.": "Connected to %1, but the router didn't hand out an address: no internet. Try again; if it repeats, restart the router.",
  "%1 não respondeu em 45 segundos. A senha pode estar certa, mas o roteador não liberou a conexão. Tente de novo ou reinicie o roteador.": "%1 didn't respond in 45 seconds. The password may be right, but the router didn't let the connection through. Try again or restart the router.",
  "%1 está fora de alcance. Chegue mais perto do roteador.": "%1 is out of range. Move closer to the router.",
- "A senha está certa, mas o roteador não entregou um endereço (DHCP). Tente de novo; se repetir, reinicie o roteador.": "The password is right, but the router didn't hand out an address (DHCP). Try again; if it repeats, restart the router."
+ "A senha está certa, mas o roteador não entregou um endereço (DHCP). Tente de novo; se repetir, reinicie o roteador.": "The password is right, but the router didn't hand out an address (DHCP). Try again; if it repeats, restart the router.",
+ " · carregando": " · charging",
+ "A senha do Wi-Fi tem pelo menos 8 caracteres.": "The Wi-Fi password must be at least 8 characters long.",
+ "Bluetooth": "Bluetooth",
+ "Entrada de som (Microfone)": "Sound input (Microphone)",
+ "Mais configurações de Wi-Fi": "More Wi-Fi settings",
+ "Mais configurações de som": "More sound settings",
+ "O Wi-Fi está desligado. Toque no botão do Wi-Fi para ligar.": "Wi-Fi is turned off. Tap the Wi-Fi button to turn it on.",
+ "Procurando redes…": "Searching for networks…",
+ "Salva": "Saved",
+ "Saída de som": "Sound output",
+ "Senha da rede": "Network password",
+ "Wi-Fi": "Wi-Fi"
 }

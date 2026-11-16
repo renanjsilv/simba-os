@@ -1,0 +1,5 @@
+# Simba OS: botões minimizar/maximizar/fechar nos apps GTK/libadwaita (chat de IA, boas-vindas,
+# Explorador…). O padrão do GNOME é só "fechar"; esta máquina de desenvolvimento tinha o valor
+# certo gravado à mão no dconf, por isso só instalações novas mostravam só o "x".
+[org.gnome.desktop.wm.preferences]
+button-layout='appmenu:minimize,maximize,close'

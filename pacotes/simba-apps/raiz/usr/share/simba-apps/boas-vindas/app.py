@@ -428,7 +428,9 @@ class Janela(Adw.ApplicationWindow):
         d.set_close_response("cancelar")
         d.connect("response", lambda _d, r: r == "conectar" and self.wifi_conectar(ssid, campo.get_text()))
         d.present(self)
-        GLib.idle_add(campo.grab_focus)
+        # uma vez só: grab_focus devolve True e o GLib repetia sem parar, selecionando o texto
+        # inteiro a cada volta — cada tecla substituía a anterior (só ficava 1 caractere)
+        GLib.idle_add(lambda: (campo.grab_focus(), False)[1])
 
     def wifi_conectar(self, ssid, senha):
         self.wifi_estado.set_label(_t("Conectando a %1…", ssid))

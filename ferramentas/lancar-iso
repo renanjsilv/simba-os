@@ -65,6 +65,21 @@ else
   ISO_CANAL_FLAG="SIMBA_ISO_CANAL=teste"
 fi
 
+# O GitHub leva um tempo para servir os arquivos que acabaram de ser publicados: sem esperar,
+# a montagem pegava 404 (simba-draco, brave-bin…) e falhava duas vezes seguidas.
+if [ "$CANAL" != estavel ]; then
+  echo "── conferindo se o canal de teste já serve todos os pacotes"
+  URL=https://github.com/renanjsilv/simba-os/releases/download/repo-testing
+  for t in $(seq 1 20); do
+    curl -sfL "$URL/simba-os-testing.db" -o /tmp/simba-lancar-iso-teste.db || { sleep 30; continue; }
+    faltam=$("$R/ferramentas/pacotes-do-db" /tmp/simba-lancar-iso-teste.db \
+      | xargs -P8 -I{} sh -c 'curl -sfLI -o /dev/null "$0/{}" || echo {}' "$URL")
+    [ -z "$faltam" ] && { echo "   todos os pacotes disponíveis"; break; }
+    echo "   ainda indisponíveis ($t/20): $(echo $faltam | head -c 200) — esperando 30 s"
+    sleep 30
+  done
+fi
+
 echo "── 2/4 montando a ISO (demora)"
 # uma 2ª tentativa: falhas de download (pacote corrompido no cache ou espelho no meio da
 # sincronização) somem sozinhas — o pacman apaga o arquivo ruim e baixa de novo

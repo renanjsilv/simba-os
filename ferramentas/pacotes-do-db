@@ -1,0 +1,4 @@
+#!/bin/bash
+# pacotes-do-db <banco.db> — nomes dos arquivos de pacote listados num banco do pacman (repo-add)
+descs() { zstd -dcq "$1" 2>/dev/null | tar -xO --wildcards '*/desc' 2>/dev/null || tar -xzOf "$1" --wildcards '*/desc'; }
+descs "$1" | awk '/^%FILENAME%/{getline; print}'

@@ -165,9 +165,11 @@ MODELOS_ESTATICOS = {
               "gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"],
     "agy": ["gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low",
             "claude-sonnet-4-6", "claude-opus-4-6-thinking", "gpt-oss-120b-medium"],
-    "opencode": ["opencode/claude-sonnet-5-5", "opencode/claude-opus-5-5",
-                 "opencode/gpt-5.5", "opencode/gpt-5.3-codex", "opencode/gemini-3.1-pro",
-                 "opencode/grok-4.7", "opencode/kimi-k3", "opencode/deepseek-v4.1-flash-free"],
+    "opencode": ["opencode/deepseek-v4.1-flash-free", "opencode/glm-5.3-flash-free",
+                 "opencode/minimax-m3.1-flash-free", "opencode/mimo-v2.6-flash-free",
+                 "opencode/nemotron-3.5-super-vl-free", "opencode/claude-sonnet-5-5",
+                 "opencode/claude-opus-5-5", "opencode/gpt-5.5", "opencode/gpt-5.3-codex",
+                 "opencode/gemini-3.1-pro", "opencode/grok-4.7", "opencode/kimi-k3"],
     "copilot": ["auto", "claude-sonnet-5.5", "claude-opus-5.5", "claude-haiku-5.5",
                 "gpt-6.1-sol", "gpt-6-luna", "gpt-5.3-codex", "gemini-4-argon",
                 "grok-4.7", "kimi-k3"],
@@ -356,9 +358,10 @@ def _gratis_fora():
 def modelos_gratis():
     vals = [o["valor"] for o in modelos("opencode") if str(o.get("valor", "")).endswith("-free")]
     if not vals:
-        vals = [o["valor"] for o in modelos("opencode", atualizar=True) if str(o.get("valor", "")).endswith("-free")]
-    if not vals:
-        vals = [v for v in MODELOS_ESTATICOS["opencode"] if v.endswith("-free")]
+        vals = [f"opencode/{m}" for m in GRATIS_PREFERIDOS] + [v for v in MODELOS_ESTATICOS["opencode"] if v.endswith("-free")]
+        # Dispara atualização em segundo plano para não congelar a interface
+        import threading
+        threading.Thread(target=lambda: modelos("opencode", atualizar=True), daemon=True).start()
     nome = lambda v: v.split("/", 1)[-1]
     return sorted(set(vals), key=lambda v: (GRATIS_PREFERIDOS.index(nome(v)) if nome(v) in GRATIS_PREFERIDOS
                                             else len(GRATIS_PREFERIDOS), v))
@@ -506,6 +509,8 @@ def _achar(a):
 
 def ler_config(verificar=True):
     instalados = [a for a in AGENTES if _achar(a)]
+    if "opencode" in instalados:
+        instalados = ["opencode"] + [a for a in instalados if a != "opencode"]
     existe = CONFIG.exists()
     try:
         c = json.loads(CONFIG.read_text())

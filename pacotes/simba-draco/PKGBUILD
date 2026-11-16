@@ -3,7 +3,7 @@
 # preparados na primeira vez por `draco preparar` (também chamado sozinho pelo servidor de voz).
 pkgname=simba-draco
 pkgver=1.1.0
-pkgrel=7
+pkgrel=8
 pkgdesc="Simba OS: Draco, assistente de voz (segure F10; Parakeet local ou Whisper na nuvem, vozes Piper/Edge, Claude Code)"
 arch=('any')
 url="https://github.com/SIMBA_GH_USER/simba-os"

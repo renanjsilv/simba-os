@@ -1,0 +1,14 @@
+[Unit]
+Description=Serviço em segundo plano da Loja de apps (Bazaar)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bazaar-daemon --no-window
+Restart=on-failure
+RestartSec=30
+Nice=15
+
+[Install]
+WantedBy=default.target

@@ -646,14 +646,20 @@ def test(pid):
         return {"ok": ok, "msg": f"conectado ({msg})" if ok else msg}
     if p.get("motor") == "opencode":
         if not install_opencode():
-            return {"ok": False, "msg": "não consegui instalar o OpenCode; verifique a internet"}
+            return {"ok": False, "msg": "não consegui instalar o OpenCode; verifique a conexão com a internet"}
         env = {**os.environ, "DRACO_MODELO": model_of(load(), pid)}
         try:
             r = subprocess.run([sys.executable, os.path.join(CODIGO, "lib", "opencode_brain.py"), "Responda apenas: ok"],
                                capture_output=True, text=True, timeout=120, env=env, cwd=DATA if os.path.isdir(DATA) else HOME)
-            res = json.loads(r.stdout.strip().splitlines()[-1])
-        except (subprocess.SubprocessError, ValueError, IndexError, OSError):
-            return {"ok": False, "msg": "o modelo grátis não respondeu"}
+            linhas = [l for l in (r.stdout or "").strip().splitlines() if l.strip().startswith("{") and l.strip().endswith("}")]
+            if not linhas:
+                err = (r.stderr or r.stdout or "").strip()
+                return {"ok": False, "msg": f"o modelo grátis não respondeu: {err[-140:]}" if err else "o modelo grátis não respondeu (saída vazia)"}
+            res = json.loads(linhas[-1])
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "msg": "tempo esgotado ao testar o modelo grátis (120 s)"}
+        except Exception as e:
+            return {"ok": False, "msg": f"erro ao testar o modelo grátis: {str(e)[:140]}"}
         if res.get("is_error"):
             return {"ok": False, "msg": (res.get("result") or "falhou")[:160]}
         return {"ok": True, "msg": "funcionando, grátis"}

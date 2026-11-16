@@ -23,7 +23,7 @@ case $estilo in
   caricatura-escura) cab=carc-escuro.png claro=0 ;;
   *) echo "estilo desconhecido: $estilo" >&2; exit 2 ;;
 esac
-if [ "$claro" = 1 ]; then tinta='#111111' fundo='#f4f4f2' fundo2='#d9d9d6'; else tinta='#ffffff' fundo='#262626' fundo2='#050505'; fi
+if [ "$claro" = 1 ]; then tinta='#111111' fundo='#f4f4f2' fundo2='#d9d9d6'; else tinta='#ffffff' fundo='#000000' fundo2='#000000'; fi
 NOME_MAIUSC=$(printf '%s' "$nome" | tr '[:lower:]' '[:upper:]')
 NOME_XML=$(printf '%s' "$NOME_MAIUSC" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 

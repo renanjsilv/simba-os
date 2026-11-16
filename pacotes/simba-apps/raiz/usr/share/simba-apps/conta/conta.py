@@ -184,7 +184,8 @@ def rc(*args, check=True, capture=True, timeout=None, entrada=None):
     exe = rclone_bin()
     if not exe:
         raise SystemExit(_t("rclone não instalado"))
-    r = subprocess.run([exe, *args], capture_output=capture, text=True, timeout=timeout, input=entrada)
+    rclone_cmd = [exe, "--retries", "1", "--low-level-retries", "1", "--contimeout", "5s", *args]
+    r = subprocess.run(rclone_cmd, capture_output=capture, text=True, timeout=timeout, input=entrada)
     if check and r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout or "").strip()[-800:] or f"rclone {args[0]} falhou")
     return r
@@ -802,6 +803,13 @@ def cmd_entrar(a):
                           erro=_t("Esta conta já tem um backup de %1. Restaure-o ou substitua-o.", meta.get('maquina', 'outra máquina')))
         BOAS_VINDAS.unlink(missing_ok=True)
         avisar(_t("Conta conectada"), c.get("email") or _t("Google Drive"))
+        try:
+            subprocess.run(["systemctl", "--user", "enable", "--now", "conta-fundo.service"],
+                           capture_output=True, timeout=10)
+            fundo_puxar(c)
+            fundo_enviar(c, inicio=True)
+        except Exception:
+            pass
         return 0
     except Exception as e:  # noqa: BLE001
         salvar_estado(entrando=False, erro=str(e)[-300:])
@@ -1141,13 +1149,13 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
 # FUNDO_ESTADO = último papel combinado com o Drive (o enviado ou o recebido): evita
 # reenviar o que acabou de chegar e devolver para a nuvem a troca de outra máquina.
 FUNDO_ESTADO = HOME / ".local/state/conta/fundo.json"
-FUNDO_INTERVALO = int(os.environ.get("CONTA_FUNDO_INTERVALO") or 30)
+FUNDO_INTERVALO = int(os.environ.get("CONTA_FUNDO_INTERVALO") or 10)
 FUNDO_MAX = 60 * 1024 * 1024
 FUNDO_LINK = HOME / ".local/state/simba/current/background"
 
 
 def _fundo_remoto_info():
-    r = rc("cat", f"{remoto_base()}/fundo.json", check=False, timeout=30)
+    r = rc("cat", f"{remoto_base()}/fundo.json", check=False, timeout=15)
     if r.returncode != 0:
         if "not found" in (r.stderr or "").lower() or "doesn't exist" in (r.stderr or "").lower():
             return {}
@@ -1176,8 +1184,25 @@ def fundo_enviar(c=None, inicio=False):
     combinado = ler_json(FUNDO_ESTADO, {})
     if combinado.get("hash") == h:
         return False                       # já é o que está na nuvem (enviado ou recebido)
-    if inicio and not combinado.get("hash") and _fundo_remoto_info():
-        return False                       # máquina recém-conectada: adota o da nuvem, não impõe o seu
+    try:
+        local_ts = max(FUNDO_LINK.lstat().st_mtime, img.stat().st_mtime)
+    except OSError:
+        local_ts = time.time()
+    # Verifica quem definiu por último antes de enviar
+    remoto_info = {}
+    try:
+        remoto_info = _fundo_remoto_info()
+    except Exception:
+        pass
+    if remoto_info and remoto_info.get("hash") and remoto_info.get("hash") != h:
+        try:
+            remoto_ts = datetime.datetime.fromisoformat(remoto_info.get("data", "")).timestamp()
+        except Exception:
+            remoto_ts = 0
+        if remoto_ts > local_ts:
+            # O papel remoto foi definido mais recentemente em outra máquina: adota ele
+            fundo_puxar(c)
+            return False
     tmp = CACHE / "fundo-envio"
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -1204,18 +1229,21 @@ def fundo_puxar(c=None):
     img_local, local = _fundo_local()
     if h == local or info.get("id") == _id_maquina():
         gravar_json(FUNDO_ESTADO, info)
+        salvar_estado(base_fundo=h)
         return False
-    # Troca local ainda não enviada e mais nova que a da nuvem: vale a daqui (o envio vem a seguir).
-    if combinado.get("hash") and local and local != combinado.get("hash"):
-        try:
-            remota = datetime.datetime.fromisoformat(info.get("data", "")).timestamp()
-        except ValueError:
-            remota = 0
-        try:
-            if FUNDO_LINK.lstat().st_mtime > remota:
-                return False
-        except OSError:
-            pass
+    # Compara quem definiu por último: se a máquina local fez alteração mais recente, envia
+    try:
+        remota_ts = datetime.datetime.fromisoformat(info.get("data", "")).timestamp()
+    except (ValueError, TypeError):
+        remota_ts = 0
+    try:
+        local_ts = max(FUNDO_LINK.lstat().st_mtime, img_local.stat().st_mtime if img_local else 0)
+    except OSError:
+        local_ts = 0
+    if local and local_ts > remota_ts:
+        # Definição local mais recente: envia para as outras máquinas
+        fundo_enviar(c)
+        return False
     alvo = None
     original = Path(info.get("original") or "")
     if original.name and original.is_file() and _hash_arquivo(original) == h:
@@ -1277,14 +1305,17 @@ def cmd_fundo(a):
                 if time.monotonic() >= proxima:
                     proxima = time.monotonic() + FUNDO_INTERVALO
                     if conectado():
-                        fundo_puxar(c)
                         if primeira:
-                            fundo_enviar(c, inicio=True)   # troca feita com a máquina desligada
+                            # Ao ligar/iniciar: verifica e sincroniza quem definiu por último
+                            fundo_puxar(c)
+                            fundo_enviar(c, inicio=True)
                             primeira = False
+                        else:
+                            fundo_puxar(c)
                     visto = _link_fundo()
         except Exception as exc:  # noqa: BLE001 — rede caiu etc.: tenta de novo depois
             print(_t("papel de parede: %1", str(exc)[-200:]), file=sys.stderr, flush=True)
-            proxima = time.monotonic() + FUNDO_INTERVALO
+            proxima = time.monotonic() + min(30, FUNDO_INTERVALO * 2)
         time.sleep(2)
 
 

@@ -65,7 +65,7 @@ arch-chroot "$T" /usr/local/bin/marca-sistema
 
 # papel de parede: na pasta de fundos do tema atual e como fundo atual
 h="$T/home/$u"
-tema=$(cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || echo white)   # sem tema ainda (primeiro login): o padrão do Simba
+tema=$(cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || cat "$h/.local/state/simba/current/theme.name" 2>/dev/null || echo black)   # sem tema ainda (primeiro login): o padrão do Simba (modo escuro)
 bgbase="$h/.config/simba/backgrounds"
 [ -d "$h/.config/simba/backgrounds" ] && [ ! -d "$bgbase" ] && bgbase="$h/.config/simba/backgrounds"
 install -d -o "$(stat -c %u "$h")" -g "$(stat -c %g "$h")" "$bgbase" "$bgbase/$tema"

@@ -785,6 +785,15 @@ class Janela(Adw.ApplicationWindow):
                 self.conta_botao.set_child(Adw.ButtonContent(label=_t("Gerenciar a conta"),
                                                              icon_name="avatar-default-symbolic"))
                 self.conta_botao.remove_css_class("suggested-action")
+                if not getattr(self, "_sincronizou_inicial", False):
+                    self._sincronizou_inicial = True
+                    def sincronizar_inicial():
+                        subprocess.run(["systemctl", "--user", "enable", "--now", "conta-fundo.service"],
+                                       capture_output=True, timeout=10)
+                        subprocess.run(["conta", "fundo", "puxar"], capture_output=True, timeout=30)
+                        subprocess.run(["conta", "fundo", "enviar"], capture_output=True, timeout=30)
+                        subprocess.run(["conta", "sincronizar", "--silencioso"], capture_output=True, timeout=120)
+                    em_segundo_plano(sincronizar_inicial, lambda _: None)
             elif st.get("erro") and not st.get("entrando") and getattr(self, "tentativas_conta", 0):
                 # ex.: backup criptografado pede a senha — isso é feito em Contas
                 self.conta_estado.set_label(st["erro"])

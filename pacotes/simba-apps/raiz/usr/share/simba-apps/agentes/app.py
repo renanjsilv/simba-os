@@ -1056,9 +1056,11 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         cfg = M.ler_config(verificar=False)
         agente = (self.agente_atual if self._rodando() else None) or self._agente_escolhido()
         if not agente:
-            agente = next((a for a in getattr(self, "candidatos", []) if not M.esgotado_ate(a)), None)
-        if not agente:
-            return None, _t("Automático"), ""
+            cand = next((a for a in getattr(self, "candidatos", []) if not M.esgotado_ate(a) and (M.conectado(a, verificar=False) is True or M.AGENTES.get(a, {}).get("gratis"))), None)
+            cand = cand or "opencode"
+            cand_info = M.AGENTES.get(cand, {})
+            cand_mod = M.modelo_efetivo(cand, cfg) or cand_info.get("modelo", "")
+            return "auto", _t("Automático"), cand_mod or _t("Grátis automático")
         info = M.AGENTES.get(agente, {})
         modelo = ""
         if self._rodando() and self.ativo_registro is not None:
@@ -1071,10 +1073,10 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             return
         agente, nome, modelo = self._info_agente_atual()
         seguro = bool(M.ler_config(verificar=False).get("seguro"))
-        login_st = M.status_login(agente) if agente else None
-        up_info = M.verificar_atualizacao(agente) if agente else None
+        login_st = M.status_login(agente) if (agente and agente != "auto") else None
+        up_info = M.verificar_atualizacao(agente) if (agente and agente != "auto") else None
         self.detalhes.ambiente(pasta=self.work_dir, agente=nome, modelo=modelo, seguro=seguro,
-                               icone=marcas.icone_agente(agente, modelo) if agente else "simba-agente",
+                               icone=marcas.icone_agente(agente, modelo) if (agente and agente != "auto") else "simba-agente",
                                login_status=login_st, atualizacao=up_info)
 
     def _verificar_alertas_ambiente(self):

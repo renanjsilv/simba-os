@@ -313,7 +313,7 @@ fi   # REUSAR
 # ---------------------------------------------------------------- marca
 etapa marca "Preparando a identidade visual"
 msg "Identidade visual: $NOME"
-ESTILO=$(cat "$SRC/marca/estilo" 2>/dev/null || echo caricatura)
+ESTILO=$(cat "$SRC/marca/estilo" 2>/dev/null || echo caricatura-escura)
 "$SRC/marca/gerar-pacote" "$NOME" "$ESTILO" "$WORK/marca" >/dev/null
 if [ -f "$SRC/marca/gato-pixel.txt" ]; then
   "$SRC/marca/logo-terminal" "$SRC/marca/gato-pixel.txt" 0 "$WORK/marca/logo.ans"

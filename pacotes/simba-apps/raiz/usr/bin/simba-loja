@@ -3,6 +3,9 @@
 # automaticamente pelo simba-flatpak-atualizar.timer).
 # Bazaar nativo (pacote "bazaar" do Arch, dependência do simba-apps): funciona desde o 1º boot
 if command -v bazaar >/dev/null 2>&1; then
+  if ! pgrep -f "bazaar-daemon" >/dev/null 2>&1; then
+    /usr/bin/bazaar-daemon --no-window >/dev/null 2>&1 &
+  fi
   exec bazaar "$@"
 fi
 if flatpak info io.github.kolunmi.Bazaar >/dev/null 2>&1; then

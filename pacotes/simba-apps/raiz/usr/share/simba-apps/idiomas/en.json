@@ -2868,5 +2868,12 @@
   "Todos os aplicativos abertos serão fechados e o computador será reiniciado.": "All open apps will be closed and your computer will restart.",
   "Desligar o computador?": "Shut down your computer?",
   "Todos os aplicativos abertos serão fechados e o computador será desligado.": "All open apps will be closed and your computer will shut down.",
-  "Menu do sistema": "System menu"
+  "Menu do sistema": "System menu",
+  "Mais configurações de Bluetooth": "More Bluetooth settings",
+  "Nenhum adaptador Bluetooth encontrado.": "No Bluetooth adapter found.",
+  "O Bluetooth está desligado.": "Bluetooth is off.",
+  "Procurando dispositivos… Deixe o aparelho em modo de pareamento.": "Looking for devices… Put the device in pairing mode.",
+  "Desconectando…": "Disconnecting…",
+  "Pareado · clique para conectar": "Paired · click to connect",
+  "Disponível · clique para parear": "Available · click to pair"
 }

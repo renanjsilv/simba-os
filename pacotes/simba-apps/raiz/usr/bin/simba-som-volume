@@ -1,5 +1,5 @@
 #!/bin/bash
-# simba-som-volume — o "plim" de quando o volume muda (como no Windows 11): toca já no volume
+# simba-som-volume — o som suave de quando o volume muda (como no Windows 11): toca já no volume
 # novo do alto-falante, para a pessoa ouvir como ficou. Toques seguidos (tecla segurada) não
 # se empilham: o anterior é cortado. Mudo ou volume 0: não toca.
 # Desligar: Configurações › Som › "Som ao mudar o volume" (marca ~/.config/simba/sem-som-volume).

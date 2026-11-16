@@ -5,6 +5,7 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import Quickshell.Services.Mpris
 import Quickshell.Networking
+import Quickshell.Bluetooth
 import qs.Commons
 
 // Central de controle do Simba OS (como a do Windows 11 / macOS).
@@ -32,8 +33,13 @@ Item {
                       saidas_audio: [], entradas_audio: [] })
   property bool mostrarSaidas: false
   property bool mostrarRedes: false
-  // 0 = central, 1 = página do Wi-Fi; anima a troca (desliza + esmaece, como no Windows 11)
-  property real fase: mostrarRedes ? 1 : 0
+  property bool mostrarBt: false
+  // página aberta pela seta (fica a última enquanto a animação de volta acontece)
+  property string pagina: "wifi"
+  onMostrarRedesChanged: if (mostrarRedes) { pagina = "wifi"; mostrarBt = false }
+  onMostrarBtChanged: if (mostrarBt) { pagina = "bt"; mostrarRedes = false }
+  // 0 = central, 1 = página do Wi-Fi/Bluetooth; anima a troca (desliza + esmaece, como no Windows 11)
+  property real fase: (mostrarRedes || mostrarBt) ? 1 : 0
   Behavior on fase { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
   // ── redes Wi-Fi dentro da central (seta no botão do Wi-Fi, como no Windows 11) ──
@@ -49,6 +55,32 @@ Item {
     return v.slice(0, 20)
   }
   Binding { target: root.wifiDev; property: "scannerEnabled"; value: true; when: root.wifiDev !== null && root.mostrarRedes && painel.visible }
+  // ── dispositivos Bluetooth dentro da central (seta no botão do Bluetooth) ──
+  readonly property var btAd: Bluetooth.defaultAdapter
+  readonly property bool btLigado: !!(btAd && btAd.enabled)
+  readonly property var btDisps: {
+    if (!btAd || !btAd.devices) return []
+    // sem nome de verdade (o BlueZ usa o endereço, às vezes com "-"): só aparece se já foi pareado
+    var v = btAd.devices.values.filter(function(d) { return d.paired || (d.name && d.name.replace(/-/g, ":").toUpperCase() !== String(d.address).toUpperCase()) })
+    v.sort(function(a, b) { return (b.connected - a.connected) || (b.paired - a.paired) || String(a.name).localeCompare(String(b.name)) })
+    return v.slice(0, 30)
+  }
+  Binding { target: root.btAd; property: "discovering"; value: true; when: root.btAd !== null && root.btLigado && root.mostrarBt && painel.visible }
+  function glifoBt(d) {
+    var i = String(d.icon || "")
+    if (i.indexOf("headset") >= 0 || i.indexOf("headphone") >= 0 || i.indexOf("audio") >= 0) return "\u{F0970}"
+    if (i.indexOf("mouse") >= 0) return "\u{F037D}"
+    if (i.indexOf("keyboard") >= 0) return "\u{F030C}"
+    if (i.indexOf("phone") >= 0) return "\u{F011C}"
+    if (i.indexOf("speaker") >= 0) return "\u{F071F}"
+    if (i.indexOf("gaming") >= 0 || i.indexOf("joystick") >= 0) return "\u{F0297}"
+    return "\u{F00AF}"
+  }
+  function btOcupado(d) { return !!(d.pairing || d.state === BluetoothDeviceState.Connecting || d.state === BluetoothDeviceState.Disconnecting) }
+  function btAlternar() {
+    var r = root, novo = !r.st.bluetooth
+    r.acao(["bluetooth"]); r.st = Object.assign({}, r.st, { bluetooth: novo })
+  }
   property string redeAberta: ""      // rede com a linha expandida (senha / desconectar)
   property var menuRede: null         // rede do menu do botão direito (Propriedades / Esquecer)
   property real menuX: 0
@@ -280,6 +312,7 @@ Item {
     function abrir(): void { root.atualizar(); painel.visible = true }
     function fechar(): void { painel.visible = false }
     function wifi(): void { root.atualizar(); painel.visible = true; root.mostrarRedes = true }
+    function bluetooth(): void { root.atualizar(); painel.visible = true; root.mostrarBt = true }
   }
 
   // ── a central ────────────────────────────────────────────────────────────
@@ -294,7 +327,7 @@ Item {
     anchor.rect.y: root.vertical ? root.height - implicitHeight : (root.bar && root.bar.position === "bottom" ? -implicitHeight - 6 : root.height + 6)
 
     property bool grabPronto: false
-    onVisibleChanged: { grabPronto = false; if (!visible) { mostrarSaidas = false; mostrarRedes = false; redeAberta = ""; menuRede = null } if (visible) ativarGrab.restart() }
+    onVisibleChanged: { grabPronto = false; if (!visible) { mostrarSaidas = false; mostrarRedes = false; mostrarBt = false; redeAberta = ""; menuRede = null } if (visible) ativarGrab.restart() }
     Timer { id: ativarGrab; interval: 60; onTriggered: painel.grabPronto = painel.visible }
     HyprlandFocusGrab { active: painel.grabPronto; windows: [painel]; onCleared: painel.visible = false }
 
@@ -455,8 +488,10 @@ Item {
               Behavior on color { ColorAnimation { duration: 140 } }
               Behavior on scale { NumberAnimation { duration: 90 } }
               readonly property color cor: modelData.on ? root.sobreRealce : root.texto
+              readonly property bool temSeta: modelData.id === "wifi" || modelData.id === "bluetooth"
+              readonly property bool setaAberta: modelData.id === "wifi" ? root.mostrarRedes : root.mostrarBt
               Column {
-                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 10; rightMargin: bloco.modelData.id === "wifi" ? 30 : 8 }
+                anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 10; rightMargin: bloco.temSeta ? 30 : 8 }
                 spacing: 2
                 Text { text: bloco.modelData.g; color: bloco.cor; font.family: root.fonte; font.pixelSize: 19 }
                 Text { width: parent.width; text: bloco.modelData.t; color: bloco.cor; font.pixelSize: 12; font.weight: Font.DemiBold; elide: Text.ElideRight }
@@ -482,9 +517,9 @@ Item {
                   r.st = Object.assign({}, r.st, o)   // responde na hora; o estado real vem logo depois
                 }
               }
-              // seta: abre a lista de redes aqui mesmo (só no Wi-Fi)
+              // seta: abre a lista de redes / dispositivos aqui mesmo (Wi-Fi e Bluetooth)
               Rectangle {
-                visible: bloco.modelData.id === "wifi"
+                visible: bloco.temSeta
                 anchors { right: parent.right; top: parent.top; bottom: parent.bottom; margins: 4 }
                 width: 24; radius: 9
                 color: ms2.containsMouse ? root.alfa(bloco.cor, 0.16) : "transparent"
@@ -497,15 +532,16 @@ Item {
                 }
                 Text {
                   anchors.centerIn: parent
-                  text: root.mostrarRedes ? "\u{F0140}" : "\u{F0142}"
+                  text: bloco.setaAberta ? "\u{F0140}" : "\u{F0142}"
                   color: bloco.cor; font.family: root.fonte; font.pixelSize: 15
                 }
                 MouseArea {
                   id: ms2
                   anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                   onClicked: {
-                    root.mostrarRedes = !root.mostrarRedes
-                    if (root.mostrarRedes) root.mostrarSaidas = false
+                    if (bloco.modelData.id === "wifi") root.mostrarRedes = !root.mostrarRedes
+                    else root.mostrarBt = !root.mostrarBt
+                    if (root.mostrarRedes || root.mostrarBt) root.mostrarSaidas = false
                     root.redeAberta = ""
                   }
                 }
@@ -606,7 +642,7 @@ Item {
           onMudou: function(v) { root.travarVol(); root.st = Object.assign({}, root.st, { volume: v, mudo: false }); if (!aplicaVol.running) aplicaVol.start() }
           onSoltou: somVol.restart()
           onClicouGlifo: { root.travarVol(); root.acao(["mudo"]); root.st = Object.assign({}, root.st, { mudo: !root.st.mudo }) }
-          onClicouDireita: { root.mostrarSaidas = !root.mostrarSaidas; if (root.mostrarSaidas) root.mostrarRedes = false }
+          onClicouDireita: { root.mostrarSaidas = !root.mostrarSaidas; if (root.mostrarSaidas) { root.mostrarRedes = false; root.mostrarBt = false } }
         }
 
         // seletor de saída e entrada de áudio (fone, microfone, bluetooth, alto-falante)
@@ -867,7 +903,7 @@ Item {
       // ── página do Wi-Fi (seta do botão do Wi-Fi), como no Windows 11: ocupa a central toda ──
       Column {
         id: paginaRedes
-        visible: root.fase > 0
+        visible: root.fase > 0 && root.pagina === "wifi"
         opacity: root.fase
         transform: Translate { x: 28 * (1 - root.fase) }
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
@@ -1056,6 +1092,130 @@ Item {
           MouseArea {
             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
             onClicked: { painel.visible = false; Quickshell.execDetached(["/usr/bin/configuracoes", "rede"]) }
+          }
+        }
+      }
+
+      // ── página do Bluetooth (seta do botão do Bluetooth), igual à do Wi-Fi ──
+      Column {
+        id: paginaBt
+        visible: root.fase > 0 && root.pagina === "bt"
+        opacity: root.fase
+        transform: Translate { x: 28 * (1 - root.fase) }
+        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
+        height: caixa.implicitHeight
+        spacing: 10
+        Item {
+          id: topoBt
+          width: parent.width; height: 36
+          Rectangle {
+            id: voltarBt
+            anchors.verticalCenter: parent.verticalCenter
+            width: 32; height: 32; radius: 16
+            color: mVoltarBt.containsMouse ? root.alfa(root.texto, 0.10) : "transparent"
+            Text { anchors.centerIn: parent; text: "\u{F0141}"; color: root.texto; font.family: root.fonte; font.pixelSize: 20 }
+            MouseArea { id: mVoltarBt; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: root.mostrarBt = false }
+          }
+          Text {
+            anchors { left: voltarBt.right; leftMargin: 8; verticalCenter: parent.verticalCenter }
+            text: I18n.t("Bluetooth"); color: root.texto; font.pixelSize: 15; font.weight: Font.DemiBold
+          }
+          Rectangle {
+            anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
+            width: 42; height: 22; radius: 11
+            color: root.st.bluetooth ? root.realce : root.alfa(root.texto, 0.18)
+            Behavior on color { ColorAnimation { duration: 140 } }
+            Rectangle {
+              anchors.verticalCenter: parent.verticalCenter
+              x: root.st.bluetooth ? parent.width - width - 3 : 3
+              width: 16; height: 16; radius: 8
+              color: root.st.bluetooth ? root.sobreRealce : root.texto
+              Behavior on x { NumberAnimation { duration: 140 } }
+            }
+            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.btAlternar() }
+          }
+        }
+        Rectangle { width: parent.width; height: 1; color: root.alfa(root.texto, 0.10) }
+        Text {
+          id: avisoBt
+          visible: !root.btAd || !root.btLigado || root.btDisps.length === 0
+          width: parent.width; wrapMode: Text.WordWrap
+          text: !root.btAd ? I18n.t("Nenhum adaptador Bluetooth encontrado.")
+                : !root.btLigado ? I18n.t("O Bluetooth está desligado.")
+                : I18n.t("Procurando dispositivos… Deixe o aparelho em modo de pareamento.")
+          color: root.texto; opacity: 0.7; font.pixelSize: 12; topPadding: 8; bottomPadding: 8; leftPadding: 4
+        }
+        Flickable {
+          visible: root.btLigado && root.btDisps.length > 0
+          width: parent.width
+          height: Math.max(80, paginaBt.height - topoBt.height - (avisoBt.visible ? avisoBt.implicitHeight : 0) - 26 - 6 * paginaBt.spacing)
+          contentHeight: listaBt.implicitHeight
+          clip: true; boundsBehavior: Flickable.StopAtBounds
+          Column {
+            id: listaBt
+            width: parent.width
+            spacing: 2
+            Repeater {
+              model: root.btDisps
+              delegate: Rectangle {
+                id: linhaBt
+                required property var modelData
+                readonly property bool ocupado: root.btOcupado(modelData)
+                width: listaBt.width; height: 44
+                radius: 8
+                color: modelData.connected ? root.alfa(root.realce, 0.18) : (mb.containsMouse ? root.alfa(root.texto, 0.08) : "transparent")
+                Row {
+                  anchors { left: parent.left; leftMargin: 10; right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+                  spacing: 10
+                  Text { anchors.verticalCenter: parent.verticalCenter; width: 18; text: root.glifoBt(linhaBt.modelData); color: linhaBt.modelData.connected ? root.realce : root.texto; font.family: root.fonte; font.pixelSize: 16 }
+                  Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 28 - (esquecer.visible ? 34 : 0)
+                    Text { width: parent.width; text: linhaBt.modelData.name || linhaBt.modelData.address; color: root.texto; font.pixelSize: 12; font.weight: linhaBt.modelData.connected ? Font.DemiBold : Font.Normal; elide: Text.ElideRight }
+                    Text {
+                      width: parent.width; color: root.texto; opacity: 0.6; font.pixelSize: 10; elide: Text.ElideRight
+                      text: linhaBt.modelData.pairing ? I18n.t("Pareando…")
+                            : linhaBt.modelData.state === BluetoothDeviceState.Connecting ? I18n.t("Conectando…")
+                            : linhaBt.modelData.state === BluetoothDeviceState.Disconnecting ? I18n.t("Desconectando…")
+                            : linhaBt.modelData.connected ? I18n.t("Conectado") + (linhaBt.modelData.batteryAvailable ? " · " + Math.round(linhaBt.modelData.battery * 100) + "%" : "")
+                            : linhaBt.modelData.paired ? I18n.t("Pareado · clique para conectar") : I18n.t("Disponível · clique para parear")
+                    }
+                  }
+                }
+                MouseArea {
+                  id: mb
+                  anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                  enabled: !linhaBt.ocupado
+                  onClicked: {
+                    var d = linhaBt.modelData
+                    if (d.connected) d.disconnect()
+                    else if (d.paired) d.connect()
+                    else { d.trusted = true; d.pair() }
+                  }
+                }
+                // esquecer (só pareados, aparece ao passar o mouse)
+                Rectangle {
+                  id: esquecer
+                  visible: linhaBt.modelData.paired && (mb.containsMouse || me.containsMouse) && !linhaBt.ocupado
+                  anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+                  width: 28; height: 28; radius: 14
+                  color: me.containsMouse ? root.alfa(root.texto, 0.12) : "transparent"
+                  Text { anchors.centerIn: parent; text: "\u{F01B4}"; color: root.texto; opacity: 0.7; font.family: root.fonte; font.pixelSize: 14 }
+                  MouseArea { id: me; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: linhaBt.modelData.forget() }
+                }
+              }
+            }
+          }
+        }
+        Rectangle { width: parent.width; height: 1; color: root.alfa(root.texto, 0.10) }
+        Text {
+          text: I18n.t("Mais configurações de Bluetooth")
+          color: root.realce; font.pixelSize: 12; font.weight: Font.DemiBold
+          topPadding: 2; bottomPadding: 4; leftPadding: 4
+          MouseArea {
+            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+            onClicked: { painel.visible = false; Quickshell.execDetached(["/usr/bin/configuracoes", "bluetooth"]) }
           }
         }
       }

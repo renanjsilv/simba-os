@@ -594,6 +594,56 @@ class HistoricoMixin:
         self._scroll_para_fim(forcar=True)
         self.text_input.grab_focus()
 
+    # ── contexto ao trocar de agente (modo Automático) ───────────────────────
+    # Cada agente retoma a PRÓPRIA sessão, que para na última vez em que ele respondeu: se outro
+    # fabricante falou depois, ele não sabia e respondia com informação velha. Agora ele recebe
+    # o que aconteceu desde então.
+    def _ultima_resposta_de(self, agente):
+        ultimo = -1
+        for i, m in enumerate(self.conversa_mensagens):
+            if m.get("tipo") == "assistant" and m.get("agente") == agente and str(m.get("texto", "")).strip():
+                ultimo = i
+        return ultimo
+
+    def _foi_o_ultimo_a_responder(self, agente):
+        for m in reversed(self.conversa_mensagens):
+            if m.get("tipo") == "assistant" and str(m.get("texto", "")).strip():
+                return m.get("agente") == agente
+        return False
+
+    @staticmethod
+    def _linhas_conversa(mensagens):
+        linhas = []
+        for msg in mensagens:
+            tipo = msg.get("tipo")
+            texto = str(msg.get("texto", "")).strip()
+            if not texto:
+                continue
+            if tipo == "user":
+                linhas.append(f"Usuário: {texto[:2000]}")
+            elif tipo == "assistant":
+                nome = M.AGENTES.get(msg.get("agente", ""), {}).get("nome", msg.get("agente", "IA"))
+                linhas.append(f"{nome}: {texto[:2000]}")
+        if linhas and linhas[-1].startswith("Usuário:"):
+            linhas.pop()   # é o pedido que está sendo enviado agora
+        return linhas
+
+    def _pedido_com_novidades(self, agente, pedido):
+        """Sessão retomada: junta ao pedido o que a conversa ganhou desde a última resposta dele."""
+        ultimo = self._ultima_resposta_de(agente)
+        linhas = self._linhas_conversa(self.conversa_mensagens[ultimo + 1:])
+        if not linhas:
+            return pedido
+        contexto = "\n\n".join(linhas)
+        if len(contexto) > 12000:
+            contexto = "…\n" + contexto[-12000:]
+        return (
+            "Desde a sua última resposta, esta conversa continuou com outro agente de IA. "
+            "Estas mensagens são MAIS RECENTES do que o que você lembra: leve-as em conta antes de "
+            "responder e prefira as informações delas às antigas.\n\n"
+            f"{contexto}\n\nNovo pedido do usuário:\n{pedido}"
+        )
+
     def _pedido_com_contexto(self, pedido):
         anteriores = []
         for msg in self.conversa_mensagens:

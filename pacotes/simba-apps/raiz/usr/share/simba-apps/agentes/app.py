@@ -1999,12 +1999,20 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
         info = M.AGENTES[agente]
         sessao = self.sessoes.get(agente) if info.get("retomar") else None
+        # sessão que não respondeu nada nesta conversa (veio de outra): começa do zero com o histórico
+        if sessao and self._ultima_resposta_de(agente) < 0:
+            sessao = None
+        # "continuar a última sessão" (agentes sem id) pode pegar a sessão de OUTRA conversa: só
+        # quando ele foi o último a responder aqui; senão começa do zero com o histórico completo
         continuar = (not sessao and not info.get("retomar") and agente in self.conversas_iniciadas
-                     and bool(info.get("continue")))
-        # Agente que ainda não participou desta conversa (ou cuja sessão não
-        # pôde ser retomada) recebe o histórico junto com o pedido.
-        if not agente_forcado and not sessao and not continuar:
-            pedido = self._pedido_com_contexto(pedido)
+                     and bool(info.get("continue")) and self._foi_o_ultimo_a_responder(agente))
+        if arq_passagem is None:
+            if sessao or continuar:
+                # retoma a sessão dele + o que os outros agentes disseram desde a última resposta dele
+                pedido = self._pedido_com_novidades(agente, pedido)
+            else:
+                # agente novo nesta conversa (inclusive escolhido à mão): recebe o histórico inteiro
+                pedido = self._pedido_com_contexto(pedido)
         # sessão nova de um agente: ele fica sabendo do navegador embutido
         if not sessao and not continuar:
             extras = []

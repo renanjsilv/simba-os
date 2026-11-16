@@ -217,6 +217,14 @@ testes = [
     ("Lixeira na área de trabalho", r.get("lixeira", False)),
     ("Limine liga direto (timeout 0)", r.get("limine_direto", False)),
     ("conta responde (desconectada)", r.get("conta_ok", False)),
+    ("OpenCode instalado (Agentes)", r.get("opencode", False)),
+    ("botões minimizar/maximizar nos apps GTK", r.get("botoes_gtk", False)),
+    ("ponto de fábrica (@factory) criado", r.get("fabrica", False)),
+    ("papel de parede entre máquinas (serviço)", r.get("fundo_sync", False)),
+    ("som ao mudar o volume", r.get("som_volume", False)),
+    ("extensão de papel de parede do Google Fotos", r.get("fotos", False)),
+    ("Central: página do Wi-Fi", r.get("central_wifi", False)),
+    ("assistente de restauração de fábrica", r.get("restauracao", False)),
 ]
 for nome, ok in testes:
     print(f"  {'✓' if ok else '✗'} {nome}")

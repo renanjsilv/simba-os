@@ -11,7 +11,7 @@ Pagina {
   titulo: I18n.t("Contas")
   subtitulo: I18n.t("Entre com o Google para guardar o sistema no Drive e trazer tudo de volta numa máquina formatada.")
 
-  property var s: null
+  property var s: Navegacao.contaStatus
   property string senhaCripto: ""
   property bool usarCripto: false
   property bool confirmarRestaurar: false
@@ -19,7 +19,7 @@ Pagina {
   property real tamanhoLocal: 0
   property int arquivosLocal: 0
 
-  function atualizar() { Sistema.json(["conta", "status"], function(v) { if (v) pg.s = v }) }
+  function atualizar() { Sistema.json(["conta", "status"], function(v) { if (v) { pg.s = v; Navegacao.contaStatus = v } }) }
   function medir() {
     Sistema.json(["conta", "tamanho"], function(v) { if (v) { pg.tamanhoLocal = v.tamanho; pg.arquivosLocal = v.arquivos } })
   }
@@ -172,17 +172,18 @@ Pagina {
           visible: !pg.conectado
           radius: 36
           color: Tema.superficieAlta
-          Glifo { anchors.centerIn: parent; g: Icones.account; tamanho: 36; color: Tema.texto2 }
+          Glifo { anchors.centerIn: parent; g: pg.s === null ? Icones.sync : Icones.account; tamanho: 36; color: Tema.texto2 }
         }
       }
       ColumnLayout {
         Layout.fillWidth: true
         spacing: 4
         Texto {
-          text: pg.conectado ? (pg.s.nome || I18n.t("Conta Google")) : I18n.t("Nenhuma conta conectada")
+          text: pg.s === null ? I18n.t("Carregando…") : (pg.conectado ? (pg.s.nome || I18n.t("Conta Google")) : I18n.t("Nenhuma conta conectada"))
           font.pixelSize: Tema.tTitulo || 20; font.weight: Font.DemiBold
         }
         Texto {
+          visible: pg.s !== null
           text: pg.conectado ? (pg.s.email || I18n.t("Google Drive")) + (pg.s.cripto ? I18n.t(" · backup criptografado") : "")
                              : I18n.t("Seu sistema não está sendo salvo em nenhum lugar.")
           color: Tema.texto2
@@ -258,7 +259,7 @@ Pagina {
   // O botão do Google vem primeiro e em destaque; a criptografia é uma opção abaixo dele.
   Rectangle {
     Layout.fillWidth: true
-    visible: !pg.conectado && !(pg.s && pg.s.boas_vindas)
+    visible: pg.s !== null && !pg.conectado && !(pg.s && pg.s.boas_vindas)
     implicitHeight: colEntrar.implicitHeight + 56
     radius: Tema.raioGrande
     gradient: Gradient {
@@ -298,9 +299,9 @@ Pagina {
       }
     }
   }
-  Secao { visible: !pg.conectado; titulo: I18n.t("Opções"); detalhe: I18n.t("Escolha antes de entrar.") }
+  Secao { visible: pg.s !== null && !pg.conectado; titulo: I18n.t("Opções"); detalhe: I18n.t("Escolha antes de entrar.") }
   Cartao {
-    visible: !pg.conectado
+    visible: pg.s !== null && !pg.conectado
     Linha {
       chave: "contaCripto"
       glifo: Icones.shield
@@ -540,7 +541,7 @@ Pagina {
       descricao: I18n.t("Para de fazer backup neste computador. Os dados no Drive continuam lá.")
       Botao { visible: !pg.confirmarSair; texto: I18n.t("Sair"); habilitado: !pg.ocupado; onClicado: pg.confirmarSair = true }
       Botao { visible: pg.confirmarSair; texto: I18n.t("Cancelar"); tipo: "fantasma"; onClicado: pg.confirmarSair = false }
-      Botao { visible: pg.confirmarSair; texto: I18n.t("Sair da conta"); tipo: "perigo"; onClicado: { pg.confirmarSair = false; Sistema.rodar(["conta", "sair"], function() { Navegacao.versaoFoto++; pg.atualizar() }) } }
+      Botao { visible: pg.confirmarSair; texto: I18n.t("Sair da conta"); tipo: "perigo"; onClicado: { pg.confirmarSair = false; Sistema.rodar(["conta", "sair"], function() { Navegacao.versaoFoto++; Navegacao.contaStatus = null; pg.atualizar() }) } }
     }
   }
 

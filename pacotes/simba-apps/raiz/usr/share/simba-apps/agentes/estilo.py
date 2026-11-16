@@ -480,8 +480,8 @@ CSS += """
 .pensando-icone { color: alpha(@window_fg_color, 0.55); }
 .pensando-seta { opacity: 0.6; transition: opacity 150ms ease; }
 .pensando-corpo {
-  margin: 4px 0 6px 11px;
-  padding: 2px 0 2px 16px;
+  margin: 4px 0 6px 6px;
+  padding: 2px 0 2px 10px;
   border-left: 2px solid alpha(@window_fg_color, 0.10);
 }
 .pensando-raciocinio-caixa { background: none; }
@@ -521,15 +521,20 @@ CSS += """
   border: 1px solid alpha(@window_fg_color, 0.10);
   background-color: alpha(@window_fg_color, 0.025);
   padding: 6px 8px 6px 6px;
+  overflow: hidden;
+}
+.passo-cartao scrolledwindow, .passo-saida scrolledwindow {
+  background: transparent;
+  border: none;
 }
 .passo-cartao .passo-icone { background-color: alpha(@accent_bg_color, 0.14); color: @simba_destaque; }
 .passo-cartao.erro { border-color: alpha(@error_color, 0.35); }
 .passo-cartao.erro .passo-icone { background-color: alpha(@error_color, 0.14); color: @error_color; }
 .passo-codigo {
   font-family: monospace;
-  font-size: 12.5px;
-  margin: 6px 0 2px 0;
-  padding: 9px 12px;
+  font-size: 12px;
+  margin: 4px 0 2px 0;
+  padding: 8px 10px;
   border-radius: 9px;
   background-color: alpha(@window_fg_color, 0.055);
 }
@@ -550,7 +555,7 @@ CSS += """
   margin-top: 4px;
   border-radius: 9px;
   background-color: alpha(#000, 0.80);
-  padding: 8px 12px;
+  padding: 6px 10px;
 }
 .passo-saida-texto { font-family: monospace; font-size: 12px; color: #e6e6e6; }
 

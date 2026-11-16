@@ -12,6 +12,7 @@ Singleton {
   property var identificar: null
   property var paginaAtual: null   // the Pagina (Flickable) on screen, for tests
   property int versaoFoto: 0       // bumps when ~/.face changes (conta foto) — Avatar reloads
+  property var contaStatus: null
   signal pedirJanela()
   // Short confirmation pill at the bottom of the window ("Tema aplicado").
   signal aviso(string texto, string glifo)

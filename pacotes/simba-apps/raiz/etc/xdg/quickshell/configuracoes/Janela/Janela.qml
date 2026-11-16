@@ -20,9 +20,10 @@ Scope {
     { id: "inicio", titulo: I18n.t("Início"), glifo: Icones.home, paginas: [
       { id: "inicio", titulo: I18n.t("Início"), glifo: Icones.home } ] },
     { separador: true },
-    // Mesma ordem da lateral do Windows 11: Sistema, Bluetooth e dispositivos,
-    // Rede e internet, Personalização, Aplicativos, Contas. Hora, idioma e
-    // atualizações ficam em Sistema › Sobre (é a mesma página).
+    { id: "g-contas", titulo: I18n.t("Contas"), glifo: Icones.accountCircle, paginas: [
+      { id: "contas", titulo: I18n.t("Contas"), aba: I18n.t("Sua conta"), glifo: Icones.accountCircle } ] },
+    // Sistema, Bluetooth e dispositivos, Rede e internet, Personalização, Aplicativos.
+    // Hora, idioma e atualizações ficam em Sistema › Sobre (é a mesma página).
     { id: "g-sistema", titulo: I18n.t("Sistema"), glifo: Icones.laptop, paginas: [
       { id: "tela", titulo: I18n.t("Tela"), glifo: Icones.monitor },
       { id: "som", titulo: I18n.t("Som"), glifo: Icones.volumeHigh },
@@ -48,9 +49,7 @@ Scope {
     { id: "g-apps", titulo: I18n.t("Aplicativos"), glifo: Icones.apps, paginas: [
       { id: "apps", titulo: I18n.t("Aplicativos padrão"), glifo: Icones.apps },
       { id: "wine", titulo: I18n.t("Compatibilidade Windows"), aba: I18n.t("Windows (.exe)"), glifo: Icones.gamepadVariant },
-      { id: "agentes", titulo: I18n.t("Agentes de IA"), glifo: Icones.robot } ] },
-    { id: "g-contas", titulo: I18n.t("Contas"), glifo: Icones.accountCircle, paginas: [
-      { id: "contas", titulo: I18n.t("Contas"), aba: I18n.t("Sua conta"), glifo: Icones.accountCircle } ] }
+      { id: "agentes", titulo: I18n.t("Agentes de IA"), glifo: Icones.robot } ] }
   ]
   // todas as páginas, na ordem dos grupos (busca, Ctrl+PgUp/PgDn)
   readonly property var paginas: {
@@ -104,7 +103,14 @@ Scope {
       else carregador.active = true
     }
   }
-  onAbertaChanged: Navegacao.janelaAberta = aberta
+  onAbertaChanged: {
+    Navegacao.janelaAberta = aberta
+    if (aberta && !Navegacao.contaStatus) {
+      Sistema.json(["conta", "status"], function(v) {
+        if (v) Navegacao.contaStatus = v
+      })
+    }
+  }
 
   LazyLoader {
     id: carregador

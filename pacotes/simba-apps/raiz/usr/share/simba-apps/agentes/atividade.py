@@ -118,6 +118,7 @@ _PREFIXOS = ("sudo", "env", "time", "nohup", "exec", "then", "do", "else", "if",
 def realce_shell(comando):
     """Comando de terminal → markup do Pango (nome do comando, opções, textos, operadores)."""
     cor = _paleta()
+    comando = (comando or "").expandtabs(2)
     saida, inicio = [], True
     for m in _SHELL.finditer(comando):
         tipo, tok = m.lastgroup, escape(m.group(0), quote=False)
@@ -155,6 +156,7 @@ def realce_diff(linhas):
     cor = _paleta()
     saida = []
     for l in linhas:
+        l = (l or "").expandtabs(2)
         tok = escape(l[1:] if l[:1] in "+- " else l, quote=False)
         if l.startswith("+"):
             saida.append(f'<span foreground="{cor["mais"]}">+ {tok}</span>')
@@ -624,7 +626,12 @@ class LinhaPasso(Gtk.Box):
             self.corpo.set_wrap_mode(Pango.WrapMode.CHAR)
             self.corpo.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
             _sem_hifen(self.corpo)
-            self.append(self.corpo)
+            rol_corpo = Gtk.ScrolledWindow()
+            rol_corpo.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+            rol_corpo.set_propagate_natural_height(True)
+            rol_corpo.set_hexpand(True)
+            rol_corpo.set_child(self.corpo)
+            self.append(rol_corpo)
             self.btn_diff = Gtk.Button()
             self.btn_diff.add_css_class("flat")
             self.btn_diff.add_css_class("passo-mais")
@@ -874,7 +881,7 @@ class LinhaPasso(Gtk.Box):
         self.repintar()
 
     def _preencher_saida(self):
-        saida = self.passo.get("saida") or ""
+        saida = (self.passo.get("saida") or "").expandtabs(2)
         linhas = saida.split("\n")
         resto = len(linhas) - PREVIA_SAIDA
         if self.saida_cheia or resto <= 3:
@@ -904,7 +911,7 @@ class LinhaPasso(Gtk.Box):
             self.saida_lbl.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
             _sem_hifen(self.saida_lbl)
             rolagem = Gtk.ScrolledWindow()
-            rolagem.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.NEVER)
+            rolagem.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
             rolagem.set_propagate_natural_height(True)
             rolagem.set_child(self.saida_lbl)
             caixa.append(rolagem)

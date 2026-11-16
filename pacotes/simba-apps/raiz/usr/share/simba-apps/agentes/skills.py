@@ -50,6 +50,125 @@ LIMITE_ARQUIVOS = 300
 LIMITE_BYTES = 30 * 1024 * 1024
 VALIDADE_CACHE = 6 * 3600
 
+# Idioma e tradução de skills para português
+sys.path.insert(0, "/usr/share/simba-apps/idiomas")
+try:
+    from simba_i18n import idioma as _simba_idioma
+except ImportError:
+    _simba_idioma = None
+
+_CACHE_TRAD = None
+
+
+def _idioma_sistema():
+    if _simba_idioma:
+        try:
+            return _simba_idioma()
+        except Exception:
+            pass
+    l = (os.environ.get("SIMBA_IDIOMA") or os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES")
+         or os.environ.get("LANG") or "pt_BR")
+    return l.split(".")[0].split("@")[0]
+
+
+def _deve_traduzir():
+    idm = _idioma_sistema()
+    return not idm or idm.startswith("pt")
+
+
+def _carregar_cache_trad():
+    global _CACHE_TRAD
+    if _CACHE_TRAD is not None:
+        return _CACHE_TRAD
+    arq = CACHE / "traducoes.json"
+    try:
+        if arq.exists():
+            _CACHE_TRAD = json.loads(arq.read_text("utf-8"))
+        else:
+            _CACHE_TRAD = {}
+    except Exception:
+        _CACHE_TRAD = {}
+    return _CACHE_TRAD
+
+
+def _salvar_cache_trad():
+    if _CACHE_TRAD is None:
+        return
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        (CACHE / "traducoes.json").write_text(json.dumps(_CACHE_TRAD, ensure_ascii=False), "utf-8")
+    except Exception:
+        pass
+
+
+def traduzir_textos(textos, tl="pt"):
+    """Traduz uma lista de textos para tl (padrão pt). Retorna na mesma ordem."""
+    if not textos or tl == "en":
+        return list(textos)
+    cache = _carregar_cache_trad()
+    resultado = list(textos)
+    para_buscar = []
+    indices = []
+    for i, t in enumerate(textos):
+        t_limpo = (t or "").strip()
+        if not t_limpo:
+            continue
+        k = f"{tl}:{t_limpo}"
+        if k in cache:
+            resultado[i] = cache[k]
+        else:
+            para_buscar.append(t_limpo)
+            indices.append((i, k))
+    if not para_buscar:
+        return resultado
+
+    mudou = False
+    for chunk_start in range(0, len(para_buscar), 25):
+        chunk_textos = para_buscar[chunk_start:chunk_start + 25]
+        chunk_indices = indices[chunk_start:chunk_start + 25]
+        try:
+            dados = urllib.parse.urlencode([("q", txt) for txt in chunk_textos]).encode()
+            req = urllib.request.Request(
+                f"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl={tl}",
+                data=dados,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=12) as r:
+                res = json.loads(r.read())
+            for (idx, k), item in zip(chunk_indices, res):
+                trad = item[0] if isinstance(item, list) else item
+                if trad and isinstance(trad, str):
+                    resultado[idx] = trad
+                    cache[k] = trad
+                    mudou = True
+        except Exception:
+            pass
+    if mudou:
+        _salvar_cache_trad()
+    return resultado
+
+
+def traduzir_skills(skills):
+    if not _deve_traduzir() or not skills:
+        return skills
+    descs = [s.get("descricao", "") for s in skills]
+    trads = traduzir_textos(descs, "pt")
+    for s, t in zip(skills, trads):
+        if t:
+            s["descricao"] = t
+    return skills
+
+
+def traduzir_repos(repos):
+    if not _deve_traduzir() or not repos:
+        return repos
+    descs = [r.get("descricao", "") for r in repos]
+    trads = traduzir_textos(descs, "pt")
+    for r, t in zip(repos, trads):
+        if t:
+            r["descricao"] = t
+    return repos
+
 
 class Erro(Exception):
     pass
@@ -159,7 +278,8 @@ def skills_do_repo(repo):
                     "ref": ref, "sha": shas.get(p, ""), "estrelas": info.get("stargazers_count", 0)}
         with concurrent.futures.ThreadPoolExecutor(8) as ex:
             return sorted(ex.map(ler, pastas), key=lambda s: s["nome"].lower())
-    return _cache("repo-" + repo, montar)
+    res = _cache("repo-" + repo, montar)
+    return traduzir_skills([dict(s) for s in res])
 
 
 def em_alta():
@@ -191,7 +311,8 @@ def em_alta():
                 except Erro:
                     pass
         return lista
-    return _cache("em-alta", montar)
+    res = _cache("em-alta", montar)
+    return traduzir_repos([dict(c) for c in res])
 
 
 def buscar(texto):
@@ -199,12 +320,27 @@ def buscar(texto):
     texto = texto.strip()
     if not texto:
         return []
+
+    # Se o texto estiver em português, traduz também para o inglês para buscar no GitHub
+    texto_en = texto
+    if _deve_traduzir() and not re.match(r"^[\w\-]+/[\w\-]+$", texto):
+        try:
+            t_en = traduzir_textos([texto], tl="en")[0]
+            if t_en and t_en.strip():
+                texto_en = t_en.strip()
+        except Exception:
+            texto_en = texto
+
     achadas, vistos = [], set()
     # 1º as coleções conhecidas (oficiais): é onde estão as skills boas e mantidas
-    termos = [t for t in re.split(r"\s+", texto.lower()) if t]
+    termos_pt = [t for t in re.split(r"\s+", texto.lower()) if t]
+    termos_en = [t for t in re.split(r"\s+", texto_en.lower()) if t]
+    todos_termos = list(dict.fromkeys(termos_pt + termos_en))
+
     def casa(sk):
         alvo = (sk["nome"] + " " + sk.get("descricao", "")).lower()
-        return all(t in alvo for t in termos)
+        return any(t in alvo for t in todos_termos)
+
     def do_destaque(repo):
         try:
             return [sk for sk in skills_do_repo(repo) if casa(sk)]
@@ -221,7 +357,8 @@ def buscar(texto):
     oficiais = len(achadas)
     if _token_github():
         try:
-            r = _api("search/code", q=f"{texto} filename:SKILL.md", per_page="30")
+            q_code = f"{texto_en} filename:SKILL.md" if texto_en != texto else f"{texto} filename:SKILL.md"
+            r = _api("search/code", q=q_code, per_page="30")
             itens = r.get("items", [])
 
             def ler(it):
@@ -258,13 +395,14 @@ def buscar(texto):
             pass
     repos = []
     try:
-        r = _api("search/repositories", q=f"{texto} skills in:name,description,topics", sort="stars", per_page="10")
+        q_repo = f"{texto_en} skills in:name,description,topics" if texto_en != texto else f"{texto} skills in:name,description,topics"
+        r = _api("search/repositories", q=q_repo, sort="stars", per_page="10")
         repos = [{"repo": it["full_name"], "estrelas": it["stargazers_count"],
                   "descricao": (it.get("description") or "")[:200]} for it in r.get("items", [])]
     except Erro:
         if not achadas:
             raise
-    return {"skills": achadas, "repos": repos}
+    return {"skills": traduzir_skills(achadas), "repos": traduzir_repos(repos)}
 
 
 # ── instalação ───────────────────────────────────────────────────────────────
@@ -370,7 +508,7 @@ def instaladas():
             continue
         agentes = [d for d, _ in DESTINOS if (HOME / d / nome).is_symlink()]
         out.append(dict(r, nome=nome, agentes=agentes))
-    return out
+    return traduzir_skills(out)
 
 
 def atualizar(silencioso=False):

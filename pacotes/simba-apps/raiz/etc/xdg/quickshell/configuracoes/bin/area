@@ -14,6 +14,7 @@
     area renomear <caminho> <novo nome>  rename, print the new path
     area lixeira <caminho>...            move to the trash (gio trash)
     area soltar <pasta> <uri>...         copy dropped files into the folder
+    area desinstalar <atalho.desktop>    uninstall the app behind a desktop shortcut (asks first)
 
 Every command prints one JSON object/array; errors are {"erro": "..."} with a
 non-zero exit. Clipboard formats are the ones Nautilus reads and writes:
@@ -422,6 +423,95 @@ def renomear(p, novo):
     saida({"ok": True, "caminho": destino})
 
 
+def desinstalar_atalho(caminho):
+    """Botão direito › Desinstalar num atalho de app da área de trabalho: descobre de onde o app
+    vem (o mesmo `iniciar origem` do Menu Iniciar), pergunta e remove; o atalho vai junto."""
+    iniciar = os.path.join(os.path.dirname(os.path.abspath(__file__)), "iniciar")
+    app_id = os.path.basename(caminho)
+    ent = configparser.ConfigParser(interpolation=None, strict=False)
+    try:
+        ent.read(caminho, encoding="utf-8")
+        nome = ent.get("Desktop Entry", "Name", fallback=app_id[:-8])
+    except (configparser.Error, OSError):
+        nome = app_id[:-8]
+    def origem(i):
+        try:
+            return json.loads(subprocess.run([iniciar, "origem", i], capture_output=True, text=True, timeout=60).stdout or "{}")
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return {}
+    o = origem(app_id)
+    if not o.get("tipo"):
+        # o atalho da área de trabalho pode ter outro nome (AnyDesk.desktop × anydesk.desktop):
+        # acha o app instalado com o mesmo comando ou o mesmo nome
+        exe = ent.get("Desktop Entry", "Exec", fallback="") if ent.has_section("Desktop Entry") else ""
+        # comando COMPLETO (sem %u/%f…): só o programa não basta — um jogo aberto pelo Hydra
+        # tem o mesmo programa do launcher e desinstalaria o launcher inteiro
+        def cmd(e):
+            return " ".join(x for x in e.replace('"', "").split() if not (len(x) == 2 and x.startswith("%")))
+        prog = cmd(exe)
+        dirs = [os.path.expanduser("~/.local/share/applications"), "/usr/share/applications",
+                os.path.expanduser("~/.local/share/flatpak/exports/share/applications"), "/var/lib/flatpak/exports/share/applications"]
+        achado = ""
+        for d in dirs:
+            if achado or not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                if not f.endswith(".desktop"):
+                    continue
+                c = configparser.ConfigParser(interpolation=None, strict=False)
+                try:
+                    c.read(os.path.join(d, f), encoding="utf-8")
+                    e2 = c.get("Desktop Entry", "Exec", fallback="")
+                    n2 = c.get("Desktop Entry", "Name", fallback="")
+                except (configparser.Error, OSError):
+                    continue
+                if (prog and cmd(e2) == prog) or (n2 and n2 == nome):
+                    achado = f
+                    break
+        if achado:
+            app_id = achado
+            o = origem(app_id)
+        elif "steam://rungameid/" in exe:
+            # jogo da Steam que só tem o atalho na área de trabalho: quem desinstala é a Steam
+            jogo = exe.split("steam://rungameid/")[1].split()[0].strip('"')
+            if subprocess.run(["zenity", "--question", "--title=Desinstalar " + nome, "--ok-label=Abrir a Steam",
+                               "--cancel-label=Cancelar", "--width=380",
+                               "--text=A Steam vai abrir para confirmar a desinstalação do jogo “%s”." % nome]).returncode == 0:
+                subprocess.Popen(["steam", "steam://uninstall/" + jogo], start_new_session=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return {"ok": True}
+        else:
+            # app que não está instalado no sistema (jogo do Hydra, atalho avulso): só o atalho sai
+            if subprocess.run(["zenity", "--question", "--title=Remover " + nome, "--ok-label=Remover o atalho",
+                               "--cancel-label=Cancelar", "--width=400",
+                               "--text=“%s” não é um programa instalado no sistema (pode ser um jogo de um launcher, "
+                               "como Hydra ou Heroic — desinstale-o por lá).\n\nRemover só o atalho da área de trabalho?" % nome]).returncode == 0:
+                subprocess.run(["gio", "trash", caminho], capture_output=True)
+            return {"ok": True}
+    def avisar(titulo, corpo):
+        subprocess.run(["notify-send", "-a", "Simba OS", titulo, corpo])
+    if not o.get("tipo") or o.get("motivo"):
+        avisar("Não dá para desinstalar " + nome, o.get("motivo") or "Não consegui descobrir de onde vem este app.")
+        return {"erro": o.get("motivo", "origem desconhecida")}
+    explica = {
+        "pacman": "O programa “%s” (pacote %s) será removido do computador." % (nome, o.get("pacote", "")),
+        "flatpak": "O aplicativo “%s” (Flatpak) será removido do computador." % nome,
+        "webapp": "O web app “%s” será removido." % nome,
+        "steam": "A Steam vai abrir para confirmar a desinstalação do jogo “%s”." % nome,
+        "atalho": "O atalho “%s” vai para a Lixeira." % nome,
+    }.get(o["tipo"], "“%s” será removido." % nome)
+    if o.get("aviso"):
+        explica += "\n\nAtenção: " + o["aviso"]
+    r = subprocess.run(["zenity", "--question", "--title=Desinstalar " + nome, "--icon=edit-delete",
+                        "--ok-label=Desinstalar", "--cancel-label=Cancelar", "--width=380", "--text=" + explica])
+    if r.returncode != 0:
+        return {"cancelado": True}
+    rc = subprocess.run([iniciar, "desinstalar", app_id]).returncode
+    if rc == 0 and o["tipo"] != "steam" and os.path.exists(caminho):
+        subprocess.run(["gio", "trash", caminho], capture_output=True)
+    return {"ok": rc == 0}
+
+
 def main():
     a = sys.argv[1:]
     if not a:
@@ -471,6 +561,8 @@ def main():
             if falhas:
                 erro("; ".join(falhas))
             saida({"ok": True, "n": len(resto)})
+        elif cmd == "desinstalar":
+            print(json.dumps(desinstalar_atalho(a[1]), ensure_ascii=False))
         elif cmd == "soltar":
             pasta, uris = resto[0], resto[1:]
             criados = []

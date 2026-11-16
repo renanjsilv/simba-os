@@ -46,15 +46,18 @@ Scope {
       C.TextField {
         id: campo
         x: Math.max(4, Math.min(w.g.x + w.g.w / 2 - width / 2, w.width - width - 4))
-        y: w.g.y + r.area.celula.i + 8
-        width: Math.max(w.g.w + 40, Math.min(320, contentWidth + 28))
-        height: 30
+        y: w.g.y + r.area.celula.i + 10
+        // mesmo tamanho de letra do nome do ícone (antes 12 px fixos, caixa alta e larga demais)
+        readonly property int letra: r.area.celula.i >= 64 ? 13 : (r.area.celula.i <= 32 ? 11 : 12)
+        width: Math.max(w.g.w, Math.min(260, contentWidth + 16))
+        height: letra + 12
+        topPadding: 2; bottomPadding: 2; leftPadding: 6; rightPadding: 6
         text: r.item.nome
         color: Tema.texto
         selectionColor: Tema.alfa(Tema.realce, 0.45)
         selectedTextColor: Tema.texto
         font.family: Tema.fonte
-        font.pixelSize: 12
+        font.pixelSize: letra
         horizontalAlignment: TextInput.AlignHCenter
         background: Rectangle {
           radius: Math.max(4, Tema.raioPequeno)

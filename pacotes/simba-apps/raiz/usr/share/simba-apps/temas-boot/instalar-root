@@ -7,7 +7,7 @@ PATH=/usr/bin:/bin
 umask 022
 padrao=${1:?tema}
 case $padrao in
-  simba|simba-escuro|simba-claro|simba-vidro|simba-bloom|simba-aurora) ;;
+  simba|simba-escuro|simba-claro|simba-vidro|simba-bloom|simba-aurora|simba-papel) ;;
   *) echo "tema inválido: $padrao" >&2; exit 2 ;;
 esac
 tmp=$(mktemp -d /var/tmp/temas-boot.XXXXXX)   # 0700, dono root
@@ -16,7 +16,7 @@ tar -xf - -C "$tmp" --no-same-owner --no-same-permissions --no-overwrite-dir
 if [[ -n $(find "$tmp" -mindepth 1 ! -type f ! -type d -print -quit) ]]; then
   echo "o pacote de temas contém links ou arquivos especiais" >&2; exit 3
 fi
-for n in simba-escuro simba-claro simba-vidro simba-bloom simba-aurora; do
+for n in simba-escuro simba-claro simba-vidro simba-bloom simba-aurora simba-papel; do
   src="$tmp/$n"
   [[ -d $src ]] || continue
   novo="/usr/share/plymouth/themes/.tmp-$n"

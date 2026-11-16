@@ -32,6 +32,9 @@ Item {
                       saidas_audio: [], entradas_audio: [] })
   property bool mostrarSaidas: false
   property bool mostrarRedes: false
+  // 0 = central, 1 = página do Wi-Fi; anima a troca (desliza + esmaece, como no Windows 11)
+  property real fase: mostrarRedes ? 1 : 0
+  Behavior on fase { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
   // ── redes Wi-Fi dentro da central (seta no botão do Wi-Fi, como no Windows 11) ──
   readonly property var wifiDev: {
@@ -285,7 +288,7 @@ Item {
     visible: false
     color: "transparent"
     implicitWidth: 372
-    implicitHeight: (root.mostrarRedes ? paginaRedes.implicitHeight : caixa.implicitHeight) + 8 * 2 + 14 * 2   // margem da moldura (8) + do conteúdo (14), em cima e embaixo
+    implicitHeight: caixa.implicitHeight + 8 * 2 + 14 * 2   // margem da moldura (8) + do conteúdo (14), em cima e embaixo
     anchor.item: root
     anchor.rect.x: root.vertical ? (root.bar && root.bar.position === "right" ? -implicitWidth - 6 : root.width + 6) : root.width - implicitWidth + 4
     anchor.rect.y: root.vertical ? root.height - implicitHeight : (root.bar && root.bar.position === "bottom" ? -implicitHeight - 6 : root.height + 6)
@@ -307,7 +310,9 @@ Item {
 
       Column {
         id: caixa
-        visible: !root.mostrarRedes
+        visible: root.fase < 1
+        opacity: 1 - root.fase
+        transform: Translate { x: -28 * root.fase }
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
         spacing: 14
 
@@ -862,10 +867,14 @@ Item {
       // ── página do Wi-Fi (seta do botão do Wi-Fi), como no Windows 11: ocupa a central toda ──
       Column {
         id: paginaRedes
-        visible: root.mostrarRedes
+        visible: root.fase > 0
+        opacity: root.fase
+        transform: Translate { x: 28 * (1 - root.fase) }
         anchors { left: parent.left; right: parent.right; top: parent.top; margins: 14 }
+        height: caixa.implicitHeight      // mesma altura da central: a lista rola por dentro
         spacing: 10
         Item {
+          id: topoRedes
           width: parent.width; height: 36
           Rectangle {
             id: voltarRedes
@@ -901,7 +910,9 @@ Item {
         }
         Rectangle { width: parent.width; height: 1; color: root.alfa(root.texto, 0.10) }
         Text {
+          id: avisoRedes
           visible: !root.st.wifi || root.redes.length === 0
+          height: visible ? implicitHeight : 0
           width: parent.width; wrapMode: Text.WordWrap
           text: !root.st.wifi ? I18n.t("O Wi-Fi está desligado.") : I18n.t("Procurando redes…")
           color: root.texto; opacity: 0.7; font.pixelSize: 12; topPadding: 8; bottomPadding: 8; leftPadding: 4
@@ -909,7 +920,7 @@ Item {
             Flickable {
               visible: root.st.wifi && root.redes.length > 0
               width: parent.width
-              height: Math.min(contentHeight, 420)
+              height: Math.max(80, paginaRedes.height - topoRedes.height - avisoRedes.height - 26 - 6 * paginaRedes.spacing)
               contentHeight: listaRedes.implicitHeight
               clip: true; boundsBehavior: Flickable.StopAtBounds
               Column {

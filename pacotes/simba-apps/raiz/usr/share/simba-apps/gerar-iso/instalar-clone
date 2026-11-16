@@ -58,7 +58,11 @@ paleta() {
     # fonte nova = mais larga que a padrão (8 px): cabem menos colunas que largura/8
     [ "$ok" = 1 ] && [ "$COLS" -lt $(( larg / 8 )) ] && break
     [ -e /sys/class/graphics/fb0 ] || break      # sem framebuffer: fica a fonte padrão
-    ok=0; printf '\e[2J' ; sleep 0.5
+    # esperando o console de vídeo: mostra o andamento em vez de uma tela preta parada
+    ok=0; medir
+    printf '\e[2J\e[%d;1H%*s\n\e[2m%*s\e[0m' $(( LINES_ / 2 )) $(( (COLS + 34) / 2 )) "Preparando o instalador…  $(( i / 2 )) s" \
+      $(( (COLS + 40) / 2 )) "Preparing the installer… (até 30 s)"
+    sleep 0.5
   done
   printf '\e[?25l\e[0;37;40m\e[2J\e[H'
 }

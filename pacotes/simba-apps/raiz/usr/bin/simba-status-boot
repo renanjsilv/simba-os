@@ -1,0 +1,38 @@
+#!/bin/bash
+# simba-status-boot — escreve na tela de inicialização (Plymouth) o que o sistema está fazendo,
+# para ninguém achar que travou: "Verificando o disco", "Carregando os drivers de vídeo"…
+# Depois de 15 s mostra também o tempo. Roda no sistema instalado e no pendrive de instalação;
+# sai sozinho quando o Plymouth fecha.
+command -v plymouth >/dev/null || exit 0
+for _ in $(seq 20); do plymouth --ping 2>/dev/null && break; sleep 0.5; done
+plymouth --ping 2>/dev/null || exit 0
+
+amigavel() {   # unidade do systemd → frase curta
+  case $1 in
+    systemd-fsck*|*.mount|systemd-remount-fs*|systemd-growfs*) echo "Verificando o disco" ;;
+    systemd-cryptsetup*|cryptsetup*) echo "Desbloqueando o disco" ;;
+    systemd-modules-load*|systemd-udev*|nvidia*|*-kmod*) echo "Carregando os drivers" ;;
+    NetworkManager-wait-online*|systemd-networkd-wait-online*|iwd*|NetworkManager*) echo "Conectando à rede" ;;
+    sddm*|display-manager*) echo "Abrindo a tela de entrada" ;;
+    instalador*) echo "Abrindo o instalador" ;;
+    limine*|snapper*|mkinitcpio*) echo "Atualizando a inicialização" ;;
+    ldconfig*|systemd-update-done*|systemd-hwdb*|systemd-journal-catalog*|systemd-firstboot*|simba-provision*|systemd-machine-id*)
+      echo "Preparando o primeiro uso (só na primeira vez)" ;;
+    systemd-tmpfiles*|systemd-sysusers*|systemd-journal*) echo "Organizando os arquivos do sistema" ;;
+    bluetooth*|cups*|avahi*) echo "Ligando os serviços" ;;
+    *) echo "" ;;
+  esac
+}
+
+ultimo=""; inicio=$SECONDS; frase="Iniciando o sistema"
+[ -e /run/archiso ] && frase="Preparando o instalador"
+while plymouth --ping 2>/dev/null && (( SECONDS - inicio < 900 )); do
+  job=$(systemctl list-jobs --no-legend 2>/dev/null | awk '$3=="start" && $4=="running" {print $2}' | head -3)
+  for j in $job; do f=$(amigavel "$j"); [ -n "$f" ] && { frase=$f; break; }; done
+  t=$(( SECONDS - inicio ))
+  texto="$frase…"
+  (( t >= 15 )) && texto="$frase…   ${t} s"
+  if [ "$texto" != "$ultimo" ]; then plymouth display-message --text="$texto" 2>/dev/null; ultimo=$texto; fi
+  sleep 1
+done
+exit 0

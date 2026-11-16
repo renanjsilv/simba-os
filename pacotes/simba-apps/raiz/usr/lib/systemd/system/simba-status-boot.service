@@ -1,0 +1,12 @@
+[Unit]
+Description=Simba: andamento da inicialização na tela do logo
+DefaultDependencies=no
+After=plymouth-start.service
+ConditionPathExists=/run/plymouth/pid
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/simba-status-boot
+
+[Install]
+WantedBy=sysinit.target

@@ -20,9 +20,9 @@ Scope {
     { id: "inicio", titulo: I18n.t("Início"), glifo: Icones.home, paginas: [
       { id: "inicio", titulo: I18n.t("Início"), glifo: Icones.home } ] },
     { separador: true },
-    { id: "g-contas", titulo: I18n.t("Contas"), glifo: Icones.accountCircle, paginas: [
-      { id: "contas", titulo: I18n.t("Contas"), aba: I18n.t("Sua conta"), glifo: Icones.accountCircle },
-      { id: "bloqueio", titulo: I18n.t("Bloqueio e inatividade"), glifo: Icones.lockClock } ] },
+    // Mesma ordem da lateral do Windows 11: Sistema, Bluetooth e dispositivos,
+    // Rede e internet, Personalização, Aplicativos, Contas. Hora, idioma e
+    // atualizações ficam em Sistema › Sobre (é a mesma página).
     { id: "g-sistema", titulo: I18n.t("Sistema"), glifo: Icones.laptop, paginas: [
       { id: "tela", titulo: I18n.t("Tela"), glifo: Icones.monitor },
       { id: "som", titulo: I18n.t("Som"), glifo: Icones.volumeHigh },
@@ -32,20 +32,25 @@ Scope {
       { id: "sistema", titulo: I18n.t("Sobre o sistema"), aba: I18n.t("Sobre"), glifo: Icones.informationOutline } ] },
     { id: "g-dispositivos", titulo: I18n.t("Bluetooth e dispositivos"), glifo: Icones.devices, paginas: [
       { id: "bluetooth", titulo: I18n.t("Bluetooth"), glifo: Icones.bluetooth },
+      { id: "impressoras", titulo: I18n.t("Impressoras e scanners"), aba: I18n.t("Impressoras"), glifo: Icones.printer },
       { id: "entrada", titulo: I18n.t("Teclado, mouse e touchpad"), aba: I18n.t("Teclado e mouse"), glifo: Icones.keyboard },
-      { id: "atalhos", titulo: I18n.t("Atalhos de teclado"), aba: I18n.t("Atalhos"), glifo: Icones.keyboardOutline },
-      { id: "impressoras", titulo: I18n.t("Impressoras e scanners"), aba: I18n.t("Impressoras"), glifo: Icones.printer } ] },
+      { id: "atalhos", titulo: I18n.t("Atalhos de teclado"), aba: I18n.t("Atalhos"), glifo: Icones.keyboardOutline } ] },
     { id: "g-rede", titulo: I18n.t("Rede e internet"), glifo: Icones.wifi, paginas: [
       { id: "rede", titulo: I18n.t("Rede e internet"), glifo: Icones.wifi } ] },
+    // Como no Windows 11, a tela de bloqueio (e a proteção de tela) mora em
+    // Personalização, logo depois do tema/fundo e antes da barra de tarefas.
     { id: "g-personalizacao", titulo: I18n.t("Personalização"), glifo: Icones.palette, paginas: [
       { id: "personalizacao", titulo: I18n.t("Tema e papel de parede"), aba: I18n.t("Tema e fundo"), glifo: Icones.palette },
+      { id: "bloqueio", titulo: I18n.t("Bloqueio e inatividade"), aba: I18n.t("Tela de bloqueio"), glifo: Icones.lockClock },
       { id: "barra", titulo: I18n.t("Barra"), glifo: Icones.dockTop },
       { id: "area", titulo: I18n.t("Área de trabalho"), glifo: Icones.viewGridOutline },
       { id: "janelas", titulo: I18n.t("Janelas e animações"), aba: I18n.t("Janelas"), glifo: Icones.dockWindow } ] },
     { id: "g-apps", titulo: I18n.t("Aplicativos"), glifo: Icones.apps, paginas: [
       { id: "apps", titulo: I18n.t("Aplicativos padrão"), glifo: Icones.apps },
       { id: "wine", titulo: I18n.t("Compatibilidade Windows"), aba: I18n.t("Windows (.exe)"), glifo: Icones.gamepadVariant },
-      { id: "agentes", titulo: I18n.t("Agentes de IA"), glifo: Icones.robot } ] }
+      { id: "agentes", titulo: I18n.t("Agentes de IA"), glifo: Icones.robot } ] },
+    { id: "g-contas", titulo: I18n.t("Contas"), glifo: Icones.accountCircle, paginas: [
+      { id: "contas", titulo: I18n.t("Contas"), aba: I18n.t("Sua conta"), glifo: Icones.accountCircle } ] }
   ]
   // todas as páginas, na ordem dos grupos (busca, Ctrl+PgUp/PgDn)
   readonly property var paginas: {

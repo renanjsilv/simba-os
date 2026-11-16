@@ -182,7 +182,7 @@ var itens = [
   ["rede", "firewall", "Firewall", "Bloqueia conexões de entrada", "firewall seguranca ufw proteger bloquear"],
   // Sistema
   ["sistema", "sobre", "Sobre este computador", "Processador, memória, disco, sistema", "sobre hardware processador memoria ram disco versao especificacoes"],
-  ["sistema", "atualizar", "Atualizar o sistema", "", "atualizacao update pacotes"],
+  ["sistema", "atualizar", "Atualizar o sistema", "", "atualizacao atualizacoes update pacotes windows update"],
   ["sistema", "idioma", "Idioma do sistema", "", "idioma lingua portugues ingles locale"],
   ["sistema", "fuso", "Fuso horário", "", "fuso horario hora relogio timezone"],
   ["sistema", "limpar", "Liberar espaço", "Caches de apps, AUR e programação, lixeira e pacotes antigos", "limpar espaco disco cache lixeira liberar armazenamento cheio"],

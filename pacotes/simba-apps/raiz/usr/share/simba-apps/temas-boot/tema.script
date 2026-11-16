@@ -116,10 +116,14 @@ if (rotulo_modo != "") {
 
 msg.sprite = Sprite();
 msg.sprite.SetZ(20);
+# andamento (simba-status-boot): logo abaixo do anel, para ser visto — no rodapé ninguém lia
 fun mensagem(t) {
-  msg.img = texto(t, Math.Int(12 * escala + 0.5));
+  msg.img = texto(t, Math.Int(14 * escala + 0.5));
   msg.sprite.SetImage(msg.img);
-  msg.sprite.SetPosition(W / 2 - msg.img.GetWidth() / 2, H * 0.92, 20);
+  y = centro_anel + raio + 30 * escala;
+  if (rotulo_modo != "") y = centro_anel + raio + 62 * escala;
+  msg.sprite.SetPosition(W / 2 - msg.img.GetWidth() / 2, y, 20);
+  msg.sprite.SetOpacity(0.85);
 }
 Plymouth.SetMessageFunction(mensagem);
 

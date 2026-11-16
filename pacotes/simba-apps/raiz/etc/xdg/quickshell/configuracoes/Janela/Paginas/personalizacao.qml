@@ -111,9 +111,9 @@ Pagina {
     // Prévias: geradas uma vez; a "Vidro" sempre (usa o papel de parede atual).
     // Refaz a prévia se faltar ou se o modelo do tema mudou (no Clássico, o logo); a "Vidro" vem depois (é mais lenta).
     var gerar = I18n.t("d=\"$HOME/.cache/temas-boot\"; m=/usr/share/simba-apps/temas-boot/tema.script; mkdir -p \"$d\"; ")
-    Sistema.sh(gerar + "for i in $(tema-boot listar | cut -d'|' -f1); do [[ $i == simba-vidro ]] && continue; r=$m; [[ $i == simba ]] && r=/usr/share/plymouth/themes/simba/logo.png; [[ -f $d/$i.png && $d/$i.png -nt $r ]] || tema-boot previa $i \"$d/$i.png\"; done", function() {
+    Sistema.sh(gerar + "for i in $(tema-boot listar | cut -d'|' -f1); do [[ $i == simba-vidro || $i == simba-papel ]] && continue; r=$m; [[ $i == simba ]] && r=/usr/share/plymouth/themes/simba/logo.png; [[ -f $d/$i.png && $d/$i.png -nt $r ]] || tema-boot previa $i \"$d/$i.png\"; done", function() {
       pg.previasBoot++
-      Sistema.sh(gerar + "tema-boot previa simba-vidro \"$d/simba-vidro.png\"", function() { pg.previasBoot++ })
+      Sistema.sh(gerar + "tema-boot previa simba-vidro \"$d/simba-vidro.png\"; tema-boot previa simba-papel \"$d/simba-papel.png\"", function() { pg.previasBoot++ })
     })
   }
   function aplicarBoot(id, titulo) {

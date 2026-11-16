@@ -97,6 +97,11 @@ Scope {
     l.push({ id: "enviarLocalSend", rotulo: I18n.t("Enviar com LocalSend (celular e PC)"), glifo: Icones.cellphoneLink })
     l.push({ separador: true })
     l.push({ id: "propriedades", rotulo: I18n.t("Propriedades"), glifo: Icones.informationOutline, tecla: I18n.t("Alt+Enter"), habilitado: sel.length === 1 })
+    // atalho de app: desinstalar o app (pergunta antes; pacote, Flatpak, web app ou jogo da Steam)
+    if (it && it.atalho && sel.length === 1) {
+      l.push({ separador: true })
+      l.push({ id: "desinstalar", rotulo: I18n.t("Desinstalar"), glifo: Icones.deleteOutline })
+    }
     return l
   }
   readonly property var itens: tipo === "icone" ? itensIcone : itensArea
@@ -135,6 +140,7 @@ Scope {
     case "revelar": Sistema.solto(["uwsm-app", "--", "nautilus", "--new-window", "--select", a.selecao[0]]); break
     case "enviarLocalSend": if (a.selecao && a.selecao.length > 0) Sistema.solto(["localsend"].concat(a.selecao)); break
     case "propriedades": if (m.itemSel) a.propriedades(m.itemSel.caminho); break
+    case "desinstalar": if (m.itemSel) Sistema.solto([Sistema.bin + "/area", "desinstalar", m.itemSel.caminho]); break
     case "recortar": a.copiar(true); break
     case "copiar": a.copiar(false); break
     case "renomear": if (m.itemSel) a.renomear(m.itemSel.caminho); break

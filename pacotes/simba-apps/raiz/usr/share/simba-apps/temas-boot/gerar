@@ -4,6 +4,7 @@
 # Variantes: escuro | claro | vidro | bloom | aurora | marca
 #   marca usa MARCA_LOGO (PNG com o logo e o nome, ex.: Simba OS) e MARCA_NOME.
 #   vidro usa o papel de parede atual desfocado (gere de novo ao trocar o fundo).
+#   papel usa o papel de parede atual nítido — o mesmo fundo da tela de bloqueio.
 set -euo pipefail
 
 BASE="$(cd "$(dirname "$0")" && pwd)"
@@ -31,6 +32,8 @@ case $variante in
   bloom)  fundo='#030817' fundo2='#030817' texto='#ffffff' logo='#ffffff' ponto='#7cc8ff' campo_bg='#0b1630' campo_borda='#2f5fb8'
           imagem_fundo=1 ;;
   aurora) fundo='#eef3fb' fundo2='#eef3fb' texto='#14213d' logo='#14213d' ponto='#0067c0' campo_bg='#ffffffcc' campo_borda='#9db4d8'
+          imagem_fundo=1 ;;
+  papel)  fundo='#000000' fundo2='#000000' texto='#ffffff' logo='#ffffff' ponto='#ffffff' campo_bg='#000000aa' campo_borda='#ffffff66'
           imagem_fundo=1 ;;
   marca)  if [ "${MARCA_CLARO:-0}" = 1 ]; then
             fundo='#f4f4f2' fundo2='#f4f4f2' texto='#1b1b1b' logo='' ponto='#1b1b1b' campo_bg='#ffffff' campo_borda='#b5b5b2'
@@ -75,6 +78,16 @@ case $variante in
       \( -size 1040x200 gradient:'#ffffff22'-'#ffffff00' \) -gravity north -compose over -composite \
       -resize 520x380 -strip "PNG32:$saida/cartao.png"
     ;;
+  papel)
+    # o papel de parede da tela de bloqueio, nítido; escurecido de leve para o logo e o "carregando"
+    bg=$(readlink -f "$HOME/.local/state/simba/current/background" 2>/dev/null || true)
+    if [[ -f $bg ]]; then
+      magick "$bg" -resize "${L}x${A}^" -gravity center -extent "${L}x${A}" \
+        -fill '#000000' -colorize 22 -strip "PNG24:$saida/fundo.png"
+    else
+      magick -size "${L}x${A}" gradient:"#1d2b45"-"#0b0f18" -strip "PNG24:$saida/fundo.png"
+    fi
+    ;;
   bloom)
     magick -size 1600x900 xc:"$fundo" \
       \( -size 1500x1500 radial-gradient:'#1f6bffcc'-'#1f6bff00' \) -geometry +420-420 -compose screen -composite \
@@ -94,7 +107,7 @@ esac
 
 titulo=$(case $variante in escuro) echo "Simba — Escuro";; claro) echo "Simba — Claro";;
   vidro) echo "Simba — Vidro (transparente)";; bloom) echo "Simba — Bloom";; aurora) echo "Simba — Aurora (claro)";;
-  marca) echo "${MARCA_NOME:-Marca}";; esac)
+  papel) echo "Simba — Papel de parede";; marca) echo "${MARCA_NOME:-Marca}";; esac)
 
 cat >"$saida/$nome.plymouth" <<EOF
 [Plymouth Theme]

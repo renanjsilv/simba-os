@@ -12,6 +12,8 @@ if _G.simba_default_bindings ~= false then
   require("default.hypr.bindings.utilities")
   require("default.hypr.bindings.voxtype")
   require_optional.module("default.hypr.bindings.applications")
+  -- Ctrl + roda sobre a área de trabalho: ícones maiores/menores (ficou fora da lista e parou)
+  require_optional.module("default.hypr.bindings.area-de-trabalho")
 end
 require("default.hypr.envs")
 require("default.hypr.looknfeel")

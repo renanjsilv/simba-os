@@ -143,6 +143,23 @@ RestartSec=1
 [Install]
 WantedBy=multi-user.target
 EOF
+# andamento no logo enquanto o pendrive inicia ("Carregando os drivers…", "Abrindo o instalador…")
+if [ -x /usr/bin/simba-status-boot ]; then
+  install -Dm755 /usr/bin/simba-status-boot "$A/usr/local/bin/simba-status-boot"
+  install -Dm644 /dev/stdin "$A/etc/systemd/system/simba-status-boot.service" <<EOF2
+[Unit]
+Description=Andamento da inicialização na tela do logo
+DefaultDependencies=no
+After=plymouth-start.service
+ConditionPathExists=/run/plymouth/pid
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/simba-status-boot
+EOF2
+  mkdir -p "$A/etc/systemd/system/sysinit.target.wants"
+  ln -sf /etc/systemd/system/simba-status-boot.service "$A/etc/systemd/system/sysinit.target.wants/simba-status-boot.service"
+fi
 mkdir -p "$A/etc/systemd/system/multi-user.target.wants"
 ln -sf /etc/systemd/system/instalador.service "$A/etc/systemd/system/multi-user.target.wants/instalador.service"
 # sem o leitor de tela/áudio do live do Arch

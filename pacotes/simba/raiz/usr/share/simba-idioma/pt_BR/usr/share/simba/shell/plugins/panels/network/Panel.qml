@@ -943,7 +943,7 @@ Panel {
     onTriggered: {
       if (!root.actionKind) return
       var reason
-      if (root.actionKind === "connect") reason = "Tempo esgotado ao conectar"
+      if (root.actionKind === "connect") reason = "Sem resposta do roteador (senha pode estar certa)"
       else if (root.actionKind === "disconnect") reason = "Tempo esgotado ao desconectar"
       else reason = "Tempo esgotado ao esquecer"
       root.failureSsid = root.actionSsid

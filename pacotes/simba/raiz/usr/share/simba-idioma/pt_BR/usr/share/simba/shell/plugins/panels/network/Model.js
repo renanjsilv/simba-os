@@ -331,7 +331,7 @@ function networkFailureReason(reason, needsCredentials, reasons) {
   if (needsCredentials && reason === r.WifiAuthTimeout) return "Senha incorreta"
   if (reason === r.WifiNetworkLost) return "Rede perdida"
   if (reason === r.WifiClientDisconnected) return "Desconectado"
-  if (reason === r.WifiClientFailed) return "Falha na conexão"
+  if (reason === r.WifiClientFailed) return "Roteador recusou a conexão"
   return "Não foi possível conectar"
 }
 

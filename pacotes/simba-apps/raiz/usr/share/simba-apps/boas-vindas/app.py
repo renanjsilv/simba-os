@@ -377,8 +377,11 @@ class Janela(Adw.ApplicationWindow):
                            _t("Escolha a sua rede Wi-Fi. Com internet, o próximo passo já traz a sua conta Google."),
                            svg_wifi, caixa, tamanho=130)
 
-    def wifi_atualizar(self):
-        self.wifi_estado.set_label(_t("Procurando redes…"))
+    def wifi_atualizar(self, manter_aviso=False):
+        # manter_aviso: depois de uma falha a lista se atualiza, mas a mensagem de erro fica
+        # (antes era trocada por "Escolha a sua rede:" em 1,5 s e a pessoa nunca via o motivo)
+        if not manter_aviso:
+            self.wifi_estado.set_label(_t("Procurando redes…"))
 
         def ler():
             return internet_ok(), redes_wifi()
@@ -403,6 +406,8 @@ class Janela(Adw.ApplicationWindow):
             self.wifi_rolagem.set_visible(bool(redes))
             if ok:
                 self.wifi_estado.set_label(_t("✓  Você está conectado à internet. Pode seguir."))
+            elif manter_aviso:
+                pass
             elif not redes:
                 self.wifi_estado.set_label(_t("Nenhuma rede Wi-Fi encontrada. Use um cabo de rede ou procure de novo."))
             else:
@@ -430,17 +435,42 @@ class Janela(Adw.ApplicationWindow):
 
         def ligar():
             args = ["device", "wifi", "connect", ssid] + (["password", senha] if senha else [])
-            return nmcli(*args, timeout=45)
+            try:
+                r = nmcli(*args, timeout=45)
+            except subprocess.TimeoutExpired:
+                subprocess.run(["nmcli", "connection", "down", "id", ssid], capture_output=True, timeout=15)
+                return ("tempo", "")
+            if r.returncode != 0:
+                return ("erro", (r.stderr or "") + (r.stdout or ""))
+            # conectado: sem IPv4 não há internet (roteador que aceita a senha mas não entrega endereço)
+            for _ in range(8):
+                ip = subprocess.run(["ip", "-4", "-o", "addr", "show", "scope", "global"], capture_output=True, text=True)
+                if "inet " in ip.stdout:
+                    return ("ok", "")
+                time.sleep(1.5)
+            return ("sem-ip", "")
 
         def pronto(r):
-            if r is not None and r.returncode == 0:
+            tipo, erro = r if r else ("erro", "")
+            e = erro.lower()
+            if tipo == "ok":
                 self.toast(_t("Conectado a %1", ssid))
+            elif tipo == "sem-ip":
+                self.wifi_estado.set_label(_t("Conectado a %1, mas o roteador não entregou um endereço: sem internet. "
+                                              "Tente de novo; se repetir, reinicie o roteador.", ssid))
+            elif tipo == "tempo":
+                self.wifi_estado.set_label(_t("%1 não respondeu em 45 segundos. A senha pode estar certa, mas o roteador "
+                                              "não liberou a conexão. Tente de novo ou reinicie o roteador.", ssid))
+            elif "secrets" in e or "psk" in e or "password" in e or "senha" in e or "authentication" in e:
+                self.wifi_estado.set_label(_t("Senha incorreta. Confira (maiúsculas contam) e tente de novo."))
+            elif "no network with ssid" in e or "nenhuma rede" in e or "not found" in e:
+                self.wifi_estado.set_label(_t("%1 está fora de alcance. Chegue mais perto do roteador.", ssid))
+            elif "ip configuration" in e or "configuração ip" in e or "dhcp" in e:
+                self.wifi_estado.set_label(_t("A senha está certa, mas o roteador não entregou um endereço (DHCP). "
+                                              "Tente de novo; se repetir, reinicie o roteador."))
             else:
-                erro = (r.stderr if r is not None else "") or ""
-                self.wifi_estado.set_label(_t("Senha incorreta ou rede fora de alcance. Tente de novo.")
-                                           if "Secrets" in erro or "802-11" in erro or "senha" in erro.lower()
-                                           else _t("Não deu para conectar a %1. Tente de novo.", ssid))
-            GLib.timeout_add(1500, lambda: (self.wifi_atualizar(), False)[1])
+                self.wifi_estado.set_label(_t("Não deu para conectar a %1. Tente de novo.", ssid))
+            GLib.timeout_add(1500, lambda: (self.wifi_atualizar(manter_aviso=tipo != "ok"), False)[1])
         em_segundo_plano(ligar, pronto)
         return True
 

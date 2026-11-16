@@ -14,6 +14,53 @@ Pagina {
   property string dns: ""
   property string senhaPara: ""
 
+  // ── tentativa de conexão: nunca fica "carregando" sem resposta ──────────
+  // Antes o botão girava enquanto o NetworkManager tentava (pode ser para sempre: roteador que
+  // aceita a senha mas não entrega endereço) e uma falha não aparecia em lugar nenhum.
+  property string tentando: ""        // rede que esta página mandou conectar
+  property string avisoPara: ""       // rede com mensagem embaixo
+  property string aviso: ""
+  property bool avisoErro: false
+  function conectar(rede, senha) {
+    pg.tentando = rede.name; pg.avisoPara = rede.name; pg.aviso = I18n.t("Conectando…"); pg.avisoErro = false
+    limite.restart()
+    if (senha !== undefined) rede.connectWithPsk(senha); else rede.connect()
+  }
+  function falhou(nome, texto) {
+    if (pg.tentando !== nome) return
+    limite.stop(); pg.tentando = ""
+    pg.avisoPara = nome; pg.aviso = texto; pg.avisoErro = true
+  }
+  function textoFalha(reason, protegida) {
+    if (protegida && (reason === ConnectionFailReason.NoSecrets || reason === ConnectionFailReason.WifiAuthTimeout))
+      return I18n.t("Senha incorreta. Confira (maiúsculas contam) e tente de novo.")
+    if (reason === ConnectionFailReason.WifiNetworkLost) return I18n.t("A rede saiu do alcance. Chegue mais perto do roteador e tente de novo.")
+    if (reason === ConnectionFailReason.WifiClientDisconnected || reason === ConnectionFailReason.WifiClientFailed)
+      return I18n.t("O roteador recusou a conexão. Tente de novo; se continuar, reinicie o roteador.")
+    return I18n.t("Não foi possível conectar. Tente de novo.")
+  }
+  // Conectou: confere se o roteador entregou um endereço IPv4 (sem ele não há internet nem DNS)
+  function conferirEndereco(nome) {
+    var dev = pg.wifi ? pg.wifi.name : ""
+    Sistema.sh("ip -4 -o addr show " + (dev ? "dev " + dev + " " : "") + "scope global | grep -q inet", function(o, code) {
+      if (pg.avisoPara !== nome) return
+      if (code === 0) { pg.aviso = I18n.t("Conectado"); pg.avisoErro = false; apagarAviso.restart() }
+      else { pg.aviso = I18n.t("Conectado, mas o roteador não entregou um endereço (IPv4): sem internet. Desconecte e conecte de novo; se repetir, reinicie o roteador."); pg.avisoErro = true }
+    })
+  }
+  Timer { id: apagarAviso; interval: 4000; onTriggered: if (!pg.avisoErro) { pg.avisoPara = ""; pg.aviso = "" } }
+  Timer { id: conferir; property string nome: ""; interval: 12000; onTriggered: pg.conferirEndereco(nome) }
+  Timer {
+    id: limite
+    interval: 45000
+    onTriggered: {
+      var nome = pg.tentando
+      var rs = pg.redes
+      for (var i = 0; i < rs.length; i++) if (rs[i].name === nome && !rs[i].connected) rs[i].disconnect()   // cancela a tentativa
+      pg.falhou(nome, I18n.t("A rede não respondeu em 45 segundos. A senha pode estar certa, mas o roteador não liberou a conexão (não entregou endereço). Tente de novo, chegue mais perto ou reinicie o roteador."))
+    }
+  }
+
   readonly property var wifi: {
     var ds = Networking.devices ? Networking.devices.values : []
     for (var i = 0; i < ds.length; i++) if (ds[i].type === DeviceType.Wifi) return ds[i]
@@ -76,7 +123,17 @@ Pagina {
         required property var modelData
         required property int index
         Layout.fillWidth: true
-        implicitHeight: 54 + (pg.senhaPara === modelData.name ? 52 : 0)
+        implicitHeight: 54 + (pg.senhaPara === modelData.name ? 52 : 0) + (pg.avisoPara === modelData.name && pg.aviso ? avisoTxt.implicitHeight + 10 : 0)
+        Connections {
+          target: rd.modelData
+          function onConnectionFailed(reason) { pg.falhou(rd.modelData.name, pg.textoFalha(reason, rd.modelData.security !== WifiSecurityType.Open)) }
+          function onConnectedChanged() {
+            if (rd.modelData.connected && pg.tentando === rd.modelData.name) {
+              limite.stop(); pg.tentando = ""; pg.aviso = I18n.t("Conectado · conferindo a internet…")
+              conferir.nome = rd.modelData.name; conferir.restart()
+            }
+          }
+        }
         Behavior on implicitHeight { NumberAnimation { duration: Tema.medio } }
         clip: true
         Rectangle { visible: rd.index > 0; anchors.left: parent.left; anchors.right: parent.right; anchors.leftMargin: 16; anchors.rightMargin: 16; height: 1; color: Tema.linha }
@@ -98,10 +155,10 @@ Pagina {
             compacto: true
             texto: rd.modelData.connected ? I18n.t("Desconectar") : I18n.t("Conectar")
             tipo: rd.modelData.connected ? "normal" : "primario"
-            ocupado: rd.modelData.stateChanging
+            ocupado: pg.tentando === rd.modelData.name || (rd.modelData.stateChanging && pg.tentando === "")
             onClicado: {
-              if (rd.modelData.connected) rd.modelData.disconnect()
-              else if (rd.modelData.known || rd.modelData.security === WifiSecurityType.Open) rd.modelData.connect()
+              if (rd.modelData.connected) { rd.modelData.disconnect(); if (pg.avisoPara === rd.modelData.name) { pg.avisoPara = ""; pg.aviso = "" } }
+              else if (rd.modelData.known || rd.modelData.security === WifiSecurityType.Open) pg.conectar(rd.modelData)
               else pg.senhaPara = (pg.senhaPara === rd.modelData.name ? "" : rd.modelData.name)
             }
           }
@@ -111,7 +168,14 @@ Pagina {
           x: 48; y: 54; width: parent.width - 64; height: 40
           spacing: 8
           Campo { id: senha; Layout.fillWidth: true; dica: I18n.t("Senha de “") + rd.modelData.name + "”"; echoMode: TextInput.Password; onAccepted: ok.clicado() }
-          Botao { id: ok; texto: I18n.t("Entrar"); tipo: "primario"; compacto: true; onClicado: { rd.modelData.connectWithPsk(senha.text); pg.senhaPara = ""; senha.text = "" } }
+          Botao { id: ok; texto: I18n.t("Entrar"); tipo: "primario"; compacto: true; onClicado: { pg.conectar(rd.modelData, senha.text); pg.senhaPara = ""; senha.text = "" } }
+        }
+        Texto {
+          id: avisoTxt
+          visible: pg.avisoPara === rd.modelData.name && pg.aviso !== ""
+          x: 48; y: 54 + (pg.senhaPara === rd.modelData.name ? 52 : 0); width: parent.width - 64
+          text: pg.aviso; wrapMode: Text.WordWrap
+          color: pg.avisoErro ? Tema.perigo : Tema.texto3; font.pixelSize: Tema.tLegenda + 1
         }
       }
     }

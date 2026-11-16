@@ -11,9 +11,10 @@ post_upgrade() {
       systemctl start fstrim.timer paccache.timer >/dev/null 2>&1 || true
     fi
   fi
-  # vigia do Wi-Fi sem IPv4 (habilitado pelo pacote em multi-user.target.wants): liga já
-  if [ -d /run/systemd/system ]; then
+  # simba-wifi-vigia saiu (1.1.9-31): tirava o sintoma (Wi-Fi sem IPv4 após o band steering do
+  # roteador) sem resolver a causa. Limpa a máscara que ficou em quem o desligou à mão.
+  if [ -L /etc/systemd/system/simba-wifi-vigia.service ]; then
+    rm -f /etc/systemd/system/simba-wifi-vigia.service
     systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl start simba-wifi-vigia.service >/dev/null 2>&1 || true
   fi
 }

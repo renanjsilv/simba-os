@@ -2758,5 +2758,16 @@
  "OpenCode %1 instalado · versão nova disponível: %2": "OpenCode %1 installed · new version available: %2",
  "OpenCode %1 instalado e em dia": "OpenCode %1 installed and up to date",
  "OpenCode instalado": "OpenCode installed",
- "Atualizando o OpenCode… pode seguir, avisamos quando terminar.": "Updating OpenCode… you can continue, we'll let you know when it's done."
+ "Atualizando o OpenCode… pode seguir, avisamos quando terminar.": "Updating OpenCode… you can continue, we'll let you know when it's done.",
+ "Senha incorreta. Confira (maiúsculas contam) e tente de novo.": "Wrong password. Check it (capital letters matter) and try again.",
+ "A rede saiu do alcance. Chegue mais perto do roteador e tente de novo.": "The network went out of range. Move closer to the router and try again.",
+ "O roteador recusou a conexão. Tente de novo; se continuar, reinicie o roteador.": "The router refused the connection. Try again; if it keeps happening, restart the router.",
+ "Não foi possível conectar. Tente de novo.": "Couldn't connect. Try again.",
+ "Conectado, mas o roteador não entregou um endereço (IPv4): sem internet. Desconecte e conecte de novo; se repetir, reinicie o roteador.": "Connected, but the router didn't hand out an address (IPv4): no internet. Disconnect and connect again; if it repeats, restart the router.",
+ "A rede não respondeu em 45 segundos. A senha pode estar certa, mas o roteador não liberou a conexão (não entregou endereço). Tente de novo, chegue mais perto ou reinicie o roteador.": "The network didn't respond in 45 seconds. The password may be right, but the router didn't let the connection through (no address handed out). Try again, move closer or restart the router.",
+ "Conectado · conferindo a internet…": "Connected · checking the internet…",
+ "Conectado a %1, mas o roteador não entregou um endereço: sem internet. Tente de novo; se repetir, reinicie o roteador.": "Connected to %1, but the router didn't hand out an address: no internet. Try again; if it repeats, restart the router.",
+ "%1 não respondeu em 45 segundos. A senha pode estar certa, mas o roteador não liberou a conexão. Tente de novo ou reinicie o roteador.": "%1 didn't respond in 45 seconds. The password may be right, but the router didn't let the connection through. Try again or restart the router.",
+ "%1 está fora de alcance. Chegue mais perto do roteador.": "%1 is out of range. Move closer to the router.",
+ "A senha está certa, mas o roteador não entregou um endereço (DHCP). Tente de novo; se repetir, reinicie o roteador.": "The password is right, but the router didn't hand out an address (DHCP). Try again; if it repeats, restart the router."
 }

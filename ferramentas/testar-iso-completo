@@ -225,6 +225,7 @@ testes = [
     ("extensão de papel de parede do Google Fotos", r.get("fotos", False)),
     ("Central: página do Wi-Fi", r.get("central_wifi", False)),
     ("assistente de restauração de fábrica", r.get("restauracao", False)),
+    ("propriedades de rede (IP/DNS manual)", r.get("rede_props", False)),
 ]
 for nome, ok in testes:
     print(f"  {'✓' if ok else '✗'} {nome}")

@@ -57,6 +57,7 @@ som_volume=$(b sh -c '[ -x /usr/bin/simba-som-volume ] && [ -s /usr/share/sounds
 fotos=$(b sh -c 'm=$HOME/.config/BraveSoftware/Brave-Browser/NativeMessagingHosts/com.draco.wallpaper.json; [ -x "$(jq -r .path "$m")" ] && grep -q /usr/share/draco/extensions/wallpaper "$HOME/.config/brave-flags.conf"')
 central_wifi=$(b sh -c 'p=$(ps -eo pid,args | awk "/quickshell -n -p \/usr\/share\/simba\/shell/ && !/awk/ {print \$1; exit}"); qs ipc --pid "$p" show | grep -q "function wifi"')
 restauracao=$(b sh -c '[ -x /usr/bin/simba-restaurar-fabrica ] && [ -x /usr/bin/simba-system-factory-reset ]')
+rede_props=$(b sh -c 'simba-rede --help | grep -q "simba-rede ip" && grep -q abrirProps /etc/xdg/quickshell/configuracoes/Janela/Paginas/rede.qml')
 
 PAYLOAD=$(jq -n --argjson camadas "${camadas:-[]}" --argjson boas "${boas:-false}" \
   --argjson parados "$(printf '%s\n' "${parados[@]}" | jq -R . | jq -s 'map(select(. != ""))')" \
@@ -66,13 +67,13 @@ PAYLOAD=$(jq -n --argjson camadas "${camadas:-[]}" --argjson boas "${boas:-false
   --argjson lixeira "$lixeira" --argjson limine "$limine" --argjson conta "$conta" \
   --argjson opencode "$opencode" --argjson botoes_gtk "$botoes_gtk" --argjson fabrica "$fabrica" \
   --argjson fundo_sync "$fundo_sync" --argjson som_volume "$som_volume" --argjson fotos "$fotos" \
-  --argjson central_wifi "$central_wifi" --argjson restauracao "$restauracao" \
+  --argjson central_wifi "$central_wifi" --argjson restauracao "$restauracao" --argjson rede_props "$rede_props" \
   '{camadas:$camadas, boas_vindas:$boas, servicos_parados:$parados, unidades_falha:$falhas,
     migracoes_pendentes:$pend, erros_shell:$erros, erros_shell_amostra:$amostra, tema_icones:$tema,
     tema_icones_existe:$tema_ok, cadeia_icones_ok:$cadeia, barra_simba:$barra, lixeira:$lixeira,
     limine_direto:$limine, conta_ok:$conta, opencode:$opencode, botoes_gtk:$botoes_gtk,
     fabrica:$fabrica, fundo_sync:$fundo_sync, som_volume:$som_volume, fotos:$fotos,
-    central_wifi:$central_wifi, restauracao:$restauracao}')
+    central_wifi:$central_wifi, restauracao:$restauracao, rede_props:$rede_props}')
 
 for h in "$GW" "10.0.2.2" "192.168.122.1"; do
   [ -n "$h" ] && curl -s -m 2 -X POST --data-binary "$PAYLOAD" "http://$h:8766/r" >/dev/null 2>&1 || true

@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""simba-rede — propriedades de uma rede Wi-Fi salva (Configurações › Rede e Central).
+
+  simba-rede info <ssid|uuid>                       JSON com configuração e estado
+  simba-rede ip <ssid|uuid> auto                    IPv4 automático (DHCP)
+  simba-rede ip <ssid|uuid> manual <ip> <máscara> [gateway]
+                                                    máscara: 255.255.255.0 ou 24
+  simba-rede dns <ssid|uuid> auto                   DNS do roteador
+  simba-rede dns <ssid|uuid> manual <dns1> [dns2]   IPv4 ou IPv6
+  simba-rede ipv6 <ssid|uuid> sim|nao
+  simba-rede automatico <ssid|uuid> sim|nao         conectar automaticamente
+  simba-rede limitada <ssid|uuid> sim|nao|auto      conexão limitada (economiza dados)
+  simba-rede mac <ssid|uuid> aleatorio|fixo         endereço MAC aleatório nesta rede
+  simba-rede senha <ssid|uuid>                      mostra a senha salva
+  simba-rede esquecer <ssid|uuid>                   apaga a rede salva (e a senha)
+  simba-rede aplicar <ssid|uuid>                    reconecta para valer (se estiver ativa)
+
+Sem senha de administrador: as redes salvas pela sessão podem ser alteradas pelo usuário.
+Saída de erro em português, para a interface mostrar.
+"""
+import ipaddress
+import json
+import subprocess
+import sys
+
+
+def nm(*args, ok=True):
+    r = subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=60)
+    if ok and r.returncode != 0:
+        raise SystemExit((r.stderr or r.stdout).strip().replace("Error: ", "Erro: ") or "Erro no nmcli")
+    return r.stdout
+
+
+def campos(saida):
+    """`nmcli -t -f A,B …` → {A: valor} (o valor pode ter ':' escapado)."""
+    d = {}
+    for linha in saida.splitlines():
+        if ":" not in linha:
+            continue
+        k, v = linha.split(":", 1)
+        v = v.replace("\\:", ":")
+        d[k] = (d[k] + " " + v) if k in d and v else (v or d.get(k, ""))
+    return d
+
+
+def achar(alvo):
+    """UUID da conexão Wi-Fi pelo SSID, nome ou UUID."""
+    for linha in nm("-t", "-f", "UUID,TYPE,NAME", "connection", "show").splitlines():
+        partes = linha.replace("\\:", "\0").split(":")
+        if len(partes) < 3 or partes[1] != "802-11-wireless":
+            continue
+        uuid, nome = partes[0], partes[2].replace("\0", ":")
+        if alvo in (uuid, nome):
+            return uuid
+        ssid = nm("-g", "802-11-wireless.ssid", "connection", "show", uuid, ok=False).strip()
+        if ssid == alvo:
+            return uuid
+    raise SystemExit("Esta rede não está salva neste computador.")
+
+
+def ativa(uuid):
+    return uuid in nm("-t", "-f", "UUID", "connection", "show", "--active", ok=False).split()
+
+
+def mascara_para_prefixo(m):
+    m = m.strip().lstrip("/")
+    if m.isdigit() and 0 < int(m) <= 32:
+        return int(m)
+    try:
+        return ipaddress.IPv4Network("0.0.0.0/" + m).prefixlen
+    except ValueError:
+        raise SystemExit("Máscara de sub-rede inválida (use 255.255.255.0 ou 24).")
+
+
+def prefixo_para_mascara(p):
+    try:
+        return str(ipaddress.IPv4Network(f"0.0.0.0/{p}").netmask)
+    except ValueError:
+        return ""
+
+
+def validar_ip(ip, so_v4=False, nome="Endereço"):
+    try:
+        a = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        raise SystemExit(f"{nome} inválido: {ip}")
+    if so_v4 and a.version != 4:
+        raise SystemExit(f"{nome} precisa ser IPv4: {ip}")
+    return str(a)
+
+
+def canal(freq):
+    try:
+        f = int(float(freq))
+    except ValueError:
+        return ""
+    if 2412 <= f <= 2472:
+        return str((f - 2407) // 5)
+    if f == 2484:
+        return "14"
+    if 5000 <= f <= 5895:
+        return str((f - 5000) // 5)
+    if 5955 <= f <= 7115:
+        return str((f - 5950) // 5)
+    return ""
+
+
+def info(uuid):
+    c = campos(nm("-t", "-f", "connection.id,connection.uuid,connection.autoconnect,connection.metered,"
+                  "802-11-wireless.ssid,802-11-wireless.cloned-mac-address,802-11-wireless-security.key-mgmt,"
+                  "ipv4.method,ipv4.addresses,ipv4.gateway,ipv4.dns,ipv4.ignore-auto-dns,ipv6.method,ipv6.dns",
+                  "connection", "show", uuid))
+    ip4 = (c.get("ipv4.addresses") or "").split(",")[0].strip()
+    endereco, prefixo = (ip4.split("/") + [""])[:2] if ip4 else ("", "")
+    dns_manual = [x for x in (c.get("ipv4.dns", "") + "," + c.get("ipv6.dns", "")).replace(" ", ",").split(",") if x]
+    seg = c.get("802-11-wireless-security.key-mgmt", "")
+    out = {
+        "uuid": uuid,
+        "ssid": c.get("802-11-wireless.ssid") or c.get("connection.id", ""),
+        "automatico": c.get("connection.autoconnect") == "yes",
+        "limitada": {"yes": "sim", "no": "nao"}.get(c.get("connection.metered", ""), "auto"),
+        "mac_aleatorio": c.get("802-11-wireless.cloned-mac-address") in ("random", "stable"),
+        "seguranca": {"wpa-psk": "WPA2-Personal", "sae": "WPA3-Personal", "wpa-eap": "WPA2-Enterprise",
+                      "owe": "Aberta (criptografada)", "none": "WEP", "": "Aberta"}.get(seg, seg),
+        "ip_manual": c.get("ipv4.method") == "manual",
+        "ip": endereco, "mascara": prefixo_para_mascara(prefixo) if prefixo else "", "gateway": c.get("ipv4.gateway", "") if c.get("ipv4.gateway") != "--" else "",
+        "dns_manual": c.get("ipv4.ignore-auto-dns") == "yes" or bool(dns_manual),
+        "dns": dns_manual,
+        "ipv6": c.get("ipv6.method") not in ("disabled", "ignore"),
+        "ativa": ativa(uuid),
+    }
+    if out["ativa"]:
+        g = campos(nm("-t", "-f", "GENERAL.DEVICES,IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,IP6.ADDRESS,IP6.DNS",
+                      "connection", "show", uuid, ok=False))
+        dev = g.get("GENERAL.DEVICES", "").split(",")[0]
+        a4 = g.get("IP4.ADDRESS[1]", g.get("IP4.ADDRESS", ""))
+        out["agora"] = {
+            "dispositivo": dev,
+            "ipv4": a4.split("/")[0] if a4 else "",
+            "mascara": prefixo_para_mascara(a4.split("/")[1]) if "/" in a4 else "",
+            "gateway": g.get("IP4.GATEWAY", ""),
+            "ipv6": [v.split("/")[0] for k, v in g.items() if k.startswith("IP6.ADDRESS") and v and not v.startswith("fe80")],
+            "dns": [v for k, v in g.items() if k.startswith(("IP4.DNS", "IP6.DNS")) and v],
+        }
+        try:
+            out["agora"]["mac"] = open(f"/sys/class/net/{dev}/address").read().strip()
+        except OSError:
+            out["agora"]["mac"] = ""
+        link = subprocess.run(["iw", "dev", dev, "link"], capture_output=True, text=True).stdout
+        for linha in link.splitlines():
+            linha = linha.strip()
+            if linha.startswith("freq:"):
+                f = linha.split()[1]
+                out["agora"]["frequencia"] = f
+                out["agora"]["banda"] = "2,4 GHz" if float(f) < 3000 else ("5 GHz" if float(f) < 5925 else "6 GHz")
+                out["agora"]["canal"] = canal(f)
+            elif linha.startswith("signal:"):
+                out["agora"]["sinal"] = linha.split(":", 1)[1].strip()
+            elif linha.startswith("tx bitrate:"):
+                t = linha.split(":", 1)[1].strip()
+                out["agora"]["velocidade"] = " ".join(t.split()[:2])
+                out["agora"]["protocolo"] = ("Wi-Fi 7 (802.11be)" if "EHT-" in t else "Wi-Fi 6 (802.11ax)" if "HE-" in t
+                                             else "Wi-Fi 5 (802.11ac)" if "VHT-" in t else "Wi-Fi 4 (802.11n)" if "MCS" in t
+                                             else "802.11a/b/g")
+    return out
+
+
+def main(a):
+    if len(a) < 2 or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0 if a and a[0] in ("-h", "--help") else 2
+    cmd, uuid, resto = a[0], achar(a[1]), a[2:]
+    if cmd == "info":
+        print(json.dumps(info(uuid), ensure_ascii=False))
+    elif cmd == "ip":
+        if resto[:1] == ["auto"]:
+            nm("connection", "modify", uuid, "ipv4.method", "auto", "ipv4.addresses", "", "ipv4.gateway", "")
+        elif resto[:1] == ["manual"] and len(resto) >= 3:
+            ip = validar_ip(resto[1], True, "Endereço IP")
+            pre = mascara_para_prefixo(resto[2])
+            args = ["ipv4.method", "manual", "ipv4.addresses", f"{ip}/{pre}"]
+            if len(resto) > 3 and resto[3].strip():
+                gw = validar_ip(resto[3], True, "Gateway")
+                if ipaddress.ip_address(gw) not in ipaddress.ip_network(f"{ip}/{pre}", strict=False):
+                    raise SystemExit("O gateway precisa estar na mesma rede do endereço IP (confira a máscara).")
+                args += ["ipv4.gateway", gw]
+            else:
+                args += ["ipv4.gateway", ""]
+            nm("connection", "modify", uuid, *args)
+        else:
+            raise SystemExit("Uso: simba-rede ip <rede> auto | manual <ip> <máscara> [gateway]")
+    elif cmd == "dns":
+        if resto[:1] == ["auto"]:
+            nm("connection", "modify", uuid, "ipv4.ignore-auto-dns", "no", "ipv4.dns", "",
+               "ipv6.ignore-auto-dns", "no", "ipv6.dns", "")
+        elif resto[:1] == ["manual"] and len(resto) >= 2:
+            servidores = [validar_ip(x, nome="Servidor DNS") for x in resto[1:] if x.strip()]
+            v4 = [x for x in servidores if ":" not in x]
+            v6 = [x for x in servidores if ":" in x]
+            if v6 and nm("-g", "ipv6.method", "connection", "show", uuid).strip() in ("disabled", "ignore"):
+                raise SystemExit("Para usar um DNS IPv6, ligue o IPv6 nesta rede.")
+            nm("connection", "modify", uuid, "ipv4.ignore-auto-dns", "yes" if v4 else "no", "ipv4.dns", " ".join(v4),
+               "ipv6.ignore-auto-dns", "yes" if v6 else "no", "ipv6.dns", " ".join(v6))
+        else:
+            raise SystemExit("Uso: simba-rede dns <rede> auto | manual <dns1> [dns2]")
+    elif cmd == "ipv6" and resto[:1] in (["sim"], ["nao"]):
+        if resto[0] == "sim":
+            nm("connection", "modify", uuid, "ipv6.method", "auto")
+        else:   # DNS IPv6 não é permitido com o IPv6 desligado: sai junto
+            nm("connection", "modify", uuid, "ipv6.method", "disabled", "ipv6.dns", "", "ipv6.ignore-auto-dns", "no")
+    elif cmd == "automatico" and resto[:1] in (["sim"], ["nao"]):
+        nm("connection", "modify", uuid, "connection.autoconnect", "yes" if resto[0] == "sim" else "no")
+    elif cmd == "limitada" and resto[:1] in (["sim"], ["nao"], ["auto"]):
+        nm("connection", "modify", uuid, "connection.metered", {"sim": "yes", "nao": "no", "auto": "unknown"}[resto[0]])
+    elif cmd == "mac" and resto[:1] in (["aleatorio"], ["fixo"]):
+        nm("connection", "modify", uuid, "802-11-wireless.cloned-mac-address",
+           "stable" if resto[0] == "aleatorio" else "permanent")
+    elif cmd == "senha":
+        s = nm("-s", "-g", "802-11-wireless-security.psk", "connection", "show", uuid).strip()
+        print(s if s else "")
+    elif cmd == "esquecer":
+        nm("connection", "delete", uuid)
+    elif cmd == "aplicar":
+        if ativa(uuid):
+            nm("connection", "up", uuid)
+    else:
+        print(__doc__, file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except subprocess.TimeoutExpired:
+        sys.exit("O NetworkManager não respondeu. Tente de novo.")

@@ -47,6 +47,9 @@ Item {
   }
   Binding { target: root.wifiDev; property: "scannerEnabled"; value: true; when: root.wifiDev !== null && root.mostrarRedes && painel.visible }
   property string redeAberta: ""      // rede com a linha expandida (senha / desconectar)
+  property var menuRede: null         // rede do menu do botão direito (Propriedades / Esquecer)
+  property real menuX: 0
+  property real menuY: 0
   property string tentando: ""        // rede que mandamos conectar
   property string avisoPara: ""
   property string aviso: ""
@@ -288,7 +291,7 @@ Item {
     anchor.rect.y: root.vertical ? root.height - implicitHeight : (root.bar && root.bar.position === "bottom" ? -implicitHeight - 6 : root.height + 6)
 
     property bool grabPronto: false
-    onVisibleChanged: { grabPronto = false; if (!visible) { mostrarSaidas = false; mostrarRedes = false; redeAberta = "" } if (visible) ativarGrab.restart() }
+    onVisibleChanged: { grabPronto = false; if (!visible) { mostrarSaidas = false; mostrarRedes = false; redeAberta = ""; menuRede = null } if (visible) ativarGrab.restart() }
     Timer { id: ativarGrab; interval: 60; onTriggered: painel.grabPronto = painel.visible }
     HyprlandFocusGrab { active: painel.grabPronto; windows: [painel]; onCleared: painel.visible = false }
 
@@ -801,6 +804,61 @@ Item {
         }
       }
 
+      // menu do botão direito numa rede salva (fecha ao clicar fora dele)
+      MouseArea {
+        anchors.fill: parent; z: 19
+        visible: root.menuRede !== null
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: root.menuRede = null
+      }
+      Rectangle {
+        id: menuRedeCaixa
+        visible: root.menuRede !== null
+        z: 20
+        x: root.menuX; y: Math.min(root.menuY, fundoPainel.height - height - 8)
+        width: 190; height: colMenu.implicitHeight + 10
+        radius: 10
+        color: root.fundo
+        border.width: 1; border.color: root.alfa(root.texto, 0.18)
+        Column {
+          id: colMenu
+          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 5 }
+          Repeater {
+            model: {
+              var n = root.menuRede; if (!n) return []
+              var l = []
+              if (n.connected) l.push({ id: "desconectar", g: "\u{F092E}", t: I18n.t("Desconectar") })
+              l.push({ id: "props", g: "\u{F02FD}", t: I18n.t("Propriedades") })
+              l.push({ id: "esquecer", g: "\u{F09E7}", t: I18n.t("Esquecer") })
+              return l
+            }
+            delegate: Rectangle {
+              required property var modelData
+              width: colMenu.width; height: 32; radius: 7
+              color: mi.containsMouse ? root.alfa(root.texto, 0.10) : "transparent"
+              Row {
+                anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                spacing: 10
+                Text { text: modelData.g; color: root.texto; font.family: root.fonte; font.pixelSize: 15; anchors.verticalCenter: parent.verticalCenter }
+                Text { text: modelData.t; color: root.texto; font.pixelSize: 12; anchors.verticalCenter: parent.verticalCenter }
+              }
+              MouseArea {
+                id: mi
+                anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  var n = root.menuRede, nome = n ? n.name : ""
+                  root.menuRede = null
+                  if (!n) return
+                  if (modelData.id === "desconectar") n.disconnect()
+                  else if (modelData.id === "esquecer") { n.forget(); if (root.avisoPara === nome) { root.avisoPara = ""; root.aviso = "" } }
+                  else { painel.visible = false; Quickshell.execDetached(["/usr/bin/configuracoes", "rede", "props:" + nome]) }
+                }
+              }
+            }
+          }
+        }
+      }
+
       // ── página do Wi-Fi (seta do botão do Wi-Fi), como no Windows 11: ocupa a central toda ──
       Column {
         id: paginaRedes
@@ -903,8 +961,17 @@ Item {
                         id: mr
                         anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                         enabled: root.tentando === ""
-                        onClicked: {
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function(e) {
                           var n = linhaRede.modelData
+                          if (e.button === Qt.RightButton) {     // menu: Propriedades / Esquecer (redes salvas)
+                            if (!n.known && !n.connected) return
+                            var pt = mr.mapToItem(fundoPainel, e.x, e.y)
+                            root.menuX = Math.min(pt.x, fundoPainel.width - 196); root.menuY = pt.y
+                            root.menuRede = n
+                            return
+                          }
+                          root.menuRede = null
                           if (n.connected || (!n.known && linhaRede.protegida)) {
                             root.redeAberta = linhaRede.aberta ? "" : n.name
                             if (root.redeAberta && !n.connected) focoSenha.restart()

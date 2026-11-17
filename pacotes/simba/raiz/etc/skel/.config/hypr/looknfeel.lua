@@ -64,6 +64,7 @@ o.window("com.simba.Configuracoes", { opacity = "1 1" })
 hl.layer_rule({ match = { namespace = "configuracoes-.*" }, no_anim = true, animation = "none" })
 -- Menu Iniciar: fundo acrílico quando o desfoque (decoration.blur) estiver ligado.
 hl.layer_rule({ match = { namespace = "configuracoes-iniciar" }, blur = true, ignore_alpha = 0.5 })
+hl.layer_rule({ match = { namespace = "simba-notifications" }, blur = true, ignore_alpha = 0.5 })
 
 -- Gerenciador de Tarefas (~/.local/share/gerenciador-tarefas, Ctrl+Shift+Esc): janela flutuante opaca
 o.window("com.simba.GerenciadorTarefas", { float = true })

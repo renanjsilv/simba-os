@@ -10,12 +10,46 @@ Pagina {
 
   property bool dnd: false
   property var historico: []
+  // Estilo dos cartões (lido pelo shell em ~/.config/simba/notificacoes.json; sem arquivo = "rpg")
+  property string estilo: "rpg"
+  readonly property string arqEstilo: Sistema.home + "/.config/simba/notificacoes.json"
+  readonly property string pastaPrevias: "file:///usr/share/simba-apps/notificacoes-estilos/"
+  readonly property var estilosPixel: [
+    { id: "rpg", nome: I18n.t("Caixa de diálogo RPG"), desc: I18n.t("Moldura dupla, como as falas de jogos antigos") },
+    { id: "balao", nome: I18n.t("Balão do Simba"), desc: I18n.t("O gatinho avisa num balão de fala") },
+    { id: "janela", nome: I18n.t("Janela clássica"), desc: I18n.t("Barra de título listrada com o nome do app") },
+    { id: "conquista", nome: I18n.t("Conquista desbloqueada"), desc: I18n.t("Escuro, com barrinha de tempo em blocos") },
+    { id: "portatil", nome: I18n.t("Portátil cinza"), desc: I18n.t("Tons de cinza e sombra pontilhada") },
+    { id: "vidro-pixel", nome: I18n.t("Vidro pixelado"), desc: I18n.t("Translúcido em pontilhado, cantos em degrau") }
+  ]
+  readonly property var estilosNormais: [
+    { id: "vidro", nome: I18n.t("Vidro"), desc: I18n.t("Translúcido com o fundo desfocado") },
+    { id: "suave", nome: I18n.t("Cartão suave"), desc: I18n.t("Sombra macia e barrinha de tempo") },
+    { id: "windows", nome: I18n.t("Estilo Windows 11"), desc: I18n.t("Cabeçalho com o nome do app") },
+    { id: "escuro", nome: I18n.t("Escuro flutuante"), desc: I18n.t("Escuro mesmo no tema claro") },
+    { id: "pilula", nome: I18n.t("Pílula compacta"), desc: I18n.t("Uma linha só, ocupa pouco espaço") },
+    { id: "padrao", nome: I18n.t("Quadrado simples"), desc: I18n.t("O visual antigo, com borda") }
+  ]
+  function lerEstilo() {
+    Sistema.sh("cat " + Sistema.q(pg.arqEstilo) + " 2>/dev/null", function(o) {
+      try { var v = JSON.parse(o || "{}"); pg.estilo = v.estilo || "rpg" } catch (e) { pg.estilo = "rpg" }
+    })
+  }
+  function escolherEstilo(id) {
+    pg.estilo = id
+    var json = JSON.stringify({ estilo: id }) + "\n"
+    Sistema.rodar(["bash", "-c", "mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"", "--", pg.arqEstilo], function() {
+      // o shell relê o arquivo sozinho; a notificação de teste mostra o estilo novo
+      Sistema.solto(["notify-send", "-a", "Configurações", "-i", "preferences-desktop-notification",
+                     I18n.t("Estilo das notificações"), I18n.t("Assim ficam as notificações agora.")])
+    }, json)
+  }
 
   function carregar() {
     Sistema.sh("simba-shell notifications isDnd", function(o) { pg.dnd = o.trim() === "on" })
     Sistema.json([Sistema.ajudante, "notificacoes"], function(v) { if (v) pg.historico = v })
   }
-  Component.onCompleted: carregar()
+  Component.onCompleted: { carregar(); lerEstilo() }
   Timer { interval: 4000; running: true; repeat: true; onTriggered: pg.carregar() }
 
   function quando(ms) {
@@ -43,6 +77,64 @@ Pagina {
       chave: "testeNotif"; glifo: Icones.messageText
       titulo: I18n.t("Enviar uma notificação de teste")
       Botao { texto: I18n.t("Enviar"); onClicado: Sistema.solto(["simba-notification-send", "-g", "󰂚", "Configurações", I18n.t("Assim ficam as notificações com o tema ") + Tema.nome + "."]) }
+    }
+  }
+
+
+  // ── estilo ───────────────────────────────────────────────────────────────
+  Secao { titulo: I18n.t("Estilo"); detalhe: I18n.t("Como os avisos aparecem no canto inferior direito. Vale na hora.") }
+  Ancora { chave: "estiloNotif" }
+  Repeater {
+    model: [{ titulo: I18n.t("Pixel art"), lista: pg.estilosPixel }, { titulo: I18n.t("Clássicos"), lista: pg.estilosNormais }]
+    delegate: ColumnLayout {
+      id: grupo
+      required property var modelData
+      Layout.fillWidth: true
+      spacing: 8
+      Texto { text: grupo.modelData.titulo; font.weight: Font.DemiBold; color: Tema.texto2; Layout.topMargin: 4 }
+      GridLayout {
+        id: gradeEstilos
+        Layout.fillWidth: true
+        columns: Math.max(1, Math.floor((width + 12) / 252))
+        columnSpacing: 12
+        rowSpacing: 12
+        Repeater {
+          model: grupo.modelData.lista
+          delegate: Rectangle {
+            id: op
+            required property var modelData
+            readonly property bool escolhido: pg.estilo === op.modelData.id
+            Layout.fillWidth: true
+            Layout.preferredHeight: colOp.implicitHeight + 16
+            radius: Tema.raio + 2
+            color: escolhido ? Tema.selecao : (mOp.containsMouse ? Tema.hover : Tema.superficie)
+            border.width: escolhido ? 2 : 1
+            border.color: escolhido ? Tema.realce : Tema.linha
+            ColumnLayout {
+              id: colOp
+              x: 8; y: 8; width: parent.width - 16
+              spacing: 6
+              Image {
+                Layout.fillWidth: true
+                Layout.preferredHeight: width * 150 / 440
+                source: pg.pastaPrevias + op.modelData.id + ".png"
+                fillMode: Image.PreserveAspectFit
+                smooth: false
+                mipmap: false
+                asynchronous: true
+              }
+              RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                Texto { text: op.modelData.nome; font.weight: Font.DemiBold; Layout.fillWidth: true; elide: Text.ElideRight }
+                Glifo { visible: op.escolhido; g: Icones.checkCircle; tamanho: 16; color: Tema.realce }
+              }
+              Texto { text: op.modelData.desc; color: Tema.texto3; font.pixelSize: Tema.tLegenda + 1; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+            }
+            MouseArea { id: mOp; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pg.escolherEstilo(op.modelData.id) }
+          }
+        }
+      }
     }
   }
 

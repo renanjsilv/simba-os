@@ -40,9 +40,8 @@ Item {
   // Corner radius is shared with the menu and shell panels.
   // It mirrors Hyprland's current decoration:rounding value.
   readonly property int cornerRadius: Style.cornerRadius
-  // Toasts are fixed to the top-right corner. They only clear the simba bar
-  // when the bar occupies the top or right edge, so left/bottom bars do not
-  // pull notification popups away from the expected top-right location.
+  // Toasts are fixed to the bottom-right corner (next to the clock). They
+  // clear the simba bar when it occupies the bottom or right edge.
   // Falls back to the bar's default size (26 horizontal / 28 vertical) when
   // shell.bar isn't reachable so the popup never lands on top of the bar.
   readonly property string barPosition: shell && shell.barConfig ? String(shell.barConfig.position || "top") : "top"
@@ -812,6 +811,26 @@ Item {
 
   property bool settingsLoaded: false
 
+  // Simba: estilo visual dos cartões, escolhido em Configurações › Notificações
+  // (~/.config/simba/notificacoes.json → {"estilo": "..."}). Sem arquivo = "rpg".
+  property string cardStyle: "rpg"
+  FileView {
+    id: estiloFile
+    path: Quickshell.env("HOME") + "/.config/simba/notificacoes.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try {
+        var v = JSON.parse(text() || "{}")
+        service.cardStyle = (v && typeof v.estilo === "string" && v.estilo) ? v.estilo : "rpg"
+      } catch (e) {
+        service.cardStyle = "rpg"
+      }
+    }
+    onLoadFailed: service.cardStyle = "rpg"
+  }
+
   function loadSettings(raw) {
     // FileView can fire onLoaded more than once during startup — the implicit
     // preload when `path` resolves, plus the explicit `settingsFile.reload()`
@@ -986,8 +1005,8 @@ Item {
       ColumnLayout {
         id: popupColumn
         anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: popupWindow.popupPlacement.margins.top
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: popupWindow.popupPlacement.margins.bottom
         anchors.rightMargin: popupWindow.popupPlacement.margins.right
         spacing: Style.space(8)
 
@@ -1057,6 +1076,8 @@ Item {
               cornerRadius: service.cornerRadius
               fontFamily: service.shell && service.shell.bar ? service.shell.bar.fontFamily : ""
               glyph: cardSlot.glyph
+              estilo: service.cardStyle
+              progresso: cardSlot.remainingLifetime
 
               onCloseRequested: service.dismissPopup(cardSlot.index)
               onCardClicked: service.invokePopupDefault(cardSlot.index)

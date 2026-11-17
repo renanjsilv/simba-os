@@ -161,6 +161,7 @@ var itens = [
   ["notificacoes", "historico", "Histórico de notificações", "", "historico notificacoes antigas"],
   ["notificacoes", "limparNotif", "Limpar notificações", "", "limpar apagar notificacoes"],
   ["notificacoes", "testeNotif", "Enviar notificação de teste", "", "teste notificacao"],
+  ["notificacoes", "estiloNotif", "Estilo das notificações", "Pixel art, vidro, cartão, Windows 11…", "estilo notificacao aparencia pixel art rpg balao vidro windows pilula escuro visual"],
   // Atalhos
   ["atalhos", "listaAtalhos", "Todos os atalhos de teclado", "", "atalhos teclas keybindings super"],
   ["atalhos", "superP", "Super + P: modo de projeção", "", "projetar super p atalho"],

@@ -82,7 +82,7 @@ Panel {
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property int cellWidth: Style.space(52)
-  readonly property int cellHeight: Style.space(34)
+  readonly property int cellHeight: Style.space(30)
   readonly property int cellSpacing: Style.space(2)
   readonly property int weekColumnWidth: Style.space(32)
   readonly property int gutterWidth: Style.space(14)
@@ -286,45 +286,75 @@ Panel {
           width: Math.max(calendarScroll.width, gridColumn.width)
           spacing: Style.space(8)
 
-          // ---- Hero: today, centered. Once the view has stepped back
-          //      it is also the way home — clicking the date you are
-          //      looking for beats hunting for a reset button.
+          // ---- Simba: central de notificações (como no Windows 11), acima da data.
+          CentralNotificacoes {
+            id: central
+            width: parent.width
+            ativo: root.opened
+            fg: root.contentForeground
+            onAcionado: root.close()
+          }
+          // separador (tracejado nos temas pixel)
+          Item {
+            width: parent.width
+            height: Style.space(14)
+            Rectangle {
+              visible: !central.pixel
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width; height: 1
+              color: root.contentForeground; opacity: 0.12
+            }
+            Row {
+              visible: central.pixel
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: 2
+              Repeater { model: Math.floor(parent.parent.width / 4); Rectangle { width: 2; height: 2; color: root.contentForeground; opacity: 0.35 } }
+            }
+          }
+
+          // ---- Hero: hora grande e data por extenso, alinhadas à direita e
+          //      sempre dentro da largura do painel (antes a data em 52 px
+          //      passava da caixa e aparecia centralizada).
           Item {
             width: parent.width
             height: heroRow.height
 
-            Row {
+            Column {
               id: heroRow
-              anchors.horizontalCenter: parent.horizontalCenter
-              spacing: Style.space(22)
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(6)
+              width: parent.width - Style.space(12)
+              spacing: 0
 
               Text {
-                // Baseline-aligned, not center-aligned: "July 26" carries a
-                // descender, so centering the two boxes leaves the icon
-                // sitting visibly low against the digits.
-                anchors.baseline: heroDate.baseline
-                text: "󰃭"
-                color: heroMouse.containsMouse
-                  ? Style.hoverStateColor(root.contentForeground, Commons.Color.accent)
-                  : root.contentForeground
-                font.family: root.contentFontFamily
-                // Decorative, and deliberately outside the Style.font.*
-                // scale. Sized so the glyph reads at the cap height of the
-                // date beside it rather than towering over it.
-                font.pixelSize: 48
+                id: heroTime
+                width: parent.width
+                horizontalAlignment: Text.AlignRight
+                textFormat: Text.PlainText
+                text: Qt.locale("pt_BR").toString(clock.date, "HH:mm")
+                color: root.contentForeground
+                font.family: central.pixel ? "Simba Pixel" : "Adwaita Sans"
+                font.pixelSize: central.pixel ? 40 : 30
+                font.weight: central.pixel ? Font.Bold : Font.Light
+                renderType: central.pixel ? Text.NativeRendering : Text.QtRendering
               }
-
               Text {
                 id: heroDate
+                width: parent.width
+                horizontalAlignment: Text.AlignRight
+                elide: Text.ElideRight
+                fontSizeMode: Text.HorizontalFit
+                minimumPixelSize: 11
                 textFormat: Text.PlainText
-                anchors.verticalCenter: parent.verticalCenter
-                text: Qt.locale("pt_BR").toString(root.today, "d 'de' MMMM")
+                text: {
+                  var t = Qt.locale("pt_BR").toString(root.today, "dddd, d 'de' MMMM")
+                  return t.charAt(0).toUpperCase() + t.slice(1)
+                }
                 color: heroMouse.containsMouse
                   ? Style.hoverStateColor(root.contentForeground, Commons.Color.accent)
-                  : root.contentForeground
-                font.family: root.contentFontFamily
-                font.pixelSize: 52
-                font.bold: true
+                  : Qt.darker(root.contentForeground, 1.25)
+                font.family: "Adwaita Sans"
+                font.pixelSize: 13
               }
             }
 

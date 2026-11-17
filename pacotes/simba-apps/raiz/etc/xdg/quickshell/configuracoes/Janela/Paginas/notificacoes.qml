@@ -12,6 +12,17 @@ Pagina {
   property var historico: []
   // Estilo dos cartões (lido pelo shell em ~/.config/simba/notificacoes.json; sem arquivo = "rpg")
   property string estilo: "rpg"
+  property string tamanho: "pequeno"
+  property string central: "auto"
+  readonly property var temasCentral: [
+    { id: "auto", nome: I18n.t("Automático"), desc: I18n.t("Combina com o estilo dos avisos") },
+    { id: "fluent", nome: I18n.t("Fluent"), desc: I18n.t("Cartões suaves, como no Windows 11") },
+    { id: "minimal", nome: I18n.t("Minimal"), desc: I18n.t("Lista limpa separada por linhas") },
+    { id: "escuro", nome: I18n.t("Escuro"), desc: I18n.t("Painel escuro mesmo no tema claro") },
+    { id: "pixel-rpg", nome: I18n.t("Pixel RPG"), desc: I18n.t("Moldura dupla com cantos em degrau") },
+    { id: "pixel-portatil", nome: I18n.t("Pixel Portátil"), desc: I18n.t("Tons de cinza de videogame portátil") },
+    { id: "pixel-noturno", nome: I18n.t("Pixel Noturno"), desc: I18n.t("Escuro com faixa pontilhada") }
+  ]
   readonly property string arqEstilo: Sistema.home + "/.config/simba/notificacoes.json"
   readonly property string pastaPrevias: "file:///usr/share/simba-apps/notificacoes-estilos/"
   readonly property var estilosPixel: [
@@ -32,19 +43,24 @@ Pagina {
   ]
   function lerEstilo() {
     Sistema.sh("cat " + Sistema.q(pg.arqEstilo) + " 2>/dev/null", function(o) {
-      try { var v = JSON.parse(o || "{}"); pg.estilo = v.estilo || "rpg" } catch (e) { pg.estilo = "rpg" }
+      var v = {}
+      try { v = JSON.parse(o || "{}") || {} } catch (e) {}
+      pg.estilo = v.estilo || "rpg"; pg.tamanho = v.tamanho || "pequeno"; pg.central = v.central || "auto"
     })
+  }
+  function salvarPreferencias(testar) {
+    var json = JSON.stringify({ estilo: pg.estilo, tamanho: pg.tamanho, central: pg.central }) + "\n"
+    Sistema.rodar(["bash", "-c", "mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"", "--", pg.arqEstilo], function() {
+      if (testar) Sistema.solto(["notify-send", "-a", "Configurações", "-i", "preferences-desktop-notification",
+                                 I18n.t("Estilo das notificações"), I18n.t("Assim ficam as notificações agora.")])
+    }, json)
   }
   function escolherEstilo(id) {
     pg.estilo = id
-    var json = JSON.stringify({ estilo: id }) + "\n"
-    Sistema.rodar(["bash", "-c", "mkdir -p \"$(dirname \"$1\")\" && cat > \"$1\"", "--", pg.arqEstilo], function() {
-      // o shell relê o arquivo sozinho; a notificação de teste mostra o estilo novo
-      Sistema.solto(["notify-send", "-a", "Configurações", "-i", "preferences-desktop-notification",
-                     I18n.t("Estilo das notificações"), I18n.t("Assim ficam as notificações agora.")])
-    }, json)
+    pg.salvarPreferencias(true)
   }
-
+  function escolherTamanho(v) { pg.tamanho = v; pg.salvarPreferencias(true) }
+  function escolherCentral(v) { pg.central = v; pg.salvarPreferencias(false) }
   function carregar() {
     Sistema.sh("simba-shell notifications isDnd", function(o) { pg.dnd = o.trim() === "on" })
     Sistema.json([Sistema.ajudante, "notificacoes"], function(v) { if (v) pg.historico = v })
@@ -82,7 +98,7 @@ Pagina {
 
 
   // ── estilo ───────────────────────────────────────────────────────────────
-  Secao { titulo: I18n.t("Estilo"); detalhe: I18n.t("Como os avisos aparecem no canto inferior direito. Vale na hora.") }
+  Secao { titulo: I18n.t("Estilo dos avisos"); detalhe: I18n.t("Como os avisos aparecem no canto inferior direito. Vale na hora.") }
   Ancora { chave: "estiloNotif" }
   Repeater {
     model: [{ titulo: I18n.t("Pixel art"), lista: pg.estilosPixel }, { titulo: I18n.t("Clássicos"), lista: pg.estilosNormais }]
@@ -134,6 +150,76 @@ Pagina {
             MouseArea { id: mOp; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pg.escolherEstilo(op.modelData.id) }
           }
         }
+      }
+    }
+  }
+
+  Cartao {
+    Layout.topMargin: 6
+    Linha {
+      chave: "tamanhoNotif"; glifo: Icones.messageText
+      titulo: I18n.t("Tamanho dos avisos")
+      descricao: I18n.t("O Pequeno ocupa menos espaço na tela.")
+      Segmentado {
+        opcoes: [{ valor: "pequeno", rotulo: I18n.t("Pequeno") }, { valor: "medio", rotulo: I18n.t("Médio") }, { valor: "grande", rotulo: I18n.t("Grande") }]
+        atual: pg.tamanho
+        onEscolhido: function(v) { pg.escolherTamanho(v) }
+      }
+    }
+  }
+
+  // ── tema da central (lista aberta pelo relógio) ─────────────────────────────
+  Secao { titulo: I18n.t("Tema da central de notificações"); detalhe: I18n.t("Visual da lista de notificações que abre ao clicar no relógio.") }
+  Ancora { chave: "temaCentral" }
+  GridLayout {
+    Layout.fillWidth: true
+    columns: Math.max(1, Math.floor((width + 12) / 252))
+    columnSpacing: 12
+    rowSpacing: 12
+    Repeater {
+      model: pg.temasCentral
+      delegate: Rectangle {
+        id: tc
+        required property var modelData
+        readonly property bool escolhido: pg.central === tc.modelData.id
+        Layout.fillWidth: true
+        Layout.preferredHeight: colTc.implicitHeight + 16
+        radius: Tema.raio + 2
+        color: escolhido ? Tema.selecao : (mTc.containsMouse ? Tema.hover : Tema.superficie)
+        border.width: escolhido ? 2 : 1
+        border.color: escolhido ? Tema.realce : Tema.linha
+        ColumnLayout {
+          id: colTc
+          x: 8; y: 8; width: parent.width - 16
+          spacing: 6
+          Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: width * 330 / 440
+            Image {
+              anchors.fill: parent
+              visible: tc.modelData.id !== "auto"
+              source: tc.modelData.id === "auto" ? "" : pg.pastaPrevias + "central/" + tc.modelData.id + ".png"
+              fillMode: Image.PreserveAspectFit
+              smooth: false
+              asynchronous: true
+            }
+            // Automático: metade clássica, metade pixel
+            Row {
+              anchors.fill: parent
+              visible: tc.modelData.id === "auto"
+              Image { width: parent.width / 2; height: parent.height; source: pg.pastaPrevias + "central/fluent.png"; fillMode: Image.PreserveAspectCrop; horizontalAlignment: Image.AlignLeft; asynchronous: true }
+              Image { width: parent.width / 2; height: parent.height; source: pg.pastaPrevias + "central/pixel-rpg.png"; fillMode: Image.PreserveAspectCrop; horizontalAlignment: Image.AlignRight; smooth: false; asynchronous: true }
+            }
+          }
+          RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            Texto { text: tc.modelData.nome; font.weight: Font.DemiBold; Layout.fillWidth: true; elide: Text.ElideRight }
+            Glifo { visible: tc.escolhido; g: Icones.checkCircle; tamanho: 16; color: Tema.realce }
+          }
+          Texto { text: tc.modelData.desc; color: Tema.texto3; font.pixelSize: Tema.tLegenda + 1; Layout.fillWidth: true; wrapMode: Text.WordWrap }
+        }
+        MouseArea { id: mTc; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: pg.escolherCentral(tc.modelData.id) }
       }
     }
   }

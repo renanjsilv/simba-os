@@ -37,6 +37,8 @@ BorderSurface {
   // Simba: visual escolhido e quanto falta para o cartão sumir (1 → 0).
   property string estilo: "rpg"
   property real progresso: 1.0
+  // pequeno | medio | grande (Configurações › Notificações › Tamanho)
+  property string tamanho: "pequeno"
 
   readonly property bool hovered: hoverTracker.hovered
 
@@ -59,7 +61,22 @@ BorderSurface {
   readonly property string est: estilosPixel.indexOf(estilo) >= 0 || estilosNormais.indexOf(estilo) >= 0 ? estilo : "rpg"
   readonly property bool legado: est === "padrao"
   readonly property bool pixel: estilosPixel.indexOf(est) >= 0
-  readonly property int px: 2
+  readonly property string tam: ["pequeno", "medio", "grande"].indexOf(tamanho) >= 0 ? tamanho : "pequeno"
+  // pixel art: só ampliações inteiras (px = tamanho do pixel da moldura, fz = fonte 10 = 1×, 20 = 2×)
+  // fz = título (Simba Pixel 20 = 2×); corpo em sans no pequeno/médio (legível), pixel no grande
+  readonly property var tamPixel: ({ pequeno: { px: 1, fz: 20, corpo: 11, sans: true,  ic: 24, w: 304, linhas: 2 },
+                                     medio:   { px: 2, fz: 20, corpo: 12, sans: true,  ic: 32, w: 336, linhas: 3 },
+                                     grande:  { px: 2, fz: 20, corpo: 20, sans: false, ic: 48, w: 384, linhas: 3 } })[tam]
+  // clássicos (especificação de UI): largura, ícone, título, corpo, linhas; margens escalam
+  readonly property var tamNormal: ({ pequeno: { w: 300, ic: 24, t: 12, c: 11, linhas: 2 },
+                                      medio:   { w: 340, ic: 32, t: 13, c: 12, linhas: 3 },
+                                      grande:  { w: 380, ic: 40, t: 14, c: 13, linhas: 4 } })[tam]
+  // gatinho do Balão: pixels de tela por pixel do sprite (11×11)
+  readonly property int gatoEsc: ({ pequeno: 2, medio: 3, grande: 4 })[tam]
+  // onde começa o balão (pixels da grade): depois do gato e da cauda
+  readonly property int balaoX: Math.ceil((11 * gatoEsc + 2) / px) + 3
+  readonly property real esc: ({ pequeno: 0.72, medio: 0.86, grande: 1.0 })[tam]
+  readonly property int px: pixel ? tamPixel.px : 2
 
   readonly property color corFundo: Commons.Color.notifications.background
   readonly property color corTexto: Commons.Color.notifications.text
@@ -71,17 +88,27 @@ BorderSurface {
   readonly property color corCorpo: est === "conquista" ? "#b0b0b0" : est === "escuro" ? "#c8c8c8"
                                   : est === "portatil" ? "#3d3d3d" : (legado ? bodyColor : Qt.tint(corTexto, Qt.rgba(corFundo.r, corFundo.g, corFundo.b, 0.25)))
 
-  // margens do conteúdo [esquerda, topo, direita, baixo]
-  readonly property var margens: ({
-    padrao: [12, 10, 12, 10], rpg: [14, 12, 26, 12], balao: [44, 10, 14, 10], janela: [12, 32, 14, 12],
-    conquista: [14, 12, 16, 20], portatil: [16, 14, 18, 14], "vidro-pixel": [14, 12, 30, 12],
-    vidro: [16, 14, 34, 14], suave: [16, 14, 34, 20], windows: [14, 38, 34, 16], escuro: [16, 14, 34, 14],
-    pilula: [10, 8, 26, 8]
-  })[est]
-  readonly property int tamIcone: pixel ? 24 : (est === "windows" ? 44 : (est === "pilula" ? 34 : 40))
+  // margens do conteúdo [esquerda, topo, direita, baixo]: pixel art em pixels da grade (× px),
+  // clássicos em pixels de tela no tamanho grande (× esc)
+  readonly property var margensGrade: ({
+    rpg: [7, 6, 13, 6], balao: [22, 5, 7, 5], janela: [6, 16, 7, 6], conquista: [7, 6, 8, 10],
+    portatil: [8, 7, 9, 7], "vidro-pixel": [7, 6, 15, 6] })
+  readonly property var margensNormais: ({
+    padrao: [12, 10, 12, 10], vidro: [16, 14, 34, 14], suave: [16, 14, 34, 20], windows: [14, 38, 34, 16],
+    escuro: [16, 14, 34, 14], pilula: [10, 8, 26, 8] })
+  readonly property var margens: pixel
+    ? margensGrade[est].map(function(v, i) {
+        // a barra de título da Janela clássica tem 11 pixels da grade e cresce com a fonte
+        if (est === "janela" && i === 1) return 4 * px + tamPixel.fz + 8
+        if (est === "balao" && i === 0) return (balaoX + 8) * px
+        return v * px })
+    : margensNormais[est].map(function(v) { return Math.round(v * esc) })
+  readonly property int tamIcone: pixel ? tamPixel.ic : (est === "pilula" ? Math.round(tamNormal.ic * 0.85) : tamNormal.ic)
   readonly property string fonteTexto: pixel ? "Simba Pixel" : (legado ? "Liberation Sans" : "Adwaita Sans")
-  readonly property int tamTitulo: pixel ? 20 : (legado ? Style.font.title : 14)
-  readonly property int tamCorpo: pixel ? 20 : (legado ? Style.font.title : 13)
+  readonly property string fonteCorpo: pixel && !tamPixel.sans ? "Simba Pixel" : (legado ? "Liberation Sans" : "Adwaita Sans")
+  readonly property int tamTitulo: pixel ? tamPixel.fz : (legado ? Style.font.title : tamNormal.t)
+  readonly property int tamCorpo: pixel ? tamPixel.corpo : (legado ? Style.font.title : tamNormal.c)
+  readonly property int linhasCorpo: est === "pilula" ? 1 : (pixel ? tamPixel.linhas : tamNormal.linhas)
   readonly property bool comFechar: ["vidro", "suave", "windows", "escuro", "vidro-pixel"].indexOf(est) >= 0
   readonly property int blocosAcesos: Math.ceil(Math.max(0, Math.min(1, progresso)) * 10)
 
@@ -102,9 +129,9 @@ BorderSurface {
     return Quickshell.iconPath(value, true)
   }
 
-  implicitWidth: legado ? Style.space(380) : (pixel ? 380 : 372)
+  implicitWidth: legado ? tamNormal.w : (pixel ? tamPixel.w : tamNormal.w)
   implicitHeight: legado ? mainColumn.implicitHeight + borderTop + borderBottom
-                         : Math.max(conteudo.implicitHeight + margens[1] + margens[3], est === "balao" ? 40 : 0)
+                         : Math.max(conteudo.implicitHeight + margens[1] + margens[3], est === "balao" ? 11 * gatoEsc + 4 : 0)
   radius: legado ? cornerRadius : 0
   color: legado ? Commons.Color.notifications.background : "transparent"
   borderSpec: legado ? cardBorderSpec : Border.none()
@@ -128,7 +155,7 @@ BorderSurface {
     visible: false
     anchors.fill: parent
     readonly property bool claro: !root.escuroTema
-    radius: ({ vidro: 18, suave: 14, windows: 10, escuro: 20, pilula: height / 2 })[root.est] || 0
+    radius: root.est === "pilula" ? height / 2 : Math.round((({ vidro: 18, suave: 14, windows: 10, escuro: 20 })[root.est] || 0) * root.esc)
     color: root.est === "escuro" ? Qt.rgba(0.11, 0.11, 0.12, 0.88)
          : root.est === "vidro" ? Qt.rgba(root.corFundo.r, root.corFundo.g, root.corFundo.b, 0.62)
          : root.est === "windows" ? Qt.rgba(root.corFundo.r, root.corFundo.g, root.corFundo.b, 0.94)
@@ -160,15 +187,15 @@ BorderSurface {
   // cabeçalho do "Estilo Windows 11": ícone pequeno + nome do app
   Row {
     visible: root.est === "windows"
-    x: 14; y: 11; spacing: 8
+    x: Math.round(14 * root.esc); y: Math.round(11 * root.esc); spacing: 8
     Image {
-      width: 16; height: 16; sourceSize.width: 32; sourceSize.height: 32
+      width: Math.round(16 * root.esc); height: width; sourceSize.width: 32; sourceSize.height: 32
       source: root.smallIconSource; smooth: true; asynchronous: true
       visible: status === Image.Ready
     }
     Text {
       text: root.app || "Simba OS"
-      font.family: root.fonteTexto; font.pixelSize: 12
+      font.family: root.fonteTexto; font.pixelSize: Math.round(12 * root.esc)
       color: Qt.rgba(root.corTexto.r, root.corTexto.g, root.corTexto.b, 0.65)
     }
   }
@@ -182,7 +209,7 @@ BorderSurface {
     height: root.height + 3 * root.px
     antialiasing: false
     renderStrategy: Canvas.Cooperative
-    property string chave: root.est + "|" + root.width + "x" + root.height + "|" + root.corFundo + root.corTexto
+    property string chave: root.est + "|" + root.tam + "|" + root.width + "x" + root.height + "|" + root.corFundo + root.corTexto
                            + "|" + (root.est === "conquista" ? root.blocosAcesos : 0) + "|" + root.app
     onChaveChanged: requestPaint()
     onPaint: {
@@ -198,10 +225,12 @@ BorderSurface {
         Px.sprite(c, P, Px.SETA, W - 10, H - 7, { k: texto })
         break
       case "balao":
-        Px.caixa(c, P, 14, 0, W - 14, H, fundo, texto, 3)
-        Px.sprite(c, P, Px.CAUDA, 11, H - 8, { k: texto, w: fundo })
-        Px.rect(c, P, 14, H - 7, 1, 3, fundo)
-        Px.sprite(c, P, Px.GATO, 0, H - 11, Px.GATO_CORES)
+        var bxx = root.balaoX
+        Px.caixa(c, P, bxx, 0, W - bxx, H, fundo, texto, 3)
+        Px.sprite(c, P, Px.CAUDA, bxx - 3, H - 8, { k: texto, w: fundo })
+        Px.rect(c, P, bxx, H - 7, 1, 3, fundo)
+        var ge = root.gatoEsc
+        Px.sprite(c, ge, Px.GATO, 0, Math.floor((H * P - 11 * ge) / ge), Px.GATO_CORES)
         break
       case "janela":
         Px.rect(c, P, 2, 2, W, H, "rgba(0,0,0,0.45)")
@@ -211,16 +240,23 @@ BorderSurface {
         Px.rect(c, P, 5, 2, 9, 9, fundo)
         Px.rect(c, P, 6, 3, 7, 7, texto); Px.rect(c, P, 7, 4, 5, 5, fundo)
         var tw = Math.ceil((tituloJanela.implicitWidth + 16) / P)
-        Px.rect(c, P, Math.floor((W - tw) / 2), 1, tw, 10, fundo)
-        Px.rect(c, P, 1, 11, W - 2, 1, texto)
+        var bh = Math.ceil((root.margens[1] - 4) / P) - 1   // altura da barra de título
+        for (var j2 = 9; j2 < bh - 1; j2 += 2) Px.rect(c, P, 2, 2 + j2, W - 4, 1, texto)
+        Px.rect(c, P, Math.floor((W - tw) / 2), 1, tw, bh - 1, fundo)
+        Px.rect(c, P, 1, bh, W - 2, 1, texto)
         break
       case "conquista":
         Px.rect(c, P, 2, 2, W, H, "#000000")
         Px.rect(c, P, 0, 0, W, H, "#d0d0d0")
         Px.rect(c, P, 1, 1, W - 2, H - 2, "#1e1e1e")
-        Px.rect(c, P, 5, 4, 16, 16, "#d0d0d0"); Px.rect(c, P, 6, 5, 14, 14, "#2c2c2c")
-        Px.pontilhado(c, P, 6, 5, 14, 14, "#383838")
-        for (var b = 0; b < 10; b++) Px.rect(c, P, 26 + b * 9, H - 7, 7, 3, b < root.blocosAcesos ? "#e0e0e0" : "#4a4a4a")
+        // moldura em volta do ícone e blocos de tempo alinhados ao texto
+        var ix = Math.floor((conteudo.x + iconeNovo.x) / P) - 2, iy = Math.floor((conteudo.y + iconeNovo.y) / P) - 2
+        var iw = Math.ceil(root.tamIcone / P) + 4
+        Px.rect(c, P, ix, iy, iw, iw, "#d0d0d0"); Px.rect(c, P, ix + 1, iy + 1, iw - 2, iw - 2, "#2c2c2c")
+        Px.pontilhado(c, P, ix + 1, iy + 1, iw - 2, iw - 2, "#383838")
+        var bx = Math.floor((conteudo.x + colunaTexto.x) / P)
+        var bw = Math.max(3, Math.floor((W - bx - 6) / 10) - 2)
+        for (var b = 0; b < 10; b++) Px.rect(c, P, bx + b * (bw + 2), H - 6, bw, 2, b < root.blocosAcesos ? "#e0e0e0" : "#4a4a4a")
         break
       case "portatil":
         Px.pontilhado(c, P, 3, 3, W, H, "#2b2b2b")
@@ -242,10 +278,10 @@ BorderSurface {
   Text {
     id: tituloJanela
     visible: root.est === "janela"
-    y: 1
+    y: root.px + Math.max(0, Math.round((root.margens[1] - 4 - 2 * root.px - height) / 2))
     anchors.horizontalCenter: parent.horizontalCenter
     text: root.app || "Simba OS"
-    font.family: "Simba Pixel"; font.pixelSize: 20; font.bold: true
+    font.family: "Simba Pixel"; font.pixelSize: root.pixel ? root.tamPixel.fz : 20; font.bold: true
     color: root.corTexto
     renderType: Text.NativeRendering
   }
@@ -253,11 +289,11 @@ BorderSurface {
   Text {
     visible: root.comFechar
     anchors.top: parent.top; anchors.right: parent.right
-    anchors.topMargin: root.est === "windows" ? 9 : 10
-    anchors.rightMargin: 14
+    anchors.topMargin: root.pixel ? 5 * root.px : Math.round((root.est === "windows" ? 9 : 10) * root.esc)
+    anchors.rightMargin: root.pixel ? 6 * root.px : Math.round(14 * root.esc)
     text: root.est === "vidro-pixel" ? "×" : "✕"
     font.family: root.est === "vidro-pixel" ? "Simba Pixel" : "Adwaita Sans"
-    font.pixelSize: root.est === "vidro-pixel" ? 20 : 12
+    font.pixelSize: root.est === "vidro-pixel" ? root.tamPixel.fz : Math.round(12 * root.esc)
     color: root.est === "escuro" ? "#9a9a9a" : Qt.rgba(root.corTexto.r, root.corTexto.g, root.corTexto.b, 0.5)
     MouseArea { anchors.fill: parent; anchors.margins: -6; cursorShape: Qt.PointingHandCursor; onClicked: root.closeRequested() }
   }
@@ -268,7 +304,7 @@ BorderSurface {
     visible: !root.legado
     x: root.margens[0]; y: root.margens[1]
     width: root.width - root.margens[0] - root.margens[2]
-    spacing: root.pixel ? 12 : 12
+    spacing: root.pixel ? Math.max(6, 4 * root.px + 2) : Math.round(12 * root.esc)
 
     Item {
       id: iconeNovo
@@ -277,13 +313,13 @@ BorderSurface {
       Layout.preferredWidth: root.tamIcone
       Layout.preferredHeight: root.tamIcone
       Layout.alignment: root.pixel ? Qt.AlignTop : Qt.AlignVCenter
-      Layout.topMargin: root.pixel ? 2 : 0
+      Layout.topMargin: root.pixel ? root.px : 0
       // fundo do ícone (Cartão suave, Escuro, Pílula)
       Rectangle {
         anchors.fill: parent
-        anchors.margins: -4
+        anchors.margins: -Math.round(4 * root.esc)
         visible: ["suave", "escuro", "pilula"].indexOf(root.est) >= 0
-        radius: root.est === "pilula" ? width / 2 : 12
+        radius: root.est === "pilula" ? width / 2 : Math.round(12 * root.esc)
         color: root.est === "escuro" ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(root.corTexto.r, root.corTexto.g, root.corTexto.b, 0.06)
       }
       Image {
@@ -292,8 +328,8 @@ BorderSurface {
         anchors.margins: root.est === "pilula" ? 4 : 0
         source: root.smallIconSource
         // pixel art: ícone pequeno ampliado sem suavizar
-        sourceSize.width: root.pixel ? 12 : root.tamIcone * Screen.devicePixelRatio
-        sourceSize.height: root.pixel ? 12 : root.tamIcone * Screen.devicePixelRatio
+        sourceSize.width: root.pixel ? Math.round(root.tamIcone / 2) : root.tamIcone * Screen.devicePixelRatio
+        sourceSize.height: root.pixel ? Math.round(root.tamIcone / 2) : root.tamIcone * Screen.devicePixelRatio
         fillMode: Image.PreserveAspectFit
         smooth: !root.pixel
         mipmap: false
@@ -306,11 +342,12 @@ BorderSurface {
         text: root.glyph
         color: root.corTitulo
         font.family: root.fontFamily
-        font.pixelSize: root.pixel ? 20 : Style.font.displayLarge
+        font.pixelSize: root.pixel ? root.tamPixel.fz : Math.round(Style.font.displayLarge * root.esc)
       }
     }
 
     ColumnLayout {
+      id: colunaTexto
       Layout.fillWidth: true
       Layout.alignment: Qt.AlignVCenter
       spacing: root.pixel ? 0 : 2
@@ -327,21 +364,20 @@ BorderSurface {
         renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
         wrapMode: Text.WordWrap
         elide: Text.ElideRight
-        maximumLineCount: root.est === "pilula" ? 1 : 2
+        maximumLineCount: 1
       }
       Text {
         Layout.fillWidth: true
         visible: root.sanitizedBody.length > 0
         text: root.styledBody
         textFormat: Text.StyledText
-        font.family: root.fonteTexto
+        font.family: root.fonteCorpo
         font.pixelSize: root.tamCorpo
         color: root.corCorpo
-        renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
+        renderType: root.fonteCorpo === "Simba Pixel" ? Text.NativeRendering : Text.QtRendering
         wrapMode: root.est === "pilula" ? Text.NoWrap : Text.WordWrap
         elide: Text.ElideRight
-        maximumLineCount: root.est === "pilula" ? 1 : 3
-        lineHeight: root.pixel ? 0.95 : 1.0
+        maximumLineCount: root.linhasCorpo
       }
     }
   }

@@ -814,6 +814,7 @@ Item {
   // Simba: estilo visual dos cartões, escolhido em Configurações › Notificações
   // (~/.config/simba/notificacoes.json → {"estilo": "..."}). Sem arquivo = "rpg".
   property string cardStyle: "rpg"
+  property string cardSize: "pequeno"
   FileView {
     id: estiloFile
     path: Quickshell.env("HOME") + "/.config/simba/notificacoes.json"
@@ -824,11 +825,13 @@ Item {
       try {
         var v = JSON.parse(text() || "{}")
         service.cardStyle = (v && typeof v.estilo === "string" && v.estilo) ? v.estilo : "rpg"
+        service.cardSize = (v && typeof v.tamanho === "string" && v.tamanho) ? v.tamanho : "pequeno"
       } catch (e) {
         service.cardStyle = "rpg"
+        service.cardSize = "pequeno"
       }
     }
-    onLoadFailed: service.cardStyle = "rpg"
+    onLoadFailed: { service.cardStyle = "rpg"; service.cardSize = "pequeno" }
   }
 
   function loadSettings(raw) {
@@ -1077,6 +1080,7 @@ Item {
               fontFamily: service.shell && service.shell.bar ? service.shell.bar.fontFamily : ""
               glyph: cardSlot.glyph
               estilo: service.cardStyle
+              tamanho: service.cardSize
               progresso: cardSlot.remainingLifetime
 
               onCloseRequested: service.dismissPopup(cardSlot.index)

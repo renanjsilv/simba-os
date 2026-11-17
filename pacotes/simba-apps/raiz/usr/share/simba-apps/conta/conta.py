@@ -177,8 +177,14 @@ def avisar(titulo, corpo="", urgente=False):
     if os.environ.get("CONTA_HOME"):
         return
     try:
-        subprocess.Popen(["notify-send", "-a", "Conta", "-i", "folder-remote", *(["-u", "critical"] if urgente else []),
-                          titulo, corpo], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if shutil.which("simba-notification-send"):
+            # clicar no aviso (ou nele na central de notificações) abre Configurações › Contas
+            cmd = ["simba-notification-send", "--app-name", "Conta", "-i", "folder-remote",
+                   *(["-u", "critical"] if urgente else []), titulo, corpo or " ", "--exec", "configuracoes", "contas"]
+        else:
+            cmd = ["notify-send", "-a", "Conta", "-i", "folder-remote", *(["-u", "critical"] if urgente else []),
+                   titulo, corpo]
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError:
         pass
 

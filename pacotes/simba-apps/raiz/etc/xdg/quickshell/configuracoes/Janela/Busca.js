@@ -162,6 +162,8 @@ var itens = [
   ["notificacoes", "limparNotif", "Limpar notificações", "", "limpar apagar notificacoes"],
   ["notificacoes", "testeNotif", "Enviar notificação de teste", "", "teste notificacao"],
   ["notificacoes", "estiloNotif", "Estilo das notificações", "Pixel art, vidro, cartão, Windows 11…", "estilo notificacao aparencia pixel art rpg balao vidro windows pilula escuro visual"],
+  ["notificacoes", "tamanhoNotif", "Tamanho dos avisos", "Pequeno, médio ou grande", "tamanho notificacao pequeno medio grande aviso"],
+  ["notificacoes", "temaCentral", "Tema da central de notificações", "Lista aberta pelo relógio", "central notificacoes relogio tema lista fluent pixel"],
   // Atalhos
   ["atalhos", "listaAtalhos", "Todos os atalhos de teclado", "", "atalhos teclas keybindings super"],
   ["atalhos", "superP", "Super + P: modo de projeção", "", "projetar super p atalho"],

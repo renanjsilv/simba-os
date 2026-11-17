@@ -2923,5 +2923,22 @@
   "Estilo": "Style",
   "Como os avisos aparecem no canto inferior direito. Vale na hora.": "How alerts look in the bottom-right corner. Applies right away.",
   "Pixel art": "Pixel art",
-  "Clássicos": "Classic"
+  "Clássicos": "Classic",
+  "Combina com o estilo dos avisos": "Matches the alert style",
+  "Fluent": "Fluent",
+  "Cartões suaves, como no Windows 11": "Soft cards, like Windows 11",
+  "Minimal": "Minimal",
+  "Lista limpa separada por linhas": "Clean list separated by lines",
+  "Painel escuro mesmo no tema claro": "Dark panel even with the light theme",
+  "Pixel RPG": "Pixel RPG",
+  "Moldura dupla com cantos em degrau": "Double frame with stepped corners",
+  "Pixel Portátil": "Pixel Handheld",
+  "Tons de cinza de videogame portátil": "Handheld console shades of gray",
+  "Pixel Noturno": "Pixel Night",
+  "Escuro com faixa pontilhada": "Dark with a dithered band",
+  "Tamanho dos avisos": "Alert size",
+  "O Pequeno ocupa menos espaço na tela.": "Small takes up less screen space.",
+  "Tema da central de notificações": "Notification center theme",
+  "Visual da lista de notificações que abre ao clicar no relógio.": "Look of the notification list that opens when you click the clock.",
+  "Estilo dos avisos": "Alert style"
 }

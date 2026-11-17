@@ -6,20 +6,22 @@ import qs.Commons
 import qs.Commons as Commons
 import "../../notifications/components/PixelArte.js" as Px
 
-// Central de notificações do Simba (acima da data e do calendário, como no Windows 11).
+// Central de notificações do Simba (cartão superior flutuante, estilo Windows 11).
 // Lista as últimas notificações do histórico (~/.local/state/simba/notifications/history),
 // cada uma removível (×) e clicável: executa a ação dela (simba-exec-argv), abre a página
 // certa das Configurações para os avisos do próprio sistema, ou foca a janela do app.
 //
-// Temas (~/.config/simba/notificacoes.json → "central"): auto, fluent, minimal, escuro,
-// pixel-rpg, pixel-portatil, pixel-noturno. "auto" acompanha o estilo dos avisos.
+// Temas (~/.config/simba/notificacoes.json → "central"):
+// 1. escuro: Windows 11 Dark Mica (padrão)
+// 2. fluent: Windows 11 Fluent Fiel (acrílico/vidro suave)
+// 3. pixel-rpg: Simba Pixel Art Retrô
+// 4. minimal: Simba Minimal Moderno
 Item {
   id: root
 
   property bool ativo: false              // o painel está aberto
   property color fg: Commons.Color.foreground
   property color bg: Commons.Color.popups.background
-  property color destaque: Commons.Color.accent
   property string fonteSistema: "Adwaita Sans"
   signal acionado()                       // pede para fechar o painel depois de um clique
 
@@ -29,17 +31,100 @@ Item {
 
   // ── preferências ────────────────────────────────────────────────────────
   property string estiloAviso: "rpg"
-  property string temaEscolhido: "auto"
+  property string temaEscolhido: "escuro"  // PADRÃO DO SISTEMA: Opção 4 (Windows 11 Dark Mica)
   property string temaForcado: ""          // prévias (Configurações)
   readonly property string tema: {
     var t = temaForcado || temaEscolhido
+    if (t === "win11-fluent") return "fluent"
+    if (t === "win11-dark" || t === "dark") return "escuro"
+    if (t === "pixel") return "pixel-rpg"
     if (["fluent", "minimal", "escuro", "pixel-rpg", "pixel-portatil", "pixel-noturno"].indexOf(t) >= 0) return t
-    return ({ vidro: "fluent", windows: "fluent", suave: "minimal", pilula: "minimal", padrao: "minimal",
-              escuro: "escuro", rpg: "pixel-rpg", balao: "pixel-rpg", janela: "pixel-rpg",
-              portatil: "pixel-portatil", conquista: "pixel-noturno", "vidro-pixel": "pixel-noturno" })[estiloAviso] || "pixel-rpg"
+    return "escuro"
   }
   readonly property bool pixel: tema.indexOf("pixel") === 0
   readonly property int px: 2
+  readonly property int raio: pixel ? 0 : (tema === "minimal" ? 8 : 12)
+
+  // Detecção dinâmica de tema escuro ou claro do sistema
+  readonly property bool darkTheme: {
+    var b = Commons.Color.background
+    return (b.r * 0.299 + b.g * 0.587 + b.b * 0.114) < 0.5
+  }
+
+  // ── Cores adaptativas por tema (funcionam em tema branco e tema preto) ───────
+  readonly property color cFundo: {
+    if (tema === "escuro") return darkTheme ? Qt.rgba(0.11, 0.11, 0.13, 0.88) : Qt.rgba(0.96, 0.96, 0.97, 0.88)
+    if (tema === "fluent") return darkTheme ? Qt.rgba(0.14, 0.14, 0.17, 0.85) : Qt.rgba(0.96, 0.97, 0.98, 0.82)
+    if (tema === "minimal") return darkTheme ? "#181a1f" : "#ffffff"
+    if (pixel) return darkTheme ? "#111111" : "#ffffff"
+    return darkTheme ? Qt.rgba(0.11, 0.11, 0.13, 0.88) : Qt.rgba(0.96, 0.96, 0.97, 0.88)
+  }
+
+  readonly property color cBorda: {
+    if (tema === "escuro") return darkTheme ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(0, 0, 0, 0.10)
+    if (tema === "fluent") return darkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.08)
+    if (tema === "minimal") return darkTheme ? "#2d3139" : "#e5e7eb"
+    if (pixel) return darkTheme ? "#b8b8b8" : "#111111"
+    return darkTheme ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(0, 0, 0, 0.10)
+  }
+
+  readonly property color cTexto: {
+    if (tema === "escuro") return darkTheme ? "#ffffff" : "#111827"
+    if (tema === "fluent") return darkTheme ? "#f3f4f6" : "#111827"
+    if (tema === "minimal") return darkTheme ? "#f3f4f6" : "#111827"
+    if (pixel) return darkTheme ? "#f2f2f2" : "#111111"
+    return darkTheme ? "#ffffff" : "#111827"
+  }
+
+  readonly property color cTextoSec: {
+    if (tema === "escuro") return darkTheme ? "#d1d5db" : "#4b5563"
+    if (tema === "fluent") return darkTheme ? "#d1d5db" : "#4b5563"
+    if (tema === "minimal") return darkTheme ? "#d1d5db" : "#4b5563"
+    if (pixel) return darkTheme ? "#cccccc" : "#333333"
+    return darkTheme ? "#d1d5db" : "#4b5563"
+  }
+
+  readonly property color cApagado: {
+    if (tema === "escuro") return darkTheme ? "#9ca3af" : "#6b7280"
+    if (tema === "fluent") return darkTheme ? "#9ca3af" : "#6b7280"
+    if (tema === "minimal") return darkTheme ? "#8b949e" : "#9ca3af"
+    if (pixel) return darkTheme ? "#888888" : "#666666"
+    return darkTheme ? "#9ca3af" : "#6b7280"
+  }
+
+  readonly property color cItem: {
+    if (tema === "escuro") return darkTheme ? Qt.rgba(1, 1, 1, 0.07) : Qt.rgba(1, 1, 1, 0.85)
+    if (tema === "fluent") return darkTheme ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(1, 1, 1, 0.85)
+    if (tema === "minimal") return darkTheme ? "#22252b" : "#fafafa"
+    if (pixel) return darkTheme ? "#1a1a1a" : "#f8f8f8"
+    return darkTheme ? Qt.rgba(1, 1, 1, 0.07) : Qt.rgba(1, 1, 1, 0.85)
+  }
+
+  readonly property color cBordaItem: {
+    if (tema === "escuro") return darkTheme ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.06)
+    if (tema === "fluent") return darkTheme ? Qt.rgba(1, 1, 1, 0.1) : Qt.rgba(0, 0, 0, 0.05)
+    if (tema === "minimal") return darkTheme ? "#2d3139" : "#f0f0f0"
+    if (pixel) return darkTheme ? "#7a7a7a" : "#111111"
+    return darkTheme ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.06)
+  }
+
+  readonly property color cHover: {
+    if (tema === "escuro") return darkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.05)
+    if (tema === "fluent") return darkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.05)
+    if (tema === "minimal") return darkTheme ? "#2a2e36" : "#f3f4f6"
+    if (pixel) return darkTheme ? "#2c2c2c" : "#e0e0e0"
+    return darkTheme ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.05)
+  }
+
+  readonly property color destaque: {
+    if (tema === "escuro") return darkTheme ? "#0078d4" : "#0067c0"
+    if (tema === "fluent") return darkTheme ? "#38bdf8" : "#0067c0"
+    if (tema === "minimal") return darkTheme ? "#e5e7eb" : "#1f2937"
+    if (pixel) return darkTheme ? "#ffffff" : "#111111"
+    return darkTheme ? "#0078d4" : "#0067c0"
+  }
+
+  readonly property string fonteTitulo: pixel ? "Simba Pixel" : fonteSistema
 
   FileView {
     path: root.home + "/.config/simba/notificacoes.json"
@@ -50,37 +135,21 @@ Item {
       try {
         var v = JSON.parse(text() || "{}")
         root.estiloAviso = v.estilo || "rpg"
-        root.temaEscolhido = v.central || "auto"
-      } catch (e) { root.estiloAviso = "rpg"; root.temaEscolhido = "auto" }
+        root.temaEscolhido = v.central || "escuro"
+      } catch (e) { root.estiloAviso = "rpg"; root.temaEscolhido = "escuro" }
     }
-    onLoadFailed: { root.estiloAviso = "rpg"; root.temaEscolhido = "auto" }
+    onLoadFailed: { root.estiloAviso = "rpg"; root.temaEscolhido = "escuro" }
   }
-
-  // ── cores por tema (sempre a partir das cores do tema do sistema) ───────
-  function mistura(a, b, t) { return Qt.rgba(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, 1) }
-  readonly property bool invertido: tema === "escuro" || tema === "pixel-noturno"
-  readonly property color cFundo: tema === "escuro" ? Qt.rgba(0.11, 0.11, 0.12, 1)
-                                 : tema === "pixel-noturno" ? Qt.rgba(0.09, 0.09, 0.10, 1)
-                                 : tema === "pixel-portatil" ? mistura(bg, fg, 0.33) : bg
-  readonly property color cTexto: invertido ? "#f2f2f2" : (tema === "pixel-portatil" ? fg : fg)
-  readonly property color cApagado: invertido ? "#a8a8a8" : mistura(fg, bg, 0.45)
-  readonly property color cItem: tema === "escuro" ? Qt.rgba(1, 1, 1, 0.07)
-                                : tema === "pixel-noturno" ? Qt.rgba(1, 1, 1, 0.06)
-                                : tema === "pixel-portatil" ? bg
-                                : tema === "minimal" ? "transparent" : mistura(bg, fg, 0.045)
-  readonly property color cHover: invertido ? Qt.rgba(1, 1, 1, 0.13) : mistura(bg, fg, 0.09)
-  readonly property color cBorda: invertido ? Qt.rgba(1, 1, 1, 0.16) : mistura(bg, fg, 0.16)
-  readonly property string fonteTitulo: pixel ? "Simba Pixel" : fonteSistema
 
   // ── dados ───────────────────────────────────────────────────────────────
   property var itens: exemplo || []
   property var exemplo: null                // prévias: lista fixa, não lê o histórico
   property bool dnd: false
-  // hora atual pelo SystemClock (o construtor Date não está disponível neste contexto)
+  // hora atual pelo SystemClock
   SystemClock { id: relogio; precision: SystemClock.Minutes }
   readonly property double agora: relogio.date.getTime()
 
-  function ler() { if (exemplo) return; leitor.running = true; dndProc.running = true }
+  function ler() { if (exemplo || limpando) return; leitor.running = true; dndProc.running = true }
 
   Process {
     id: leitor
@@ -106,7 +175,11 @@ Item {
           if (ua !== ub) return ub - ua
           return (b.timestamp || 0) - (a.timestamp || 0)
         })
-        root.itens = lista
+        // só troca a lista se mudou: trocar recria os itens e cortaria uma animação de saída
+        if (root.limpando) return
+        var chaveNova = lista.map(function(x) { return x.arquivo }).join("|")
+        var chaveAtual = root.itens.map(function(x) { return x.arquivo }).join("|")
+        if (chaveNova !== chaveAtual) root.itens = lista
       }
     }
   }
@@ -136,10 +209,39 @@ Item {
     root.itens = root.itens.filter(function(x) { return x.arquivo !== item.arquivo })
   }
 
+  // "Limpar tudo": cada item sai em cascata (30 ms entre um e outro) e só no fim
+  // o histórico é apagado de verdade.
+  property bool limpando: false
+  readonly property int passoCascata: 30
+  readonly property int duracaoSaida: 300      // deslizar (160) + encolher (140)
+  // O histórico só é apagado quando o último item termina de sair (contagem em saidos);
+  // o Timer é só a rede de segurança caso alguma animação não chegue ao fim.
+  property int saidos: 0
   function limparTudo() {
-    acao.command = ["simba-shell", "notifications", "clear"]
-    acao.running = true
+    if (root.limpando || root.itens.length === 0) return
+    root.saidos = 0
+    root.limpando = true
+    fimLimpeza.interval = (root.itens.length - 1) * root.passoCascata + root.duracaoSaida + 2000
+    fimLimpeza.restart()
+  }
+  function itemSaiu() {
+    root.saidos++
+    if (root.saidos >= root.itens.length) concluirLimpeza()
+  }
+  function concluirLimpeza() {
+    if (!root.limpando) return
+    fimLimpeza.stop()
+    if (!root.exemplo) {   // prévias/testes nunca apagam o histórico de verdade
+      acao.command = ["simba-shell", "notifications", "clear"]
+      acao.running = true
+    }
     root.itens = []
+    root.limpando = false
+  }
+  Timer {
+    id: fimLimpeza
+    repeat: false
+    onTriggered: root.concluirLimpeza()
   }
 
   function alternarDnd() {
@@ -174,15 +276,16 @@ Item {
 
   implicitHeight: coluna.implicitHeight
 
-  // ── fundo da seção (moldura do tema) ─────────────────────────────────────
+  // ── Fundo do cartão superior flutuante ─────────────────────────────────────
   Rectangle {
     anchors.fill: parent
-    visible: !root.pixel && root.tema !== "minimal"
-    radius: root.tema === "escuro" ? 10 : 8
-    color: root.tema === "escuro" ? root.cFundo : "transparent"
-    border.width: root.tema === "fluent" ? 1 : 0
+    visible: !root.pixel
+    radius: root.raio
+    color: root.cFundo
+    border.width: 1
     border.color: root.cBorda
   }
+
   Canvas {
     id: moldura
     anchors.fill: parent
@@ -194,50 +297,46 @@ Item {
       var c = getContext("2d"); c.reset()
       if (!root.pixel) return
       var P = root.px, W = Math.floor(width / P), H = Math.floor(height / P)
-      var f = String(root.cFundo), t = String(root.tema === "pixel-noturno" ? root.cApagado : root.fg)
-      if (root.tema === "pixel-rpg") {
-        Px.caixa(c, P, 0, 0, W, H, f, t, 2)
-        Px.caixa(c, P, 2, 2, W - 4, H - 4, f, String(root.cBorda), 1)
-      } else if (root.tema === "pixel-portatil") {
-        Px.rect(c, P, 0, 0, W, H, String(root.fg))
-        Px.rect(c, P, 1, 1, W - 2, H - 2, f)
-      } else {
-        Px.caixa(c, P, 0, 0, W, H, f, t, 2)
-        Px.pontilhado(c, P, 2, 2, W - 4, 8, String(Qt.rgba(root.destaque.r, root.destaque.g, root.destaque.b, 0.35)))
-      }
+      var f = String(root.cFundo), t = String(root.cBorda)
+      Px.caixa(c, P, 0, 0, W, H, f, t, 2)
+      Px.caixa(c, P, 2, 2, W - 4, H - 4, f, String(root.cBordaItem), 1)
     }
   }
 
   ColumnLayout {
     id: coluna
-    width: parent.width
+    anchors.fill: parent
     spacing: 0
 
-    // ── cabeçalho ──
+    // ── 1. Cabeçalho de Notificações ──
     RowLayout {
       Layout.fillWidth: true
-      Layout.leftMargin: root.pixel ? 12 : 10
-      Layout.rightMargin: root.pixel ? 14 : 10
-      Layout.topMargin: root.pixel ? 8 : 6
+      Layout.leftMargin: root.pixel ? 12 : 14
+      Layout.rightMargin: root.pixel ? 12 : 14
+      Layout.topMargin: root.pixel ? 8 : 10
+      Layout.bottomMargin: 6
       Layout.preferredHeight: 30
       spacing: 6
+
       Text {
         text: "Notificações"
         font.family: root.fonteTitulo
-        font.pixelSize: root.pixel ? 16 : 13
+        font.pixelSize: root.pixel ? 16 : 13.5
         font.bold: true
         font.capitalization: root.tema === "minimal" ? Font.AllUppercase : Font.MixedCase
         font.letterSpacing: root.tema === "minimal" ? 0.5 : 0
         color: root.cTexto
         renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
       }
+
+      // Contador de notificações
       Rectangle {
         visible: root.itens.length > 0
         implicitWidth: Math.max(16, contador.implicitWidth + 8)
         implicitHeight: 16
         radius: root.pixel ? 0 : 8
         color: root.pixel ? root.cTexto : root.cItem
-        border.width: root.tema === "minimal" ? 1 : 0
+        border.width: root.pixel ? 1 : (root.tema === "minimal" ? 1 : 0)
         border.color: root.cBorda
         Text {
           id: contador
@@ -250,63 +349,89 @@ Item {
           renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
         }
       }
+
       Item { Layout.fillWidth: true }
-      // Não perturbe
+
+      // Botão Não Perturbe
       Rectangle {
-        implicitWidth: 24; implicitHeight: 24
-        radius: root.pixel ? 0 : 5
+        implicitWidth: 26; implicitHeight: 26
+        radius: root.pixel ? 0 : 6
         color: root.dnd ? root.destaque : (dndMouse.containsMouse ? root.cHover : "transparent")
+        border.width: root.pixel ? 1 : 0
+        border.color: root.cBorda
         Text {
           anchors.centerIn: parent
           text: root.dnd ? "󰂛" : "󰂚"
           font.family: "JetBrainsMono Nerd Font"
           font.pixelSize: 13
-          color: root.dnd ? root.cFundo : root.cTexto
+          color: root.dnd ? "#ffffff" : root.cTexto
         }
         MouseArea {
           id: dndMouse
           anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
           onClicked: root.alternarDnd()
         }
-        ToolTipSimples { visivel: dndMouse.containsMouse; texto: root.dnd ? "Não perturbe: ligado — avisos vão só para a central" : "Não perturbe: desligado — clique para silenciar avisos" }
+        ToolTipSimples {
+          visivel: dndMouse.containsMouse
+          texto: root.dnd ? "Não perturbe: ligado" : "Não perturbe: desligado"
+        }
       }
-      // Limpar tudo
-      Text {
+
+      // Botão Limpar tudo (estilo pill do Windows 11)
+      Rectangle {
         visible: root.itens.length > 0
-        text: "Limpar tudo"
-        font.family: root.pixel ? "Simba Pixel" : root.fonteSistema
-        font.pixelSize: root.pixel ? 16 : 11
-        font.underline: limparMouse.containsMouse && !root.pixel
-        color: limparMouse.containsMouse ? root.cTexto : root.cApagado
-        renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
+        implicitWidth: txtLimpar.implicitWidth + 14
+        implicitHeight: 24
+        radius: root.pixel ? 0 : 5
+        color: limparMouse.containsMouse ? root.cHover : "transparent"
+        border.width: 1
+        border.color: root.cBordaItem
+
+        Text {
+          id: txtLimpar
+          anchors.centerIn: parent
+          text: "Limpar tudo"
+          font.family: root.fonteTitulo
+          font.pixelSize: root.pixel ? 13 : 11
+          font.bold: true
+          color: root.cTexto
+          renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
+        }
         MouseArea {
           id: limparMouse
-          anchors.fill: parent; anchors.margins: -4
+          anchors.fill: parent
           hoverEnabled: true; cursorShape: Qt.PointingHandCursor
           onClicked: root.limparTudo()
         }
       }
     }
 
-    // ── lista ──
-    Flickable {
-      id: rolagem
+    // ── 2. Lista de Notificações ──
+    Item {
+      id: containerRolagem
+      visible: root.itens.length > 0
       Layout.fillWidth: true
-      Layout.leftMargin: root.pixel ? 8 : 6
-      Layout.rightMargin: root.pixel ? 8 : 6
+      Layout.fillHeight: visible
+      Layout.preferredHeight: visible ? -1 : 0
+      Layout.leftMargin: root.pixel ? 10 : 12
+      Layout.rightMargin: root.pixel ? 10 : 12
       Layout.topMargin: 2
-      Layout.bottomMargin: root.pixel ? 8 : 6
-      Layout.preferredHeight: root.itens.length === 0 ? vazio.implicitHeight : Math.min(lista.implicitHeight, 180)
-      contentHeight: lista.implicitHeight
-      clip: true
-      boundsBehavior: Flickable.StopAtBounds
-      interactive: contentHeight > height
-      flickDeceleration: 4000
+      Layout.bottomMargin: root.pixel ? 10 : 12
+
+      Flickable {
+        id: rolagem
+        anchors.fill: parent
+        anchors.rightMargin: (contentHeight > height) ? 7 : 0
+        contentHeight: lista.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        interactive: contentHeight > height
+        flickDeceleration: 4000
 
       Column {
         id: lista
         width: rolagem.width
-        spacing: root.tema === "minimal" ? 0 : 4
+        spacing: root.tema === "minimal" ? 2 : 6
 
         Repeater {
           model: root.itens
@@ -315,27 +440,42 @@ Item {
             required property var modelData
             required property int index
             width: lista.width
-            height: corpoItem.implicitHeight + 12
+            // fator encolhe a altura no fim da saída, para os de baixo subirem suavemente
+            property real fator: 1
+            height: (corpoItem.implicitHeight + 14) * fator
+            clip: fator < 1
             readonly property bool urgente: modelData.urgency === 2
+            property bool individual: false
+            Connections {
+              target: root
+              function onLimpandoChanged() {
+                if (root.limpando && !saida.running) {
+                  it.individual = false
+                  atrasoSaida.duration = it.index * root.passoCascata
+                  saida.start()
+                }
+              }
+            }
             readonly property bool sobre: mItem.containsMouse || mFechar.containsMouse
             opacity: 1
 
-            // fundo do item
+            // Fundo do cartão individual de notificação
             Rectangle {
               anchors.fill: parent
               visible: !root.pixel
-              radius: root.tema === "minimal" ? 0 : 6
+              radius: root.tema === "minimal" ? 4 : 8
               color: it.sobre ? root.cHover : root.cItem
+              border.width: 1
+              border.color: root.cBordaItem
               Behavior on color { ColorAnimation { duration: 100 } }
-              Rectangle {   // linha separadora (Minimal)
-                visible: root.tema === "minimal" && it.index < root.itens.length - 1
-                anchors.bottom: parent.bottom; width: parent.width; height: 1; color: root.cBorda
-              }
-              Rectangle {   // faixa de urgente
+
+              // Faixa de destaque para notificações urgentes
+              Rectangle {
                 visible: it.urgente
-                width: 3; height: parent.height - 8; y: 4; radius: 1.5; color: root.cTexto
+                width: 3; height: parent.height - 8; y: 4; radius: 1.5; color: root.destaque
               }
             }
+
             Canvas {
               anchors.fill: parent
               visible: root.pixel
@@ -346,21 +486,22 @@ Item {
                 var c = getContext("2d"); c.reset()
                 if (!root.pixel) return
                 var P = root.px, W = Math.floor(width / P), H = Math.floor(height / P)
-                var borda = root.tema === "pixel-portatil" ? String(mistura(root.bg, root.fg, 0.66)) : String(root.cBorda)
-                Px.caixa(c, P, 0, 0, W, H, String(root.tema === "pixel-portatil" ? root.bg : (root.tema === "pixel-noturno" ? Qt.rgba(0.14, 0.14, 0.15, 1) : root.bg)), borda, 1)
+                Px.caixa(c, P, 0, 0, W, H, String(root.cItem), String(root.cBordaItem), 1)
                 if (it.sobre) Px.pontilhadoForma(c, P, 1, 1, W - 2, H - 2, 0, String(root.cHover))
-                if (it.urgente) Px.rect(c, P, 2, 3, 2, H - 6, String(root.cTexto))
+                if (it.urgente) Px.rect(c, P, 2, 2, 2, H - 4, String(root.cTexto))
               }
             }
 
             ColumnLayout {
               id: corpoItem
-              x: it.urgente ? 12 : 8
-              y: 6
+              x: it.urgente ? 14 : 10
+              y: 7
               width: parent.width - x - 28
-              spacing: 1
+              spacing: 2
+
+              // Linha do App e Horário
               RowLayout {
-                spacing: 5
+                spacing: 6
                 Image {
                   Layout.preferredWidth: 16; Layout.preferredHeight: 16
                   source: {
@@ -377,37 +518,43 @@ Item {
                 Text {
                   text: (it.modelData.app || "Sistema") + " · " + root.quando(it.modelData.timestamp || 0)
                   font.family: root.fonteSistema; font.pixelSize: 10
+                  font.bold: true
                   color: root.cApagado
                   elide: Text.ElideRight
                   Layout.fillWidth: true
                 }
               }
+
+              // Título
               Text {
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text: (it.urgente ? "! " : "") + (it.modelData.summary || "")
                 font.family: root.fonteTitulo
-                font.pixelSize: root.pixel ? 16 : 12
+                font.pixelSize: root.pixel ? 15 : 12.5
                 font.bold: true
                 color: root.cTexto
                 elide: Text.ElideRight
                 maximumLineCount: 1
                 renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
               }
+
+              // Mensagem / Detalhes
               Text {
                 Layout.fillWidth: true
                 visible: text.length > 0
                 text: String(it.modelData.body || "").replace(/<[^>]+>/g, "")
                 textFormat: Text.PlainText
                 font.family: root.fonteSistema; font.pixelSize: 11
-                color: root.cTexto
-                opacity: 0.8
+                color: root.cTextoSec
                 wrapMode: Text.WordWrap
                 elide: Text.ElideRight
                 maximumLineCount: 2
+                lineHeight: 1.2
               }
             }
 
+            // Área de clique da notificação inteira
             MouseArea {
               id: mItem
               anchors.fill: parent
@@ -415,10 +562,11 @@ Item {
               cursorShape: root.temAcao(it.modelData) ? Qt.PointingHandCursor : Qt.ArrowCursor
               onClicked: root.acionar(it.modelData)
             }
-            // remover (×)
+
+            // Botão Fechar (×)
             Rectangle {
               anchors.top: parent.top; anchors.right: parent.right
-              anchors.topMargin: 4; anchors.rightMargin: 4
+              anchors.topMargin: 5; anchors.rightMargin: 5
               width: 20; height: 20
               radius: root.pixel ? 0 : 4
               opacity: it.sobre ? 1 : 0
@@ -434,31 +582,64 @@ Item {
               MouseArea {
                 id: mFechar
                 anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
-                onClicked: saida.start()
+                onClicked: { it.individual = true; atrasoSaida.duration = 0; saida.start() }
               }
             }
-            // desliza para a direita e some, depois sai do histórico
-            ParallelAnimation {
+
+            // Animação de remoção suave
+            // desliza para a direita e some, depois encolhe (os de baixo sobem)
+            SequentialAnimation {
               id: saida
-              NumberAnimation { target: it; property: "opacity"; to: 0; duration: 160 }
-              NumberAnimation { target: it; property: "x"; to: 24; duration: 160; easing.type: Easing.OutCubic }
-              onFinished: root.remover(it.modelData)
+              PauseAnimation { id: atrasoSaida; duration: 0 }
+              ParallelAnimation {
+                NumberAnimation { target: it; property: "opacity"; to: 0; duration: 160; easing.type: Easing.OutQuad }
+                NumberAnimation { target: it; property: "x"; to: Math.round(it.width * 0.35); duration: 160; easing.type: Easing.InCubic }
+              }
+              NumberAnimation { target: it; property: "fator"; to: 0; duration: 140; easing.type: Easing.InOutQuad }
+              onFinished: {
+                if (it.individual) root.remover(it.modelData)
+                else if (root.limpando) root.itemSaiu()
+              }
             }
           }
         }
       }
     }
 
-    // ── estado vazio ──
+    // Barra de rolagem discreta estilo Win11
+      Rectangle {
+        id: barraRolagem
+        visible: rolagem.contentHeight > rolagem.height
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        width: 3
+        color: "transparent"
+
+        Rectangle {
+          y: rolagem.visibleArea.yPosition * parent.height
+          width: 3
+          height: Math.max(20, rolagem.visibleArea.heightRatio * parent.height)
+          radius: 1.5
+          color: root.cApagado
+          opacity: 0.5
+        }
+      }
+    }
+
+    // ── 3. Estado Vazio ──
     Item {
       id: vazio
       visible: root.itens.length === 0
       Layout.fillWidth: true
-      Layout.preferredHeight: visible ? implicitHeight : 0
-      implicitHeight: 56
+      Layout.fillHeight: visible
+      Layout.preferredHeight: visible ? -1 : 0
+      implicitHeight: 64
+
       Column {
         anchors.centerIn: parent
-        spacing: 2
+        spacing: 3
+
         Canvas {   // Simba cochilando (temas pixel)
           visible: root.pixel
           anchors.horizontalCenter: parent.horizontalCenter
@@ -481,6 +662,7 @@ Item {
             for (var k = 0; k <= quadro; k++) Px.rect(c, 2, 17 + k * 2, 2 - k * 2, 2, 1, cor)
           }
         }
+
         Text {
           visible: !root.pixel
           anchors.horizontalCenter: parent.horizontalCenter
@@ -490,7 +672,7 @@ Item {
         Text {
           anchors.horizontalCenter: parent.horizontalCenter
           text: root.pixel ? "Nada por aqui…" : "Nenhuma notificação nova"
-          font.family: root.fonteTitulo; font.pixelSize: root.pixel ? 16 : 12; font.bold: root.pixel
+          font.family: root.fonteTitulo; font.pixelSize: root.pixel ? 16 : 12; font.bold: true
           color: root.cTexto
           renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
         }
@@ -504,7 +686,7 @@ Item {
     }
   }
 
-  // dica simples (sem depender dos componentes do painel)
+  // Dica simples (tooltip)
   component ToolTipSimples: Rectangle {
     property bool visivel: false
     property string texto: ""
@@ -514,7 +696,9 @@ Item {
     anchors.right: parent.right
     width: dica.implicitWidth + 14; height: dica.implicitHeight + 8
     radius: root.pixel ? 0 : 4
-    color: root.invertido ? "#2a2a2a" : root.fg
-    Text { id: dica; anchors.centerIn: parent; text: parent.texto; font.family: root.fonteSistema; font.pixelSize: 11; color: root.invertido ? "#f2f2f2" : root.bg }
+    color: root.cItem
+    border.width: 1
+    border.color: root.cBorda
+    Text { id: dica; anchors.centerIn: parent; text: parent.texto; font.family: root.fonteSistema; font.pixelSize: 11; color: root.cTexto }
   }
 }

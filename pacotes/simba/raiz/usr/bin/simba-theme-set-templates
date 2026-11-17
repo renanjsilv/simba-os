@@ -374,6 +374,16 @@ if [[ -f $COLORS_FILE ]]; then
   shopt -s nullglob
   template_files=("$USER_TEMPLATES_DIR"/*.tpl "$TEMPLATES_DIR"/*.tpl)
 
+  # Simba: SIMBA_THEMED_ONLY=shell.toml gera só esse arquivo (a troca de tema manda a
+  # barra/os painéis ao shell antes de gerar o resto; o resto não sobrescreve o que já existe).
+  if [[ -n ${SIMBA_THEMED_ONLY:-} ]]; then
+    only=()
+    for tpl in "${template_files[@]}"; do
+      [[ $(basename "$tpl" .tpl) == "$SIMBA_THEMED_ONLY" ]] && only+=("$tpl")
+    done
+    template_files=("${only[@]}")
+  fi
+
   # Parsing and alias/fallback resolution (legacy colorN names, derived
   # shades, mode/theme_type) is shared with every other colors.toml consumer.
   while IFS=$'\t' read -r key value; do

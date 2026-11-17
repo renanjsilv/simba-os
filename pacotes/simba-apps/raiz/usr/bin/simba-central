@@ -286,7 +286,7 @@ case "${1:-}" in
     # alterna entre o tema escuro e o claro do Simba (black ⇄ white),
     # lembrando o último escuro/claro usado se for outro
     st="$HOME/.local/state/simba"; mkdir -p "$st"; t=$(tema)
-    if [[ $(estado | jq -r .claro) == true ]]; then
+    if [[ $(tema_claro) == true ]]; then   # antes: estado completo (Wi-Fi, BT, áudio…) só para isto
       echo "$t" > "$st/tema-claro"; alvo=$(cat "$st/tema-escuro" 2>/dev/null || echo black)
     else
       echo "$t" > "$st/tema-escuro"; alvo=$(cat "$st/tema-claro" 2>/dev/null || echo white)

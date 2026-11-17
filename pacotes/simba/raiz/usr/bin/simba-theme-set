@@ -280,6 +280,32 @@ if [[ ! -f $NEXT_THEME_PATH/colors.toml && -f $NEXT_THEME_PATH/alacritty.toml ]]
   simba-theme-colors-from-alacritty "$NEXT_THEME_PATH"
 fi
 
+# Simba: com o papel de parede fixo (papel-definido) a troca não tem transição de
+# fundo, então o shell recebe as cores novas já aqui, antes dos templates (~2 s):
+# a tela muda na hora e o resto continua por trás.
+EARLY_SHELL_APPLIED=0
+# Apps GTK/libadwaita (Configurações, Explorador, chat…) mudam claro/escuro já agora; o
+# simba-theme-set-gnome completo (ícones) continua rodando no fim, como antes.
+if [[ $THEME_HEADLESS != "1" && -n ${DBUS_SESSION_BUS_ADDRESS:-} && -f $NEXT_THEME_PATH/colors.toml ]]; then
+  if [[ $(simba-theme-color --file "$NEXT_THEME_PATH/colors.toml" mode 2>/dev/null) == "light" ]]; then
+    gsettings set org.gnome.desktop.interface color-scheme "prefer-light" &
+  else
+    gsettings set org.gnome.desktop.interface color-scheme "prefer-dark" &
+  fi
+fi
+if [[ $THEME_HEADLESS != "1" && -f $HOME/.local/state/simba/papel-definido ]]; then
+  early_pinned=$(<"$HOME/.local/state/simba/papel-definido")
+  if [[ -f $early_pinned && $early_pinned != "$(realpath -m "$CURRENT_THEME_PATH")"/* ]]; then
+    # só o shell.toml (barra, painéis, notificações) é gerado agora; o resto vem depois
+    SIMBA_THEMED_ONLY=shell.toml simba-theme-set-templates
+    early_colors=$([[ -f $NEXT_THEME_PATH/colors.toml ]] && base64 -w 0 "$NEXT_THEME_PATH/colors.toml")
+    early_shell=$([[ -f $NEXT_THEME_PATH/shell.toml ]] && base64 -w 0 "$NEXT_THEME_PATH/shell.toml")
+    if [[ -n $early_colors ]]; then
+      shell_ipc shell applyTheme "$early_colors" "$early_shell" && EARLY_SHELL_APPLIED=1
+    fi
+  fi
+fi
+
 # Generate dynamic configs
 simba-theme-set-templates
 
@@ -321,7 +347,7 @@ if [[ $THEME_HEADLESS == "1" ]]; then
   # render.
   [[ $SIMBA_THEME_SKIP_BACKGROUND == "1" ]] || set_theme_background_link || true
 elif [[ $SIMBA_THEME_SKIP_BACKGROUND == "1" ]]; then
-  shell_ipc shell applyTheme "$colors_payload" "$shell_payload" || true
+  [[ $EARLY_SHELL_APPLIED == "1" ]] || shell_ipc shell applyTheme "$colors_payload" "$shell_payload" || true
 else
   set_theme_background
 fi

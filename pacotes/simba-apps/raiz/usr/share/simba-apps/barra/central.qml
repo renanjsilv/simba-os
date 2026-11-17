@@ -218,10 +218,14 @@ Item {
   property double travaBri: 0
   function travarVol() { travaVol = Date.now() + 1500 }
   function travarBri() { travaBri = Date.now() + 1500 }
+  // Tema: a troca leva um instante; enquanto não confirma, a leitura antiga não desfaz o ícone.
+  property double travaTema: 0
+  property bool temaPedido: false
   function aplicarLido(v) {
     var agora = Date.now()
     if (agora < travaVol) { v.volume = st.volume; v.mudo = st.mudo }
     if (agora < travaBri) v.brilho = st.brilho
+    if (agora < travaTema) { if (v.claro === temaPedido) travaTema = 0; else v.claro = temaPedido }
     st = v
   }
   // "plim" no volume novo, como no Windows 11 (ao soltar o controle / a cada giro da roda)
@@ -512,6 +516,7 @@ Item {
                   // a ação vai primeiro: trocar root.st recria este botão (o modelo
                   // depende dele) e, depois disso, "root" já não existe neste handler
                   var r = root, k = bloco.modelData.id, o = {}
+                  if (k === "escuro") { r.temaPedido = !r.st.claro; r.travaTema = Date.now() + 8000 }
                   r.acao([k])
                   o[k === "escuro" ? "claro" : k] = k === "escuro" ? !r.st.claro : !r.st[k]
                   r.st = Object.assign({}, r.st, o)   // responde na hora; o estado real vem logo depois

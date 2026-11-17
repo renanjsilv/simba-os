@@ -40,6 +40,18 @@ Pagina {
   }
 
   readonly property bool conectado: !!(s && s.conectado)
+  // 1º login: a pessoa escolhe o que sincronizar antes de qualquer envio (conta escolher).
+  readonly property bool precisaEscolher: !!(s && s.conectado && s.precisa_escolher)
+  property var escolha: ({ config: true, imagens: true, historico: true, documentos: true, pacotes: true, fundo: true })
+  function marcar(id, v) { var e = Object.assign({}, pg.escolha); e[id] = v; pg.escolha = e }
+  function confirmarEscolha() {
+    var cats = ["config", "imagens", "historico", "documentos", "pacotes"].filter(function(k) { return pg.escolha[k] })
+    Sistema.rodar(["conta", "escolher", "--categorias", cats.join(","), "--fundo", pg.escolha.fundo ? "liga" : "desliga"], function(o, code) {
+      pg.atualizar(); pg.medir()
+      Navegacao.confirmar(code === 0 ? (cats.length ? I18n.t("Sincronização iniciada") : I18n.t("Escolha salva")) : I18n.t("Não foi possível salvar"),
+                          code === 0 ? Icones.checkCircle : Icones.alert)
+    })
+  }
   readonly property bool ocupado: !!(s && (s.rodando || s.entrando))
   readonly property bool precisaSenha: !!(s && s.cripto && s.erro && /senha|password/i.test(s.erro))
 
@@ -197,7 +209,7 @@ Pagina {
         }
       }
       Botao {
-        visible: pg.conectado
+        visible: pg.conectado && !pg.precisaEscolher
         texto: pg.s && pg.s.rodando ? I18n.t("Sincronizando…") : I18n.t("Sincronizar agora")
         glifo: Icones.sync
         tipo: "primario"
@@ -214,6 +226,41 @@ Pagina {
     visible: !!(pg.s && pg.s.entrando && pg.s.link_login)
     texto: I18n.t("Se o navegador não abriu, abra o login do Google por aqui.")
     acoes: Botao { texto: I18n.t("Abrir login"); onClicado: Qt.openUrlExternally(pg.s.link_login) }
+  }
+  // ── 1º login: o que sincronizar ──────────────────────────────────────────
+  Secao {
+    visible: pg.precisaEscolher
+    titulo: I18n.t("O que você quer sincronizar?")
+    detalhe: I18n.t("Nada foi enviado ainda. Marque só o que quiser guardar no Drive — dá para mudar depois aqui mesmo.")
+  }
+  Cartao {
+    visible: pg.precisaEscolher
+    Repeater {
+      model: pg.precisaEscolher ? ["config", "imagens", "historico", "documentos", "pacotes", "fundo"] : []
+      delegate: Linha {
+        id: op
+        required property string modelData
+        glifo: ({ config: Icones.folderCog, imagens: Icones.folderOpen, historico: Icones.clockOutline,
+                  documentos: Icones.folderText, pacotes: Icones.apps, fundo: Icones.wallpaper })[modelData]
+        titulo: op.modelData === "fundo" ? I18n.t("Papel de parede igual em todos os computadores") : pg.s.rotulos[op.modelData]
+        descricao: ({ config: I18n.t("~/.config, scripts, apps e temas próprios, estado do sistema"),
+                      imagens: I18n.t("Imagens e papéis de parede"),
+                      historico: I18n.t("Histórico e favoritos do Brave, histórico do terminal e arquivos recentes"),
+                      documentos: I18n.t("Documentos e atalhos da área de trabalho"),
+                      pacotes: I18n.t("Programas do pacman, AUR e Flatpak — reinstalados na restauração"),
+                      fundo: I18n.t("Trocou aqui, muda na hora nos outros computadores desta conta") })[op.modelData]
+        Interruptor {
+          ligado: !!pg.escolha[op.modelData]
+          onAlternado: function(x) { pg.marcar(op.modelData, x) }
+        }
+      }
+    }
+    Linha {
+      glifo: Icones.sync
+      titulo: I18n.t("Tudo certo?")
+      descricao: I18n.t("O backup automático (a cada 20 minutos) só leva o que estiver marcado.")
+      Botao { texto: I18n.t("Começar a sincronizar"); tipo: "primario"; habilitado: !pg.ocupado; onClicado: pg.confirmarEscolha() }
+    }
   }
   // Conta com backup de outra máquina: decidir antes de enviar qualquer coisa.
   Aviso {
@@ -338,10 +385,10 @@ Pagina {
   }
 
   // ── o que entra no backup ────────────────────────────────────────────────
-  Secao { visible: pg.conectado; titulo: I18n.t("O que é salvo"); detalhe: I18n.t("Neste computador: ") + pg.arquivosLocal + " arquivos, " + pg.mb(pg.tamanhoLocal) + I18n.t(". Caches, navegadores (fora histórico e favoritos), jogos e senhas do chaveiro ficam de fora.") }
+  Secao { visible: pg.conectado && !pg.precisaEscolher; titulo: I18n.t("O que é salvo"); detalhe: I18n.t("Neste computador: ") + pg.arquivosLocal + " arquivos, " + pg.mb(pg.tamanhoLocal) + I18n.t(". Caches, navegadores (fora histórico e favoritos), jogos e senhas do chaveiro ficam de fora.") }
   Ancora { chave: "contaItens" }
   Cartao {
-    visible: pg.conectado
+    visible: pg.conectado && !pg.precisaEscolher
     Repeater {
       model: pg.s ? ["config", "imagens", "historico", "documentos", "pacotes", "segredos"] : []
       delegate: Linha {

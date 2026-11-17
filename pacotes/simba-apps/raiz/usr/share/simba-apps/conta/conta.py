@@ -14,6 +14,8 @@ criou) e restaura tudo numa instalação nova.
   conta pacotes                     instala os programas que faltam (abre um terminal)
   conta auto liga|desliga           sincronização automática (a cada 2 h e 10 min após ligar)
   conta categoria <id> liga|desliga escolhe o que entra no backup
+  conta escolher [--categorias a,b] [--fundo liga|desliga]
+                                    escolha do 1º login: o que sincronizar (antes disso nada é enviado)
   conta tamanho                     estima o tamanho do backup local
   conta fundo liga|desliga          papel de parede igual em todas as máquinas, na hora
 
@@ -146,7 +148,15 @@ def config():
     c.setdefault("pastas_personalizadas", [])
     c.setdefault("pastas_excluidas", [])
     c.setdefault("sincronizar_fundo", True)
+    # Escolha do que sincronizar, feita depois do 1º login (Configurações › Contas ou
+    # boas-vindas). Contas de antes dessa tela (já com e-mail) contam como escolhidas.
+    c.setdefault("escolha_feita", bool(c.get("email")))
     return c
+
+
+def precisa_escolher(c=None):
+    c = c or config()
+    return not c.get("escolha_feita") and conectado()
 
 
 def salvar_config(c):
@@ -184,11 +194,32 @@ def rc(*args, check=True, capture=True, timeout=None, entrada=None):
     exe = rclone_bin()
     if not exe:
         raise SystemExit(_t("rclone não instalado"))
-    rclone_cmd = [exe, "--retries", "1", "--low-level-retries", "1", "--contimeout", "5s", *args]
+    # low-level-retries: o rclone espera e tenta de novo quando o Google responde
+    # "rateLimitExceeded" (cota do client_id compartilhado do rclone). Com 1 tentativa só,
+    # qualquer limite momentâneo derrubava o backup e gerava o aviso "Falha no backup".
+    rclone_cmd = [exe, "--retries", "1", "--low-level-retries", "8", "--contimeout", "5s", *args]
     r = subprocess.run(rclone_cmd, capture_output=capture, text=True, timeout=timeout, input=entrada)
     if check and r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout or "").strip()[-800:] or f"rclone {args[0]} falhou")
     return r
+
+
+def erro_temporario(msg):
+    """Falhas que passam sozinhas (limite de uso da API do Google, rede, servidor fora):
+    a próxima rodada do timer resolve, então não merecem notificação na hora."""
+    m = str(msg).lower()
+    if "storagequotaexceeded" in m:        # Drive cheio: não passa sozinho
+        return False
+    return any(k in m for k in (
+        "ratelimitexceeded", "rate_limit_exceeded", "userratelimitexceeded", "quota",
+        "too many requests", "429", "backenderror", "internal error", " 500", " 502", " 503",
+        "timeout", "timed out", "no such host", "connection refused", "connection reset",
+        "network is unreachable", "temporary failure", "i/o timeout",
+        "falha ao enviar os arquivos (veja a conexão)"))
+
+
+# Avisa da falha só se o backup estiver parado há esse tempo (erros temporários seguidos).
+AVISAR_FALHA_APOS = 3 * 3600
 
 
 def remoto_base():
@@ -626,6 +657,7 @@ def cmd_status(_a):
         "sincronizar_fundo": bool(c.get("sincronizar_fundo", True)),
         "categorias": c["categorias"],
         "rotulos": CATEGORIAS,
+        "precisa_escolher": bool(lig and not c.get("escolha_feita")),
         "ultima": e.get("ultima", ""),
         "resultado": e.get("resultado", ""),
         "erro": e.get("erro", ""),
@@ -767,6 +799,11 @@ def cmd_entrar(a):
     if a.cripto == "-":
         a.cripto = sys.stdin.readline().rstrip("\n")
     salvar_estado(entrando=True, erro="", link_login="")
+    if not conectado():
+        # Login novo: pergunta o que sincronizar antes de enviar qualquer coisa.
+        c0 = config()
+        c0["escolha_feita"] = False
+        salvar_config(c0)
     try:
         if not instalar_rclone():
             salvar_estado(entrando=False, erro=_t("Não foi possível instalar o rclone (senha cancelada?)."))
@@ -796,12 +833,20 @@ def cmd_entrar(a):
             c["cripto"] = True
         salvar_config(c)
         salvar_estado(entrando=False, remoto_meta=meta, link_login="")
-        if pode_enviar():
-            cmd_auto(type("A", (), {"modo": "liga"})())
-        else:
+        if not pode_enviar():
             salvar_estado(precisa_decidir=True,
                           erro=_t("Esta conta já tem um backup de %1. Restaure-o ou substitua-o.", meta.get('maquina', 'outra máquina')))
         BOAS_VINDAS.unlink(missing_ok=True)
+        if not c.get("escolha_feita"):
+            # Nada é enviado nem ligado até a pessoa escolher o que sincronizar.
+            subprocess.run(["systemctl", "--user", "disable", "--now", "conta-sync.timer"], capture_output=True)
+            avisar(_t("Conta conectada"), _t("Agora escolha o que sincronizar em Configurações › Contas."))
+            if not os.environ.get("CONTA_HOME") and not _boas_vindas_aberta():
+                subprocess.Popen(["configuracoes", "contas"], start_new_session=True,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return 0
+        if pode_enviar():
+            cmd_auto(type("A", (), {"modo": "liga"})())
         avisar(_t("Conta conectada"), c.get("email") or _t("Google Drive"))
         try:
             subprocess.run(["systemctl", "--user", "enable", "--now", "conta-fundo.service"],
@@ -848,8 +893,10 @@ def cmd_sair(_a):
     for k in ("email", "nome"):
         c.pop(k, None)
     c["cripto"] = False
+    c["escolha_feita"] = False
     salvar_config(c)
     apagar_foto()
+    subprocess.run(["systemctl", "--user", "disable", "--now", "conta-fundo.service"], capture_output=True)
     subprocess.run(["systemctl", "--user", "disable", "--now", "conta-sync.timer"], capture_output=True)
     salvar_estado(resultado="", erro="", remoto_meta={})
     return 0
@@ -1149,13 +1196,15 @@ def puxar_alteracoes_remotas(silencioso=False, forcar=False):
 # FUNDO_ESTADO = último papel combinado com o Drive (o enviado ou o recebido): evita
 # reenviar o que acabou de chegar e devolver para a nuvem a troca de outra máquina.
 FUNDO_ESTADO = HOME / ".local/state/conta/fundo.json"
-FUNDO_INTERVALO = int(os.environ.get("CONTA_FUNDO_INTERVALO") or 10)
+# 60 s: com 10 s eram ~1000 chamadas por hora à API só para ler o fundo.json, o que
+# estourava o limite do Google e derrubava também o backup. Quem troca o papel envia na hora.
+FUNDO_INTERVALO = int(os.environ.get("CONTA_FUNDO_INTERVALO") or 60)
 FUNDO_MAX = 60 * 1024 * 1024
 FUNDO_LINK = HOME / ".local/state/simba/current/background"
 
 
 def _fundo_remoto_info():
-    r = rc("cat", f"{remoto_base()}/fundo.json", check=False, timeout=15)
+    r = rc("cat", f"{remoto_base()}/fundo.json", check=False, timeout=90)
     if r.returncode != 0:
         if "not found" in (r.stderr or "").lower() or "doesn't exist" in (r.stderr or "").lower():
             return {}
@@ -1266,7 +1315,7 @@ def fundo_puxar(c=None):
 
 
 def _fundo_ativo(c):
-    return c.get("sincronizar_fundo", True) and not esta_pausado()[0] and conectado()
+    return c.get("sincronizar_fundo", True) and c.get("escolha_feita") and not esta_pausado()[0] and conectado()
 
 
 def _link_fundo():
@@ -1292,10 +1341,11 @@ def cmd_fundo(a):
     visto = _link_fundo()
     proxima = 0.0
     primeira = True
+    espera_erro = FUNDO_INTERVALO
     while True:
         try:
             c = config()
-            if c.get("sincronizar_fundo", True) and not esta_pausado()[0]:
+            if c.get("sincronizar_fundo", True) and c.get("escolha_feita") and not esta_pausado()[0]:
                 link = _link_fundo()
                 if link != visto:
                     time.sleep(2)          # trocas seguidas: envia só a última
@@ -1313,9 +1363,13 @@ def cmd_fundo(a):
                         else:
                             fundo_puxar(c)
                     visto = _link_fundo()
-        except Exception as exc:  # noqa: BLE001 — rede caiu etc.: tenta de novo depois
-            print(_t("papel de parede: %1", str(exc)[-200:]), file=sys.stderr, flush=True)
-            proxima = time.monotonic() + min(30, FUNDO_INTERVALO * 2)
+                    espera_erro = FUNDO_INTERVALO
+        except Exception as exc:  # noqa: BLE001 — rede caiu, limite do Google etc.
+            # Espera cada vez mais (até 15 min) em vez de insistir: insistir no limite
+            # de uso só prolonga o bloqueio, para o papel e para o backup.
+            espera_erro = min(900, espera_erro * 2)
+            print(_t("papel de parede: %1", str(exc)[-200:].replace("\n", " ")), file=sys.stderr, flush=True)
+            proxima = time.monotonic() + espera_erro
         time.sleep(2)
 
 
@@ -1323,6 +1377,15 @@ def cmd_sincronizar(a):
     if not conectado():
         print(_t("não conectado"), file=sys.stderr)
         return 0 if a.silencioso else 1  # timer de um clone ainda sem login: não é falha
+
+    if precisa_escolher():
+        if not a.silencioso:
+            print(_t("Escolha primeiro o que sincronizar em Configurações › Contas."), file=sys.stderr)
+        return 0
+    if not any(v for k, v in config()["categorias"].items() if k in INCLUIR or k == "pacotes"):
+        if not a.silencioso:
+            print(_t("Nenhum item escolhido para o backup."), file=sys.stderr)
+        return 0
 
     # Modo Viagem (pausa temporária)
     pausado, ate = esta_pausado()
@@ -1378,8 +1441,10 @@ def cmd_sincronizar(a):
             CACHE.mkdir(parents=True, exist_ok=True)
             arq_lista = CACHE / "lista.txt"
             arq_lista.write_text("\n".join(lista) + "\n")
-            comuns = ["--skip-links", "--stats", "2s", "--stats-one-line", "-v", "--transfers", "8",
-                      "--retries", "3", "--low-level-retries", "10"]
+            # --fast-list: lista a pasta do Drive em poucas chamadas (antes, uma por pasta:
+            # centenas a cada 20 min, o que estourava o limite de uso do Google).
+            comuns = ["--skip-links", "--stats", "2s", "--stats-one-line", "-v", "--transfers", "4",
+                      "--fast-list", "--tpslimit", "8", "--retries", "3", "--low-level-retries", "10"]
             dados = remoto_dados(c)
             # O que for apagado ou substituído no Drive vai para lixeira/<data> (30 dias).
             lixeira = f"{dados}/lixeira/{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -1397,15 +1462,33 @@ def cmd_sincronizar(a):
             publicar_ferramenta()
             agora = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
             salvar_estado(ultima=agora, resultado="ok", tamanho=total, arquivos=len(lista), progresso="", remoto_meta=meta,
-                          precisa_decidir=False, conflito=None)
+                          precisa_decidir=False, conflito=None, falhas_seguidas=0)
             marcar_base_enviada()
             if not a.silencioso:
                 avisar(_t("Backup concluído"), _t("%1 arquivos sincronizados com o Google Drive.", len(lista)))
             return 0
         except Exception as e:  # noqa: BLE001
-            salvar_estado(resultado="erro", erro=str(e)[-300:], progresso="")
-            avisar(_t("Falha no backup"), str(e)[-200:], True)
-            return 1
+            msg = str(e)
+            falhas = int(estado().get("falhas_seguidas") or 0) + 1
+            temporario = erro_temporario(msg)
+            parado_ha = 0
+            try:
+                ultima = datetime.datetime.fromisoformat(estado().get("ultima") or "")
+                parado_ha = time.time() - ultima.timestamp()
+            except (ValueError, TypeError):
+                parado_ha = AVISAR_FALHA_APOS
+            if temporario:
+                legivel = _t("O Google Drive limitou o acesso por alguns minutos; o backup tenta de novo sozinho.") \
+                    if ("ratelimit" in msg.lower() or "rate_limit" in msg.lower() or "quota" in msg.lower()) \
+                    else _t("Sem conexão com o Google Drive agora; o backup tenta de novo sozinho.")
+            else:
+                legivel = msg[-300:]
+            salvar_estado(resultado="erro", erro=legivel, progresso="", falhas_seguidas=falhas)
+            # Erro temporário (limite do Google, rede): só avisa se o backup está parado há horas.
+            if not temporario or parado_ha >= AVISAR_FALHA_APOS or not a.silencioso:
+                avisar(_t("Falha no backup"), legivel[-200:], True)
+            print(msg[-800:], file=sys.stderr)
+            return 0 if (temporario and a.silencioso) else 1
 
 
 def _brave_aberto():
@@ -1725,6 +1808,50 @@ def cmd_categoria(a):
     return 0
 
 
+def _boas_vindas_aberta():
+    """A tela de boas-vindas mostra a escolha ela mesma: não abre as Configurações por cima."""
+    for d in os.listdir("/proc"):
+        if d.isdigit():
+            try:
+                cmd = Path(f"/proc/{d}/cmdline").read_bytes()
+            except OSError:
+                continue
+            if b"boas-vindas/app.py" in cmd:
+                return True
+    return False
+
+
+def cmd_escolher(a):
+    """Escolha do que sincronizar (1º login). Depois dela o backup automático e o papel
+    de parede entre máquinas ligam conforme o escolhido e a 1ª sincronização começa."""
+    c = config()
+    if a.categorias is not None:
+        escolhidas = {x.strip() for x in a.categorias.split(",") if x.strip()}
+        desconhecidas = escolhidas - set(CATEGORIAS)
+        if desconhecidas:
+            print(_t("categoria desconhecida: %1", ", ".join(sorted(desconhecidas))), file=sys.stderr)
+            return 2
+        for k in CATEGORIAS:
+            c["categorias"][k] = k in escolhidas and (k != "segredos" or bool(c.get("cripto")))
+    if a.fundo:
+        c["sincronizar_fundo"] = a.fundo == "liga"
+    c["escolha_feita"] = True
+    salvar_config(c)
+    if os.environ.get("CONTA_HOME"):
+        return 0
+    algum = any(c["categorias"].values())
+    if algum and pode_enviar():
+        cmd_auto(type("A", (), {"modo": "liga"})())
+    elif not algum:
+        cmd_auto(type("A", (), {"modo": "desliga"})())
+    acao = ["enable", "--now"] if c["sincronizar_fundo"] else ["disable", "--now"]
+    subprocess.run(["systemctl", "--user", *acao, "conta-fundo.service"], capture_output=True, timeout=10)
+    if algum and pode_enviar():
+        subprocess.Popen([str(FERRAMENTA), "sincronizar", "--silencioso"], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return 0
+
+
 def cmd_boas_vindas(a):
     if a.acao == "mostrar":
         return 0 if BOAS_VINDAS.exists() and not SEM_BOAS_VINDAS.exists() and not conectado() else 1
@@ -1789,6 +1916,10 @@ def main():
     p.add_argument("modo", choices=["liga", "desliga"])
     p.set_defaults(f=cmd_categoria)
     sub.add_parser("tamanho").set_defaults(f=cmd_tamanho)
+    p = sub.add_parser("escolher", help="o que sincronizar (escolha do 1º login)")
+    p.add_argument("--categorias", help="ids separados por vírgula (vazio = nenhuma)")
+    p.add_argument("--fundo", choices=["liga", "desliga"])
+    p.set_defaults(f=cmd_escolher)
     p = sub.add_parser("fundo", help="papel de parede imediato entre máquinas")
     p.add_argument("acao", choices=["vigiar", "enviar", "puxar", "liga", "desliga"])
     p.set_defaults(f=cmd_fundo)

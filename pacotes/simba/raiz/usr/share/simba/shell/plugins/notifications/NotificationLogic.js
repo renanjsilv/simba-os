@@ -402,11 +402,12 @@ function popupPlacement(barPosition, barClearance, gapsOut) {
   if (!isFinite(clearance)) clearance = 0
   if (!isFinite(gap)) gap = 0
 
+  // Simba: toasts no canto inferior direito, perto do relógio (estilo Windows).
   return {
-    anchors: { top: true, bottom: false, left: false, right: true },
+    anchors: { top: false, bottom: true, left: false, right: true },
     margins: {
       top: position === "top" ? clearance : gap,
-      bottom: gap,
+      bottom: position === "bottom" ? clearance : gap,
       left: gap,
       right: position === "right" ? clearance : gap
     }

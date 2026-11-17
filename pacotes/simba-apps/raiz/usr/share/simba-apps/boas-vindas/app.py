@@ -483,10 +483,67 @@ class Janela(Adw.ApplicationWindow):
         self.conta_estado.add_css_class("estado")
         caixa.append(self.conta_botao)
         caixa.append(self.conta_estado)
+        caixa.append(self._montar_escolha())
         self.conta_texto = (_t("Entre com sua conta Google e o Simba OS guarda no seu Drive as configurações, "
                             "o papel de parede e os documentos. Formatou ou trocou de computador? "
-                            "É só entrar de novo e tudo volta."))
-        return self.pagina(_t("Sua conta, em todo lugar"), self.conta_texto, svg_conta, caixa)
+                            "É só entrar de novo e tudo volta.") + " " +
+                            _t("Depois do login você escolhe o que sincronizar."))
+        pagina = self.pagina(_t("Sua conta, em todo lugar"), self.conta_texto, svg_conta, caixa)
+        self.conta_ilustracao = pagina.get_first_child()
+        return pagina
+
+    # Escolha do que sincronizar (aparece logo depois do 1º login; nada é enviado antes).
+    ESCOLHAS = [
+        ("config", "Configurações e aplicativos"),
+        ("imagens", "Papéis de parede e imagens"),
+        ("historico", "Histórico do navegador e do terminal"),
+        ("documentos", "Documentos e área de trabalho"),
+        ("pacotes", "Lista de programas instalados"),
+        ("fundo", "Papel de parede igual nos outros computadores"),
+    ]
+
+    def _montar_escolha(self):
+        self.escolha_caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, visible=False)
+        rotulo = Gtk.Label(label=_t("O que você quer sincronizar?"))
+        rotulo.add_css_class("heading")
+        self.escolha_caixa.append(rotulo)
+        grade = Gtk.Grid(column_spacing=24, row_spacing=4, halign=Gtk.Align.CENTER)
+        self.escolha_opcoes = {}
+        for i, (chave, texto) in enumerate(self.ESCOLHAS):
+            cb = Gtk.CheckButton(label=_t(texto), active=True)
+            self.escolha_opcoes[chave] = cb
+            grade.attach(cb, i % 2, i // 2, 1, 1)
+        self.escolha_caixa.append(grade)
+        self.escolha_botao = self.botao(_t("Começar a sincronizar"), self.confirmar_escolha, True)
+        self.escolha_caixa.append(self.escolha_botao)
+        return self.escolha_caixa
+
+    def _mostrar_escolha(self, mostrar):
+        self.escolha_caixa.set_visible(mostrar)
+        # sem a ilustração a lista cabe na janela (que não muda de tamanho)
+        if getattr(self, "conta_ilustracao", None) is not None:
+            self.conta_ilustracao.set_visible(not mostrar)
+        self.conta_botao.set_visible(not mostrar)
+
+    def confirmar_escolha(self):
+        cats = [k for k, _ in self.ESCOLHAS if k != "fundo" and self.escolha_opcoes[k].get_active()]
+        fundo = "liga" if self.escolha_opcoes["fundo"].get_active() else "desliga"
+        self.escolha_botao.set_sensitive(False)
+
+        def escolher():
+            return subprocess.run(["conta", "escolher", "--categorias", ",".join(cats), "--fundo", fundo],
+                                  capture_output=True, timeout=60).returncode
+
+        def pronto(rc):
+            self.escolha_botao.set_sensitive(True)
+            if rc != 0:
+                self.toast(_t("Não foi possível salvar a escolha."))
+                return
+            self._sincronizou_inicial = True   # `conta escolher` já ligou e sincronizou
+            self._mostrar_escolha(False)
+            self.toast(_t("Sincronização iniciada") if cats else _t("Escolha salva"))
+            self.atualizar_conta()
+        em_segundo_plano(escolher, pronto)
 
     def p_draco(self):
         caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
@@ -785,7 +842,12 @@ class Janela(Adw.ApplicationWindow):
                 self.conta_botao.set_child(Adw.ButtonContent(label=_t("Gerenciar a conta"),
                                                              icon_name="avatar-default-symbolic"))
                 self.conta_botao.remove_css_class("suggested-action")
-                if not getattr(self, "_sincronizou_inicial", False):
+                if st.get("precisa_escolher"):
+                    # `conta escolher` liga o backup/papel conforme a escolha e já sincroniza
+                    self._mostrar_escolha(True)
+                    self.conta_estado.set_label(_t("✓  Conectado como %1", quem) + " — " +
+                                                _t("escolha abaixo o que sincronizar"))
+                elif not getattr(self, "_sincronizou_inicial", False):
                     self._sincronizou_inicial = True
                     def sincronizar_inicial():
                         subprocess.run(["systemctl", "--user", "enable", "--now", "conta-fundo.service"],

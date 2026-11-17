@@ -81,11 +81,13 @@ Panel {
   readonly property color contentForeground: bar ? bar.foreground : Commons.Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
 
-  readonly property int cellWidth: Style.space(52)
-  readonly property int cellHeight: Style.space(30)
+  readonly property int cellWidth: Style.space(36)
+  readonly property int cellHeight: Style.space(26)
   readonly property int cellSpacing: Style.space(2)
-  readonly property int weekColumnWidth: Style.space(32)
-  readonly property int gutterWidth: Style.space(14)
+  readonly property int weekColumnWidth: Style.space(22)
+  readonly property int gutterWidth: Style.space(8)
+
+  property bool calendarioRecolhido: false
 
   function open() {
     refresh()
@@ -245,7 +247,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(560))
+    contentWidth: panel.fittedContentWidth(Style.space(360))
     contentHeight: panel.fittedContentHeight(calendarColumn.implicitHeight)
 
     PanelKeyCatcher {
@@ -283,9 +285,9 @@ Panel {
           // the screen allows, and a fixed seven-column grid would otherwise
           // lose its last days off the edge instead of scrolling.
           width: Math.max(calendarScroll.width, gridColumn.width)
-          spacing: Style.space(8)
+          spacing: Style.space(6)
 
-          // ---- Simba: central de notificações (como no Windows 11), acima da data.
+          // ---- Simba: central de notificações (estilo Windows 11), acima da data.
           CentralNotificacoes {
             id: central
             width: parent.width
@@ -293,10 +295,11 @@ Panel {
             fg: root.contentForeground
             onAcionado: root.close()
           }
+
           // separador (tracejado nos temas pixel)
           Item {
             width: parent.width
-            height: Style.space(14)
+            height: Style.space(8)
             Rectangle {
               visible: !central.pixel
               anchors.verticalCenter: parent.verticalCenter
@@ -311,39 +314,47 @@ Panel {
             }
           }
 
-          // ---- Hero: hora grande e data por extenso, alinhadas à direita e
-          //      sempre dentro da largura do painel (antes a data em 52 px
-          //      passava da caixa e aparecia centralizada).
+          // ---- Hero: hora e data alinhadas à direita, com botão de recolher à esquerda (estilo Windows 11)
           Item {
             width: parent.width
-            height: heroRow.height
+            height: Math.max(heroRow.height, Style.space(32))
+
+            PanelActionButton {
+              anchors.left: parent.left
+              anchors.leftMargin: root.pixel ? 4 : 2
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: root.calendarioRecolhido ? (central.pixel ? "▼" : "󰅀") : (central.pixel ? "▲" : "󰅃")
+              tooltipText: root.calendarioRecolhido ? "Expandir calendário" : "Recolher calendário"
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+              onClicked: root.calendarioRecolhido = !root.calendarioRecolhido
+            }
 
             Column {
               id: heroRow
               anchors.right: parent.right
-              anchors.rightMargin: Style.space(6)
-              width: parent.width - Style.space(12)
+              anchors.rightMargin: root.pixel ? 4 : 2
               spacing: 0
 
               Text {
                 id: heroTime
-                width: parent.width
+                anchors.right: parent.right
                 horizontalAlignment: Text.AlignRight
                 textFormat: Text.PlainText
                 text: Qt.locale("pt_BR").toString(clock.date, "HH:mm")
                 color: root.contentForeground
                 font.family: central.pixel ? "Simba Pixel" : "Adwaita Sans"
-                font.pixelSize: central.pixel ? 40 : 30
-                font.weight: central.pixel ? Font.Bold : Font.Light
+                font.pixelSize: central.pixel ? 22 : 20
+                font.weight: central.pixel ? Font.Bold : Font.DemiBold
                 renderType: central.pixel ? Text.NativeRendering : Text.QtRendering
               }
               Text {
                 id: heroDate
-                width: parent.width
+                anchors.right: parent.right
                 horizontalAlignment: Text.AlignRight
                 elide: Text.ElideRight
                 fontSizeMode: Text.HorizontalFit
-                minimumPixelSize: 11
+                minimumPixelSize: 10
                 textFormat: Text.PlainText
                 text: {
                   var t = Qt.locale("pt_BR").toString(root.today, "dddd, d 'de' MMMM")
@@ -353,7 +364,7 @@ Panel {
                   ? Style.hoverStateColor(root.contentForeground, Commons.Color.accent)
                   : Qt.darker(root.contentForeground, 1.25)
                 font.family: "Adwaita Sans"
-                font.pixelSize: 13
+                font.pixelSize: 11
               }
             }
 
@@ -376,414 +387,405 @@ Panel {
             }
           }
 
-          // ---- Year progress, doubling as the rule under the hero:
-          //      a plain hairline said nothing, and whole days done
-          //      over days in the year says the same thing louder.
-          Item {
+          // ---- Seção do calendário (recolhível ao estilo Windows 11)
+          Column {
+            id: calendarioSecao
+            visible: !root.calendarioRecolhido
             width: parent.width
-            height: yearBlock.y + yearBlock.height
+            spacing: Style.space(6)
 
+            // Progresso do ano (Memento Mori / trilho sutil sob a data)
             Item {
-              id: yearBlock
-              y: Style.space(6)
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: gridColumn.width
-              height: Math.max(yearLabel.implicitHeight, Style.space(10))
+              width: parent.width
+              height: yearBlock.y + yearBlock.height
 
-              TapHandler {
-                enabled: !root.editingLife
-                onDoubleTapped: root.startEditingLife()
-              }
-
-              Row {
-                visible: root.editingLife
+              Item {
+                id: yearBlock
+                y: Style.space(2)
                 anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(10)
+                width: gridColumn.width
+                height: Math.max(yearLabel.implicitHeight, Style.space(12))
 
-                Text {
+                TapHandler {
+                  enabled: !root.editingLife
+                  onDoubleTapped: root.startEditingLife()
+                }
+
+                Row {
+                  visible: root.editingLife
+                  anchors.horizontalCenter: parent.horizontalCenter
                   anchors.verticalCenter: parent.verticalCenter
-                  text: "NASCIMENTO"
-                  color: Qt.darker(root.contentForeground, 1.5)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.letterSpacing: 1
-                }
-
-                TextField {
-                  id: bornField
-                  width: Style.space(70)
-                  anchors.verticalCenter: parent.verticalCenter
-                  placeholderText: "year"
-                  foreground: root.contentForeground
-                  font.family: root.contentFontFamily
-                  inputMethodHints: Qt.ImhDigitsOnly
-
-                  Keys.onPressed: function(event) { root.handleLifeKey(event, expectancyField) }
-                }
-
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  anchors.verticalCenterOffset: 0
-                  leftPadding: Style.space(6)
-                  text: "VIVER ATÉ"
-                  color: Qt.darker(root.contentForeground, 1.5)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.letterSpacing: 1
-                }
-
-                TextField {
-                  id: expectancyField
-                  width: Style.space(60)
-                  anchors.verticalCenter: parent.verticalCenter
-                  placeholderText: "90"
-                  foreground: root.contentForeground
-                  font.family: root.contentFontFamily
-                  inputMethodHints: Qt.ImhDigitsOnly
-
-                  Keys.onPressed: function(event) { root.handleLifeKey(event, bornField) }
-                }
-              }
-
-              Text {
-                id: yearLabel
-                textFormat: Text.PlainText
-                visible: !root.editingLife
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.today.getFullYear()
-                color: Qt.darker(root.contentForeground, 1.5)
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.bodySmall
-                font.letterSpacing: 1
-              }
-
-              Text {
-                id: yearPercent
-                textFormat: Text.PlainText
-                visible: !root.editingLife
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.yearDonePercent + "%"
-                color: root.contentForeground
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              Rectangle {
-                id: yearTrack
-                visible: !root.editingLife
-                anchors.left: yearLabel.right
-                anchors.right: yearPercent.left
-                anchors.leftMargin: Style.space(12)
-                anchors.rightMargin: Style.space(12)
-                anchors.verticalCenter: parent.verticalCenter
-                height: Style.space(6)
-                radius: Style.cornerRadius > 0 ? height / 2 : 0
-                color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
-
-                Rectangle {
-                  width: Math.round(parent.width * root.yearDone)
-                  height: parent.height
-                  radius: parent.radius
-                  color: Style.selectedStateColor(root.contentForeground, Commons.Color.accent)
-
-                  Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                }
-              }
-            }
-          }
-
-          // ---- Memento mori. Only here once someone has gone looking and
-          //      given an age; the same rail as the year above it, measured
-          //      against a nominal lifetime.
-          Item {
-            visible: root.birthYear > 0
-            width: parent.width
-            height: visible ? lifeBlock.height : 0
-
-            Item {
-              id: lifeBlock
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: gridColumn.width
-              height: Math.max(lifeLabel.implicitHeight, Style.space(10))
-
-              Text {
-                id: lifeLabel
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                text: "VIDA"
-                color: Qt.darker(root.contentForeground, 1.5)
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.bodySmall
-                font.letterSpacing: 1
-              }
-
-              Text {
-                id: lifePercent
-                textFormat: Text.PlainText
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.lifeDonePercent + "%"
-                color: root.contentForeground
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              Rectangle {
-                anchors.left: lifeLabel.right
-                anchors.right: lifePercent.left
-                anchors.leftMargin: Style.space(12)
-                anchors.rightMargin: Style.space(12)
-                anchors.verticalCenter: parent.verticalCenter
-                height: Style.space(6)
-                radius: Style.cornerRadius > 0 ? height / 2 : 0
-                color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
-
-                Rectangle {
-                  width: Math.round(parent.width * root.lifeDone)
-                  height: parent.height
-                  radius: parent.radius
-                  color: Style.selectedStateColor(root.contentForeground, Commons.Color.accent)
-
-                  Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                }
-              }
-
-              TapHandler {
-                onDoubleTapped: root.clearLife()
-              }
-
-              MouseArea {
-                id: lifeMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                acceptedButtons: Qt.NoButton
-
-                PanelToolTip {
-                  visible: lifeMouse.containsMouse
-                  text: "Memento Mori"
-                  fontFamily: root.contentFontFamily
-                }
-              }
-            }
-          }
-
-          // ---- Month grid: week numbers down a gutter on the left, then
-          //      the seven day columns. Always six rows, so the popup is
-          //      exactly as tall in February as it is in August.
-          Item {
-            width: parent.width
-            height: gridColumn.y + gridColumn.height
-
-            WheelHandler {
-              onWheel: function(event) {
-                // Horizontal wheels and touchpad side-scrolls report y === 0;
-                // without this they would every one read as "next month".
-                if (event.angleDelta.y === 0) return
-                root.moveMonth(event.angleDelta.y > 0 ? -1 : 1)
-              }
-            }
-
-            Column {
-              id: gridColumn
-              // The meter above is a solid rule; the grid needs room to
-              // read as its own block rather than hanging off it.
-              y: Style.space(18)
-              anchors.horizontalCenter: parent.horizontalCenter
-              spacing: Style.space(3)
-
-              Row {
-                id: headerRow
-                spacing: root.cellSpacing
-
-                // The week-number heading doubles as the week-start toggle.
-                // It is the one control in the panel whose meaning is not
-                // self-evident, so it carries a tooltip naming the day the
-                // click will switch to.
-                Rectangle {
-                  width: root.weekColumnWidth
-                  height: Style.space(16)
-                  radius: Style.cornerRadius
-                  color: weekStartMouse.containsMouse
-                    ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
-                    : "transparent"
+                  spacing: Style.space(10)
 
                   Text {
-                    anchors.centerIn: parent
-                    text: "S"
-                    color: weekStartMouse.containsMouse
-                      ? Style.hoverStateColor(root.contentForeground, Commons.Color.accent)
-                      : Qt.darker(root.contentForeground, 1.9)
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "NASCIMENTO"
+                    color: Qt.darker(root.contentForeground, 1.5)
                     font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
+                    font.pixelSize: Style.font.bodySmall
                     font.letterSpacing: 1
-                    font.bold: true
                   }
 
-                  MouseArea {
-                    id: weekStartMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.toggleWeekStart()
+                  TextField {
+                    id: bornField
+                    width: Style.space(70)
+                    anchors.verticalCenter: parent.verticalCenter
+                    placeholderText: "year"
+                    foreground: root.contentForeground
+                    font.family: root.contentFontFamily
+                    inputMethodHints: Qt.ImhDigitsOnly
+
+                    Keys.onPressed: function(event) { root.handleLifeKey(event, expectancyField) }
                   }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.verticalCenterOffset: 0
+                    leftPadding: Style.space(6)
+                    text: "VIVER ATÉ"
+                    color: Qt.darker(root.contentForeground, 1.5)
+                    font.family: root.contentFontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.letterSpacing: 1
+                  }
+
+                  TextField {
+                    id: expectancyField
+                    width: Style.space(60)
+                    anchors.verticalCenter: parent.verticalCenter
+                    placeholderText: "90"
+                    foreground: root.contentForeground
+                    font.family: root.contentFontFamily
+                    inputMethodHints: Qt.ImhDigitsOnly
+
+                    Keys.onPressed: function(event) { root.handleLifeKey(event, bornField) }
+                  }
+                }
+
+                Text {
+                  id: yearLabel
+                  textFormat: Text.PlainText
+                  visible: !root.editingLife
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.today.getFullYear()
+                  color: Qt.darker(root.contentForeground, 1.5)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  font.letterSpacing: 1
+                }
+
+                Text {
+                  id: yearPercent
+                  textFormat: Text.PlainText
+                  visible: !root.editingLife
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.yearDonePercent + "%"
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                Rectangle {
+                  id: yearTrack
+                  visible: !root.editingLife
+                  anchors.left: yearLabel.right
+                  anchors.right: yearPercent.left
+                  anchors.leftMargin: Style.space(8)
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  height: Style.space(3)
+                  radius: Style.cornerRadius > 0 ? height / 2 : 0
+                  color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
+
+                  Rectangle {
+                    width: Math.round(parent.width * root.yearDone)
+                    height: parent.height
+                    radius: parent.radius
+                    color: Style.selectedStateColor(root.contentForeground, Commons.Color.accent)
+
+                    Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                  }
+                }
+              }
+            }
+
+            // Memento mori (somente se definido)
+            Item {
+              visible: root.birthYear > 0
+              width: parent.width
+              height: visible ? lifeBlock.height : 0
+
+              Item {
+                id: lifeBlock
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: gridColumn.width
+                height: Math.max(lifeLabel.implicitHeight, Style.space(12))
+
+                Text {
+                  id: lifeLabel
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "VIDA"
+                  color: Qt.darker(root.contentForeground, 1.5)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  font.letterSpacing: 1
+                }
+
+                Text {
+                  id: lifePercent
+                  textFormat: Text.PlainText
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.lifeDonePercent + "%"
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                }
+
+                Rectangle {
+                  anchors.left: lifeLabel.right
+                  anchors.right: lifePercent.left
+                  anchors.leftMargin: Style.space(8)
+                  anchors.rightMargin: Style.space(8)
+                  anchors.verticalCenter: parent.verticalCenter
+                  height: Style.space(3)
+                  radius: Style.cornerRadius > 0 ? height / 2 : 0
+                  color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
+
+                  Rectangle {
+                    width: Math.round(parent.width * root.lifeDone)
+                    height: parent.height
+                    radius: parent.radius
+                    color: Style.selectedStateColor(root.contentForeground, Commons.Color.accent)
+
+                    Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                  }
+                }
+
+                TapHandler {
+                  onDoubleTapped: root.clearLife()
+                }
+
+                MouseArea {
+                  id: lifeMouse
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  acceptedButtons: Qt.NoButton
 
                   PanelToolTip {
-                    visible: weekStartMouse.containsMouse
-                    text: "Começar semanas em " + root.nextWeekStartLabel
+                    visible: lifeMouse.containsMouse
+                    text: "Memento Mori"
                     fontFamily: root.contentFontFamily
                   }
                 }
+              }
+            }
 
-                Item {
-                  width: root.gutterWidth
-                  height: Style.space(16)
+            // ---- Navegação de mês (acima da grade, estilo Windows 11)
+            Item {
+              width: parent.width
+              height: monthNav.height
+
+              Item {
+                id: monthNav
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: gridColumn.width
+                height: Style.space(24)
+
+                Text {
+                  id: monthLabel
+                  textFormat: Text.PlainText
+                  anchors.left: parent.left
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: Qt.locale("pt_BR").toString(root.viewDate, "MMMM yyyy").toUpperCase()
+                  color: Qt.darker(root.contentForeground, 1.3)
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.caption
+                  font.letterSpacing: 0.5
+                  font.bold: true
                 }
 
-                Repeater {
-                  model: root.weekdays
+                Row {
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
 
-                  Text {
-                    textFormat: Text.PlainText
-                    required property var modelData
-                    width: root.cellWidth
-                    height: Style.space(16)
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    text: root.weekdayLabel(modelData)
-                    color: Qt.darker(root.contentForeground, 1.5)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
-                    font.letterSpacing: 1
-                    font.bold: true
+                  PanelActionButton {
+                    iconText: central.pixel ? "<" : "󰅁"
+                    tooltipText: "Mês anterior"
+                    foreground: root.contentForeground
+                    fontFamily: root.contentFontFamily
+                    onClicked: root.moveMonth(-1)
+                  }
+
+                  PanelActionButton {
+                    iconText: central.pixel ? ">" : "󰅂"
+                    tooltipText: "Próximo mês"
+                    foreground: root.contentForeground
+                    fontFamily: root.contentFontFamily
+                    onClicked: root.moveMonth(1)
                   }
                 }
               }
+            }
 
-              Repeater {
-                model: root.weeks
+            // ---- Grade do mês: números das semanas na calha esquerda + 7 colunas de dias
+            Item {
+              width: parent.width
+              height: gridColumn.y + gridColumn.height
+
+              WheelHandler {
+                onWheel: function(event) {
+                  if (event.angleDelta.y === 0) return
+                  root.moveMonth(event.angleDelta.y > 0 ? -1 : 1)
+                }
+              }
+
+              Column {
+                id: gridColumn
+                y: Style.space(2)
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: Style.space(2)
 
                 Row {
-                  required property var modelData
+                  id: headerRow
                   spacing: root.cellSpacing
 
-                  Text {
-                    textFormat: Text.PlainText
+                  Rectangle {
                     width: root.weekColumnWidth
-                    height: root.cellHeight
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    text: modelData.week
-                    color: Qt.darker(root.contentForeground, 1.9)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.caption
+                    height: Style.space(16)
+                    radius: Style.cornerRadius
+                    color: weekStartMouse.containsMouse
+                      ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
+                      : "transparent"
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: "S"
+                      color: weekStartMouse.containsMouse
+                        ? Style.hoverStateColor(root.contentForeground, Commons.Color.accent)
+                        : Qt.darker(root.contentForeground, 1.9)
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      font.letterSpacing: 0.5
+                      font.bold: true
+                    }
+
+                    MouseArea {
+                      id: weekStartMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: root.toggleWeekStart()
+                    }
+
+                    PanelToolTip {
+                      visible: weekStartMouse.containsMouse
+                      text: "Começar semanas em " + root.nextWeekStartLabel
+                      fontFamily: root.contentFontFamily
+                    }
                   }
 
                   Item {
                     width: root.gutterWidth
-                    height: root.cellHeight
+                    height: Style.space(16)
                   }
 
                   Repeater {
-                    model: modelData.days
+                    model: root.weekdays
 
-                    Rectangle {
+                    Text {
+                      textFormat: Text.PlainText
                       required property var modelData
-
                       width: root.cellWidth
-                      height: root.cellHeight
-                      radius: Style.cornerRadius
-                      // Today is outlined, not filled: a lit-up block shouts
-                      // over a grid this quiet.
-                      color: "transparent"
-                      border.width: modelData.today ? Style.spacing.hairline : 0
-                      border.color: Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
+                      height: Style.space(16)
+                      horizontalAlignment: Text.AlignHCenter
+                      verticalAlignment: Text.AlignVCenter
+                      text: root.weekdayLabel(modelData)
+                      color: Qt.darker(root.contentForeground, 1.5)
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                    }
+                  }
+                }
 
-                      Text {
-                        textFormat: Text.PlainText
-                        anchors.centerIn: parent
-                        text: modelData.day
-                        color: modelData.inMonth
-                          ? (modelData.weekend ? Qt.darker(root.contentForeground, 1.45) : root.contentForeground)
-                          : Qt.darker(root.contentForeground, 2.2)
-                        font.family: root.contentFontFamily
-                        font.pixelSize: Style.font.body
-                        font.bold: modelData.today
+                Repeater {
+                  model: root.weeks
+
+                  Row {
+                    required property var modelData
+                    spacing: root.cellSpacing
+
+                    Text {
+                      textFormat: Text.PlainText
+                      width: root.weekColumnWidth
+                      height: root.cellHeight
+                      horizontalAlignment: Text.AlignHCenter
+                      verticalAlignment: Text.AlignVCenter
+                      text: modelData.week
+                      color: Qt.darker(root.contentForeground, 1.9)
+                      font.family: root.contentFontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+
+                    Item {
+                      width: root.gutterWidth
+                      height: root.cellHeight
+                    }
+
+                    Repeater {
+                      model: modelData.days
+
+                      Rectangle {
+                        id: dayCell
+                        required property var modelData
+
+                        width: root.cellWidth
+                        height: root.cellHeight
+                        radius: Style.cornerRadius
+                        color: modelData.today
+                          ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
+                          : (dayMouse.containsMouse && modelData.inMonth ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent) : "transparent")
+                        border.width: modelData.today ? (central.pixel ? 2 : 1) : 0
+                        border.color: Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
+
+                        Text {
+                          textFormat: Text.PlainText
+                          anchors.centerIn: parent
+                          text: modelData.day
+                          color: modelData.inMonth
+                            ? (modelData.weekend ? Qt.darker(root.contentForeground, 1.45) : root.contentForeground)
+                            : Qt.darker(root.contentForeground, 2.2)
+                          font.family: root.contentFontFamily
+                          font.pixelSize: Style.font.caption
+                          font.bold: modelData.today
+                        }
+
+                        MouseArea {
+                          id: dayMouse
+                          anchors.fill: parent
+                          hoverEnabled: true
+                          enabled: modelData.inMonth
+                          cursorShape: Qt.ArrowCursor
+                        }
                       }
                     }
                   }
                 }
               }
-            }
 
-            // Hairline down the week-number gutter, drawn only beside the
-            // day rows so it does not cut through the header band.
-            Rectangle {
-              x: gridColumn.x + root.weekColumnWidth + root.cellSpacing + Math.round((root.gutterWidth - width) / 2)
-              y: gridColumn.y + headerRow.height + gridColumn.spacing
-              width: Style.spacing.hairline
-              height: gridColumn.height - headerRow.height - gridColumn.spacing
-              color: root.contentForeground
-              opacity: 0.1
-            }
-          }
-
-          // ---- Month stepping, spanning the grid it drives. The chevrons
-          //      sit on the grid's outer bounds, the same edges the year
-          //      rail above uses, so the row reads as the panel's other
-          //      full-width rail instead of a cluster floating in space.
-          //      The label is centered and fixed-width, so it holds still
-          //      from "MAY" to "SEPTEMBER".
-          Item {
-            width: parent.width
-            height: monthNav.height
-
-            Item {
-              id: monthNav
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: gridColumn.width
-              height: monthLabel.implicitHeight + Style.space(10)
-
-              Text {
-                id: monthLabel
-                textFormat: Text.PlainText
-                anchors.horizontalCenter: parent.horizontalCenter
-                anchors.verticalCenter: parent.verticalCenter
-                // Fixed width so the chevrons hold still between a
-                // "MAY 2026" and a "SEPTEMBER 2026".
-                width: Style.space(130)
-                horizontalAlignment: Text.AlignHCenter
-                text: Qt.locale("pt_BR").toString(root.viewDate, "MMMM yyyy").toUpperCase()
-                color: Qt.darker(root.contentForeground, 1.4)
-                font.family: root.contentFontFamily
-                font.pixelSize: Style.font.body
-                font.letterSpacing: 1
-              }
-
-              PanelActionButton {
-                // Pulled out by the button's own padding so the glyph, not
-                // its hit box, lines up with the "2026" on the year rail.
-                anchors.left: parent.left
-                anchors.leftMargin: -Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                iconText: "󰅁"
-                tooltipText: "Mês anterior"
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onClicked: root.moveMonth(-1)
-              }
-
-              PanelActionButton {
-                anchors.right: parent.right
-                anchors.rightMargin: -Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                iconText: "󰅂"
-                tooltipText: "Próximo mês"
-                foreground: root.contentForeground
-                fontFamily: root.contentFontFamily
-                onClicked: root.moveMonth(1)
+              // Hairline down the week-number gutter
+              Rectangle {
+                x: gridColumn.x + root.weekColumnWidth + root.cellSpacing + Math.round((root.gutterWidth - width) / 2)
+                y: gridColumn.y + headerRow.height + gridColumn.spacing
+                width: Style.spacing.hairline
+                height: gridColumn.height - headerRow.height - gridColumn.spacing
+                color: root.contentForeground
+                opacity: 0.1
               }
             }
           }

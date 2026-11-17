@@ -216,15 +216,15 @@ Item {
     // ── cabeçalho ──
     RowLayout {
       Layout.fillWidth: true
-      Layout.leftMargin: root.pixel ? 14 : 12
-      Layout.rightMargin: root.pixel ? 18 : 10
-      Layout.topMargin: root.pixel ? 10 : 8
-      Layout.preferredHeight: 36
-      spacing: 8
+      Layout.leftMargin: root.pixel ? 12 : 10
+      Layout.rightMargin: root.pixel ? 14 : 10
+      Layout.topMargin: root.pixel ? 8 : 6
+      Layout.preferredHeight: 30
+      spacing: 6
       Text {
         text: "Notificações"
         font.family: root.fonteTitulo
-        font.pixelSize: root.pixel ? 20 : 14
+        font.pixelSize: root.pixel ? 16 : 13
         font.bold: true
         font.capitalization: root.tema === "minimal" ? Font.AllUppercase : Font.MixedCase
         font.letterSpacing: root.tema === "minimal" ? 0.5 : 0
@@ -233,9 +233,9 @@ Item {
       }
       Rectangle {
         visible: root.itens.length > 0
-        implicitWidth: Math.max(18, contador.implicitWidth + 10)
-        implicitHeight: 18
-        radius: root.pixel ? 0 : 9
+        implicitWidth: Math.max(16, contador.implicitWidth + 8)
+        implicitHeight: 16
+        radius: root.pixel ? 0 : 8
         color: root.pixel ? root.cTexto : root.cItem
         border.width: root.tema === "minimal" ? 1 : 0
         border.color: root.cBorda
@@ -244,7 +244,7 @@ Item {
           anchors.centerIn: parent
           text: root.itens.length
           font.family: root.pixel ? "Simba Pixel" : root.fonteSistema
-          font.pixelSize: root.pixel ? 10 : 11
+          font.pixelSize: root.pixel ? 10 : 10
           font.bold: true
           color: root.pixel ? root.cFundo : root.cTexto
           renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
@@ -253,14 +253,14 @@ Item {
       Item { Layout.fillWidth: true }
       // Não perturbe
       Rectangle {
-        implicitWidth: 28; implicitHeight: 28
-        radius: root.pixel ? 0 : 6
+        implicitWidth: 24; implicitHeight: 24
+        radius: root.pixel ? 0 : 5
         color: root.dnd ? root.destaque : (dndMouse.containsMouse ? root.cHover : "transparent")
         Text {
           anchors.centerIn: parent
           text: root.dnd ? "󰂛" : "󰂚"
           font.family: "JetBrainsMono Nerd Font"
-          font.pixelSize: 15
+          font.pixelSize: 13
           color: root.dnd ? root.cFundo : root.cTexto
         }
         MouseArea {
@@ -275,13 +275,13 @@ Item {
         visible: root.itens.length > 0
         text: "Limpar tudo"
         font.family: root.pixel ? "Simba Pixel" : root.fonteSistema
-        font.pixelSize: root.pixel ? 20 : 12
+        font.pixelSize: root.pixel ? 16 : 11
         font.underline: limparMouse.containsMouse && !root.pixel
         color: limparMouse.containsMouse ? root.cTexto : root.cApagado
         renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
         MouseArea {
           id: limparMouse
-          anchors.fill: parent; anchors.margins: -6
+          anchors.fill: parent; anchors.margins: -4
           hoverEnabled: true; cursorShape: Qt.PointingHandCursor
           onClicked: root.limparTudo()
         }
@@ -292,11 +292,11 @@ Item {
     Flickable {
       id: rolagem
       Layout.fillWidth: true
-      Layout.leftMargin: root.pixel ? 10 : 8
-      Layout.rightMargin: root.pixel ? 10 : 8
-      Layout.topMargin: 4
-      Layout.bottomMargin: root.pixel ? 12 : 8
-      Layout.preferredHeight: root.itens.length === 0 ? vazio.implicitHeight : Math.min(lista.implicitHeight, 272)
+      Layout.leftMargin: root.pixel ? 8 : 6
+      Layout.rightMargin: root.pixel ? 8 : 6
+      Layout.topMargin: 2
+      Layout.bottomMargin: root.pixel ? 8 : 6
+      Layout.preferredHeight: root.itens.length === 0 ? vazio.implicitHeight : Math.min(lista.implicitHeight, 180)
       contentHeight: lista.implicitHeight
       clip: true
       boundsBehavior: Flickable.StopAtBounds
@@ -306,7 +306,7 @@ Item {
       Column {
         id: lista
         width: rolagem.width
-        spacing: root.tema === "minimal" ? 0 : 6
+        spacing: root.tema === "minimal" ? 0 : 4
 
         Repeater {
           model: root.itens
@@ -315,7 +315,7 @@ Item {
             required property var modelData
             required property int index
             width: lista.width
-            height: corpoItem.implicitHeight + 20
+            height: corpoItem.implicitHeight + 12
             readonly property bool urgente: modelData.urgency === 2
             readonly property bool sobre: mItem.containsMouse || mFechar.containsMouse
             opacity: 1
@@ -333,7 +333,7 @@ Item {
               }
               Rectangle {   // faixa de urgente
                 visible: it.urgente
-                width: 3; height: parent.height - 12; y: 6; radius: 1.5; color: root.cTexto
+                width: 3; height: parent.height - 8; y: 4; radius: 1.5; color: root.cTexto
               }
             }
             Canvas {
@@ -355,12 +355,12 @@ Item {
 
             ColumnLayout {
               id: corpoItem
-              x: it.urgente ? 16 : 12
-              y: 10
-              width: parent.width - x - 36
-              spacing: 2
+              x: it.urgente ? 12 : 8
+              y: 6
+              width: parent.width - x - 28
+              spacing: 1
               RowLayout {
-                spacing: 6
+                spacing: 5
                 Image {
                   Layout.preferredWidth: 16; Layout.preferredHeight: 16
                   source: {
@@ -376,7 +376,7 @@ Item {
                 }
                 Text {
                   text: (it.modelData.app || "Sistema") + " · " + root.quando(it.modelData.timestamp || 0)
-                  font.family: root.fonteSistema; font.pixelSize: 11
+                  font.family: root.fonteSistema; font.pixelSize: 10
                   color: root.cApagado
                   elide: Text.ElideRight
                   Layout.fillWidth: true
@@ -387,7 +387,7 @@ Item {
                 visible: text.length > 0
                 text: (it.urgente ? "! " : "") + (it.modelData.summary || "")
                 font.family: root.fonteTitulo
-                font.pixelSize: root.pixel ? 20 : 13
+                font.pixelSize: root.pixel ? 16 : 12
                 font.bold: true
                 color: root.cTexto
                 elide: Text.ElideRight
@@ -399,7 +399,7 @@ Item {
                 visible: text.length > 0
                 text: String(it.modelData.body || "").replace(/<[^>]+>/g, "")
                 textFormat: Text.PlainText
-                font.family: root.fonteSistema; font.pixelSize: 12
+                font.family: root.fonteSistema; font.pixelSize: 11
                 color: root.cTexto
                 opacity: 0.8
                 wrapMode: Text.WordWrap
@@ -418,9 +418,9 @@ Item {
             // remover (×)
             Rectangle {
               anchors.top: parent.top; anchors.right: parent.right
-              anchors.topMargin: 6; anchors.rightMargin: 6
-              width: 24; height: 24
-              radius: root.pixel ? 0 : 5
+              anchors.topMargin: 4; anchors.rightMargin: 4
+              width: 20; height: 20
+              radius: root.pixel ? 0 : 4
               opacity: it.sobre ? 1 : 0
               Behavior on opacity { NumberAnimation { duration: 120 } }
               color: mFechar.containsMouse ? root.cHover : "transparent"
@@ -428,7 +428,7 @@ Item {
                 anchors.centerIn: parent
                 text: root.pixel ? "×" : "✕"
                 font.family: root.pixel ? "Simba Pixel" : root.fonteSistema
-                font.pixelSize: root.pixel ? 20 : 11
+                font.pixelSize: root.pixel ? 14 : 10
                 color: root.cTexto
               }
               MouseArea {
@@ -455,14 +455,14 @@ Item {
       visible: root.itens.length === 0
       Layout.fillWidth: true
       Layout.preferredHeight: visible ? implicitHeight : 0
-      implicitHeight: 104
+      implicitHeight: 56
       Column {
         anchors.centerIn: parent
-        spacing: 6
+        spacing: 2
         Canvas {   // Simba cochilando (temas pixel)
           visible: root.pixel
           anchors.horizontalCenter: parent.horizontalCenter
-          width: 48; height: 30
+          width: 36; height: 20
           antialiasing: false
           property int quadro: 0
           Timer { interval: 500; repeat: true; running: root.ativo && root.pixel && vazio.visible; onTriggered: parent.quadro = (parent.quadro + 1) % 3 }
@@ -476,29 +476,28 @@ Item {
               ".kgggggggggkgkgk",
               "kgggggggggggglgk",
               "kggggggggggggggk",
-              ".kkkkkkkkkkkkkk."], 4, 8, Px.GATO_CORES)
+              ".kkkkkkkkkkkkkk."], 0, 3, Px.GATO_CORES)
             var cor = String(root.cApagado)
-            // "z" subindo: um, dois, três pontinhos
-            for (var k = 0; k <= quadro; k++) Px.rect(c, 2, 20 + k * 2, 5 - k * 2, 2, 1, cor)
+            for (var k = 0; k <= quadro; k++) Px.rect(c, 2, 17 + k * 2, 2 - k * 2, 2, 1, cor)
           }
         }
         Text {
           visible: !root.pixel
           anchors.horizontalCenter: parent.horizontalCenter
-          text: "󰂚"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 30
+          text: "󰂚"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 20
           color: root.cApagado
         }
         Text {
           anchors.horizontalCenter: parent.horizontalCenter
           text: root.pixel ? "Nada por aqui…" : "Nenhuma notificação nova"
-          font.family: root.fonteTitulo; font.pixelSize: root.pixel ? 20 : 13; font.bold: root.pixel
+          font.family: root.fonteTitulo; font.pixelSize: root.pixel ? 16 : 12; font.bold: root.pixel
           color: root.cTexto
           renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
         }
         Text {
           anchors.horizontalCenter: parent.horizontalCenter
           text: root.pixel ? "o Simba está cochilando." : "Tudo em dia."
-          font.family: root.fonteSistema; font.pixelSize: 11
+          font.family: root.fonteSistema; font.pixelSize: 10
           color: root.cApagado
         }
       }

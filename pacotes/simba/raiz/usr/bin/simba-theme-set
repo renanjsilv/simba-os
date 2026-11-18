@@ -284,25 +284,66 @@ fi
 # fundo, então o shell recebe as cores novas já aqui, antes dos templates (~2 s):
 # a tela muda na hora e o resto continua por trás.
 EARLY_SHELL_APPLIED=0
-# Apps GTK/libadwaita (Configurações, Explorador, chat…) mudam claro/escuro já agora; o
+EARLY_PINNED=0
+if [[ $THEME_HEADLESS != "1" && -f $HOME/.local/state/simba/papel-definido ]]; then
+  early_pinned=$(<"$HOME/.local/state/simba/papel-definido")
+  [[ -f $early_pinned && $early_pinned != "$(realpath -m "$CURRENT_THEME_PATH")"/* ]] && EARLY_PINNED=1
+fi
+
+# Transição suave: foto da tela por cima de tudo (uma por monitor) enquanto o tema troca
+# por baixo; o shell desfaz a foto sozinho 0,3 s depois que as cores novas chegam
+# (Background.qml › congelarTema). Feita em paralelo com a geração do shell.toml.
+TRANSICAO_DIR=""
+# Apps GTK/libadwaita (Configurações, Explorador, chat…) levam ~0,9 s para se redesenhar
+# depois do aviso de claro/escuro: o aviso sai assim que a tela é congelada. O
 # simba-theme-set-gnome completo (ícones) continua rodando no fim, como antes.
-if [[ $THEME_HEADLESS != "1" && -n ${DBUS_SESSION_BUS_ADDRESS:-} && -f $NEXT_THEME_PATH/colors.toml ]]; then
+trocar_esquema_gtk() {
+  [[ $THEME_HEADLESS != "1" && -n ${DBUS_SESSION_BUS_ADDRESS:-} && -f $NEXT_THEME_PATH/colors.toml ]] || return 0
   if [[ $(simba-theme-color --file "$NEXT_THEME_PATH/colors.toml" mode 2>/dev/null) == "light" ]]; then
     gsettings set org.gnome.desktop.interface color-scheme "prefer-light" &
   else
     gsettings set org.gnome.desktop.interface color-scheme "prefer-dark" &
   fi
+}
+congelar_tela() {
+  local dir=$1 out
+  for out in $(hyprctl monitors -j 2>/dev/null | jq -r '.[].name'); do
+    grim -l 0 -o "$out" "$dir/$out.png" &
+  done
+  wait
+  if compgen -G "$dir/*.png" >/dev/null && shell_ipc background congelarTema "$dir"; then
+    touch "$dir/.congelada"
+    sleep 0.03            # a cortina precisa de um quadro na tela antes de as cores mudarem
+    trocar_esquema_gtk
+  fi
+}
+tema_atual=$(cat "$HOME/.local/state/simba/current/theme.name" 2>/dev/null)
+if [[ $EARLY_PINNED == "1" && ${SIMBA_THEME_SEM_TRANSICAO:-} != "1" && $tema_atual != "$THEME_NAME" ]] && command -v grim >/dev/null && command -v jq >/dev/null; then
+  TRANSICAO_DIR="${XDG_RUNTIME_DIR:-/tmp}/simba-transicao-tema"
+  mkdir -p "$TRANSICAO_DIR" && rm -f "${TRANSICAO_DIR:?}"/*.png "${TRANSICAO_DIR:?}/.congelada"
+  congelar_tela "$TRANSICAO_DIR" &
+  CONGELAR_PID=$!
 fi
-if [[ $THEME_HEADLESS != "1" && -f $HOME/.local/state/simba/papel-definido ]]; then
-  early_pinned=$(<"$HOME/.local/state/simba/papel-definido")
-  if [[ -f $early_pinned && $early_pinned != "$(realpath -m "$CURRENT_THEME_PATH")"/* ]]; then
-    # só o shell.toml (barra, painéis, notificações) é gerado agora; o resto vem depois
-    SIMBA_THEMED_ONLY=shell.toml simba-theme-set-templates
-    early_colors=$([[ -f $NEXT_THEME_PATH/colors.toml ]] && base64 -w 0 "$NEXT_THEME_PATH/colors.toml")
-    early_shell=$([[ -f $NEXT_THEME_PATH/shell.toml ]] && base64 -w 0 "$NEXT_THEME_PATH/shell.toml")
-    if [[ -n $early_colors ]]; then
-      shell_ipc shell applyTheme "$early_colors" "$early_shell" && EARLY_SHELL_APPLIED=1
-    fi
+
+if [[ $EARLY_PINNED == "1" ]]; then
+  # só o shell.toml (barra, painéis, notificações) é gerado agora; o resto vem depois
+  SIMBA_THEMED_ONLY=shell.toml simba-theme-set-templates
+fi
+if [[ -n $TRANSICAO_DIR ]]; then
+  wait "$CONGELAR_PID"
+  if [[ -f $TRANSICAO_DIR/.congelada ]]; then
+    (sleep 3; rm -f "${TRANSICAO_DIR:?}"/*.png "${TRANSICAO_DIR:?}/.congelada") &
+  else
+    TRANSICAO_DIR=""
+  fi
+fi
+[[ -n $TRANSICAO_DIR ]] || trocar_esquema_gtk
+
+if [[ $EARLY_PINNED == "1" ]]; then
+  early_colors=$([[ -f $NEXT_THEME_PATH/colors.toml ]] && base64 -w 0 "$NEXT_THEME_PATH/colors.toml")
+  early_shell=$([[ -f $NEXT_THEME_PATH/shell.toml ]] && base64 -w 0 "$NEXT_THEME_PATH/shell.toml")
+  if [[ -n $early_colors ]]; then
+    shell_ipc shell applyTheme "$early_colors" "$early_shell" && EARLY_SHELL_APPLIED=1
   fi
 fi
 

@@ -132,6 +132,12 @@ Item {
   IpcHandler {
     target: "background"
 
+    // Simba: transição suave entre temas. congelarTema mostra por cima de tudo a foto da
+    // tela (uma por monitor, <dir>/<nome-do-monitor>.png) tirada antes da troca;
+    // revelarTema desfaz a foto devagar, mostrando o tema novo por baixo.
+    function congelarTema(dir: string): void { root.congelarTema(dir) }
+    function revelarTema(): void { root.revelarTema() }
+
     function refresh(): void {
       root.refreshBackground()
     }
@@ -318,6 +324,81 @@ Item {
           else root.openSelector()
           mouse.accepted = true
         }
+      }
+    }
+  }
+
+  // ── transição suave entre temas (cortina com a foto da tela) ────────────────
+  property string transicaoDir: ""
+  property bool transicaoAtiva: false
+  property real transicaoOpacidade: 1
+  property int transicaoVersao: 0
+  // os apps GTK levam ~0,9–1,2 s para se redesenhar depois do aviso de claro/escuro: a cortina
+  // só sai quando as cores chegaram (+0,3 s) E esse tempo passou desde o congelamento
+  property bool coresProntas: false
+  property bool appsProntos: false
+
+  function congelarTema(dir) {
+    fadeTema.stop()
+    root.transicaoDir = dir
+    root.transicaoVersao++
+    root.transicaoOpacidade = 1
+    root.transicaoAtiva = true
+    root.coresProntas = false
+    root.appsProntos = false
+    esperaApps.restart()
+    segurancaTransicao.restart()
+  }
+  function revelarTema() {
+    segurancaTransicao.stop()
+    revelarAposCores.stop()
+    esperaApps.stop()
+    if (!root.transicaoAtiva || fadeTema.running) return
+    fadeTema.restart()
+  }
+  // As cores novas chegaram ao shell: espera os apps GTK se redesenharem (~0,3 s) e
+  // revela sozinha — sem esperar outro comando do simba-theme-set.
+  Connections {
+    target: Commons.Color
+    function onBackgroundChanged() { if (root.transicaoAtiva && !fadeTema.running) root.agendarRevelar() }
+    function onForegroundChanged() { if (root.transicaoAtiva && !fadeTema.running) root.agendarRevelar() }
+  }
+  function agendarRevelar() { revelarAposCores.restart() }
+  function tentarRevelar() { if (root.coresProntas && root.appsProntos) root.revelarTema() }
+  Timer { id: revelarAposCores; interval: 300; onTriggered: { root.coresProntas = true; root.tentarRevelar() } }
+  Timer { id: esperaApps; interval: 1200; onTriggered: { root.appsProntos = true; root.tentarRevelar() } }
+  NumberAnimation {
+    id: fadeTema
+    target: root; property: "transicaoOpacidade"
+    to: 0; duration: 350; easing.type: Easing.InOutQuad
+    onFinished: { root.transicaoAtiva = false; root.transicaoOpacidade = 1 }
+  }
+  // se o revelarTema nunca chegar (troca falhou), a cortina sai sozinha
+  Timer { id: segurancaTransicao; interval: 4000; onTriggered: root.revelarTema() }
+
+  Variants {
+    model: Quickshell.screens
+    PanelWindow {
+      id: cortina
+      required property var modelData
+      screen: modelData
+      visible: root.transicaoAtiva
+      anchors { top: true; bottom: true; left: true; right: true }
+      exclusionMode: ExclusionMode.Ignore
+      color: "transparent"
+      WlrLayershell.namespace: "simba-transicao-tema"
+      WlrLayershell.layer: WlrLayer.Overlay
+      WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+      mask: Region {}          // cliques passam direto para as janelas
+      Image {
+        anchors.fill: parent
+        source: root.transicaoAtiva && root.transicaoDir !== ""
+          ? "file://" + root.transicaoDir + "/" + cortina.modelData.name + ".png?v=" + root.transicaoVersao : ""
+        cache: false
+        asynchronous: false
+        fillMode: Image.Stretch
+        smooth: true
+        opacity: root.transicaoOpacidade
       }
     }
   }

@@ -882,6 +882,10 @@ class Janela(Adw.ApplicationWindow):
             self.extrair([g.get_path()])
             return
         Gtk.RecentManager.get_default().add_item(g.get_uri())
+        if app is not None and app.get_id() == "imv.desktop" and g.get_path():
+            # imv com um arquivo só não tem para onde ir nas setas; o imv-dir
+            # abre a pasta inteira começando na foto clicada.
+            app = next((a for a in Gio.AppInfo.get_all() if a.get_id() == "imv-dir.desktop"), app)
         if app is not None:
             try:
                 app.launch([g], self.get_display().get_app_launch_context())

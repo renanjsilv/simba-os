@@ -43,8 +43,14 @@ class Inicio(Gtk.Box):
         # recentes mudam enquanto a página está aberta
         self._sinal = Gtk.RecentManager.get_default().connect("changed", lambda *a: GLib.idle_add(self.montar))
 
+    def liberar(self):
+        """Janela fechada (Janela._liberar): solta o sinal dos recentes, que é global."""
+        if getattr(self, "_sinal", None):
+            Gtk.RecentManager.get_default().disconnect(self._sinal)
+            self._sinal = None
+
     def do_unroot(self):
-        Gtk.RecentManager.get_default().disconnect(self._sinal)
+        self.liberar()
         Gtk.Box.do_unroot(self)
 
     def montar(self):
@@ -390,6 +396,9 @@ class Lateral(Gtk.Box):
         self.lista.add_controller(teclas)
         self.montar()
 
+    def liberar(self):
+        self.lista.set_header_func(None)      # guardada pelo C: prendia a lateral (e a janela)
+
     def _linha(self, nome, icone, destino, secao, recuo=0, pasta=None, seta=None):
         caixa = Gtk.Box(spacing=4, margin_start=2 + recuo)
         caixa.append(Gtk.Box(css_classes=["marca"]))
@@ -574,8 +583,8 @@ class Detalhes(Gtk.Box):
         topo.append(pic)
         self.corpo.append(topo)
         if u.miniaturavel(ct):
-            def pronto(p):
-                pic.set_filename(p)
+            def pronto(tex):
+                pic.set_paintable(tex)
                 pic.set_visible(True)
                 img.set_visible(False)
                 return False

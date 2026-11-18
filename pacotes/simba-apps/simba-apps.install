@@ -12,5 +12,8 @@ post_upgrade() {
   for u in $(loginctl list-users --no-legend 2>/dev/null | awk '$1 >= 1000 {print $2}'); do
     systemctl --user -M "$u@" daemon-reload >/dev/null 2>&1 || true
     systemctl --user -M "$u@" start conta-fundo.service >/dev/null 2>&1 || true
+    # Explorador residente: abre janelas na hora (se já estiver rodando, ele mesmo se
+    # reinicia com o código novo quando não houver janela aberta)
+    systemctl --user -M "$u@" start explorador.service >/dev/null 2>&1 || true
   done
 }

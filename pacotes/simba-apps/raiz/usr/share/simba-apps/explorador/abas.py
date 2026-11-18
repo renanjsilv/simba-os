@@ -135,6 +135,13 @@ class FaixaAbas(Gtk.Widget):
         self.queue_draw()
 
     # ── layout ─────────────────────────────────────────────────────────────
+    def do_dispose(self):
+        # widget próprio: os filhos (abas, botão +) são nossos — sem soltá-los aqui o GTK
+        # avisava "still has children left" e eles ficavam na memória ao fechar a janela
+        while (c := self.get_first_child()) is not None:
+            c.unparent()
+        Gtk.Widget.do_dispose(self)
+
     def do_measure(self, orientacao, para):
         if orientacao == Gtk.Orientation.HORIZONTAL:
             nat = len(self.abas) * LARG_MAX + MAIS_L + 8 + AREA_ARRASTAR

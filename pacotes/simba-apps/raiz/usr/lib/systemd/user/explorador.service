@@ -1,0 +1,17 @@
+[Unit]
+Description=Explorador de Arquivos (residente: abre janelas na hora)
+# Fica carregado sem janela, como o Nautilus. /usr/bin/explorador só pede a janela
+# pelo D-Bus. Também atende org.freedesktop.FileManager1 ("Mostrar na pasta").
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -c "import sys; sys.path.insert(0, '/usr/share/simba-apps/explorador'); import explorador; sys.exit(explorador.main())" --residente
+Restart=always
+RestartSec=2
+# GTK em segundo plano: não disputa CPU com o login
+Nice=5
+
+[Install]
+WantedBy=graphical-session.target

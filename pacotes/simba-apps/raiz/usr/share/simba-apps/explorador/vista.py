@@ -36,6 +36,7 @@ class Vista(Gtk.Overlay):
 
     def __init__(self, janela, gfile=None, lista=None, mostrar_local=False):
         super().__init__()
+        self._sinais_modelo = []
         self.janela = janela
         self.gfile = gfile
         self.mostrar_local = mostrar_local
@@ -57,16 +58,16 @@ class Vista(Gtk.Overlay):
             self.dirlist.set_monitored(True)
             self.dirlist.set_io_priority(GLib.PRIORITY_DEFAULT)
             self.fonte = self.dirlist
-            self.dirlist.connect("notify::loading", lambda *a: self._atualizar_vazio())
-            self.dirlist.connect("notify::error", lambda *a: self._atualizar_vazio())
+            self._ligar(self.dirlist, "notify::loading", lambda *a: self._atualizar_vazio())
+            self._ligar(self.dirlist, "notify::error", lambda *a: self._atualizar_vazio())
 
         self.filtro = Gtk.CustomFilter.new(self._filtrar)
         self.filtrado = Gtk.FilterListModel.new(self.fonte, self.filtro)
         self.sorter = Gtk.CustomSorter.new(self._comparar)
         self.ordenado = Gtk.SortListModel.new(self.filtrado, self.sorter)
         self.selecao = Gtk.MultiSelection.new(self.ordenado)
-        self.selecao.connect("selection-changed", lambda *a: self.emit("selecao"))
-        self.ordenado.connect("items-changed", self._mudou)
+        self._ligar(self.selecao, "selection-changed", lambda *a: self.emit("selecao"))
+        self._ligar(self.ordenado, "items-changed", self._mudou)
 
         self.rolagem = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
         self.set_child(self.rolagem)
@@ -148,6 +149,7 @@ class Vista(Gtk.Overlay):
 
     # ── views ──────────────────────────────────────────────────────────────
     def _montar_view(self):
+        antiga = getattr(self, "view", None)
         v = self.visao
         if v == "detalhes":
             self.view = self._columnview()
@@ -162,6 +164,8 @@ class Vista(Gtk.Overlay):
         self.view.set_single_click_activate(self.janela.cfg.get("cliqueUnico", False))
         self.view.connect("activate", self._ativado)
         self.rolagem.set_child(self.view)
+        if antiga is not None:
+            u.descartar_depois(antiga)       # a visão trocada (ícones ↔ detalhes) não fica na memória
 
     def definir_visao(self, v):
         if v == self.visao:
@@ -210,9 +214,9 @@ class Vista(Gtk.Overlay):
             token = object()
             img._token = token
 
-            def pronto(path):
+            def pronto(tex):
                 if getattr(img, "_token", None) is token:
-                    pic.set_filename(path)
+                    pic.set_paintable(tex)
                     pic.set_visible(True)
                     img.set_visible(False)
                 return False
@@ -220,14 +224,17 @@ class Vista(Gtk.Overlay):
         else:
             img._token = None
 
+    # Os gestos pegam o item por get_widget(), sem guardar o item na função: item → gesto →
+    # função → item era um ciclo pelo C que nada liberava — cada item de pasta visitada (com
+    # a miniatura decodificada) ficava na memória para sempre (~30 MB por visita às Imagens).
     def _arrastavel(self, w):
         src = Gtk.DragSource(actions=Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
-        src.connect("prepare", self._preparar_arrasto, w)
+        src.connect("prepare", lambda s, x, y: self._preparar_arrasto(s, x, y, s.get_widget()))
         w.add_controller(src)
 
     def _alvo_soltar(self, w):
         alvo = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY | Gdk.DragAction.MOVE)
-        alvo.connect("drop", lambda t, val, x, y: self._soltar_em(val, getattr(w, "_info", None), t))
+        alvo.connect("drop", lambda t, val, x, y: self._soltar_em(val, getattr(t.get_widget(), "_info", None), t))
         w.add_controller(alvo)
 
     def _item_grade(self, li):
@@ -336,7 +343,7 @@ class Vista(Gtk.Overlay):
         col = self._colunas.get(self.ordem)
         if col:
             cv.sort_by_column(col, Gtk.SortType.DESCENDING if self.desc else Gtk.SortType.ASCENDING)
-        cv.get_sorter().connect("changed", self._cabecalho_ordem)
+        self._ligar(cv.get_sorter(), "changed", self._cabecalho_ordem)
         return cv
 
     def _cabecalho_ordem(self, sorter, *_):
@@ -451,6 +458,23 @@ class Vista(Gtk.Overlay):
                 self.rolar_ate(p)
                 return True
         return False
+
+    def _ligar(self, obj, sinal, fn, *extra):
+        self._sinais_modelo.append((obj, obj.connect(sinal, fn, *extra)))
+
+    def liberar(self):
+        """Página trocada/janela fechada (u.liberar): os modelos não são widgets, então os
+        sinais e as funções de filtro/ordem daqui prenderiam a vista inteira na memória."""
+        for obj, hid in self._sinais_modelo:
+            if GObject.signal_handler_is_connected(obj, hid):
+                obj.disconnect(hid)
+        self._sinais_modelo = []
+        self.filtro.set_filter_func(None)
+        self.sorter.set_sort_func(None)
+        if self.dirlist is not None:
+            self.dirlist.set_monitored(False)
+        # o pesado (lista, itens, miniaturas) sai já, mesmo que algum gesto ainda aponte pra cá
+        self.set_child(None)
 
     def selecionar_quando_aparecer(self, nome, tentativas=40):
         """Arquivo recém-criado: seleciona quando o monitor da pasta trouxer."""

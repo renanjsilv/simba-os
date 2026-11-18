@@ -1,3 +1,51 @@
 #!/bin/bash
-# Explorador de Arquivos (~/.local/share/explorador) — estilo Windows 11.
-exec python3 "/usr/share/simba-apps/explorador/explorador.py" "$@"
+# Explorador de Arquivos — estilo Windows 11 (/usr/share/simba-apps/explorador).
+#
+# Rápido: o Explorador fica residente (explorador.service, sobe no login ou na 1ª
+# chamada pelo D-Bus). Este lançador só pede a janela ao processo que já está
+# carregado — sem abrir Python nem GTK —, então a janela aparece na hora.
+# Se o D-Bus/residente falhar, cai no jeito antigo (processo próprio).
+DIR=/usr/share/simba-apps/explorador
+
+lento() { exec python3 -c 'import sys; sys.path.insert(0, sys.argv.pop(1)); import explorador; sys.exit(explorador.main())' "$DIR" "$@"; }
+
+# opções internas (--servico, --residente…) ou sem sessão D-Bus: direto
+[[ $1 == --* ]] && lento "$@"
+[[ -n $DBUS_SESSION_BUS_ADDRESS || -S ${XDG_RUNTIME_DIR:-/run/user/$UID}/bus ]] || lento "$@"
+
+# caminho → URI file:// (percent-encoding byte a byte, aceita acentos e espaços)
+uri() {
+  local s c i out='' LC_ALL=C
+  s=$1
+  for ((i = 0; i < ${#s}; i++)); do
+    c=${s:i:1}
+    case $c in
+      [a-zA-Z0-9/._~-]) out+=$c ;;
+      *) printf -v c '%%%02X' "'$c"; out+=$c ;;
+    esac
+  done
+  printf 'file://%s' "$out"
+}
+
+uris=()
+for a in "$@"; do
+  if [[ ! -e $a && $a =~ ^[a-zA-Z][a-zA-Z0-9+.-]*: ]]; then
+    uris+=("$a")                      # já é URI (file://, trash:///, sftp://…)
+  else
+    uris+=("$(uri "$(realpath -m -- "$a")")")
+  fi
+done
+
+# token de ativação (o Hyprland põe a janela nova em foco)
+plat='{}'
+tok=${XDG_ACTIVATION_TOKEN:-$DESKTOP_STARTUP_ID}
+[[ $tok =~ ^[A-Za-z0-9_.:-]+$ ]] && plat="{'activation-token': <'$tok'>, 'desktop-startup-id': <'$tok'>}"
+
+alvo=(--session --dest com.simba.Explorador --object-path /com/simba/Explorador --timeout 15)
+if ((${#uris[@]})); then
+  lista=$(printf "'%s'," "${uris[@]//\'/%27}")
+  gdbus call "${alvo[@]}" --method org.freedesktop.Application.Open "[${lista%,}]" "$plat" >/dev/null 2>&1 && exit 0
+else
+  gdbus call "${alvo[@]}" --method org.freedesktop.Application.Activate "$plat" >/dev/null 2>&1 && exit 0
+fi
+lento "$@"

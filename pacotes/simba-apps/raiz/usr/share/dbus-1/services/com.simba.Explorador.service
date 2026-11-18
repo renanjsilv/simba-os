@@ -1,0 +1,4 @@
+[D-BUS Service]
+Name=com.simba.Explorador
+Exec=/usr/bin/explorador --residente
+SystemdService=explorador.service

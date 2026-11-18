@@ -24,7 +24,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk, Pango  # noqa: E402
 
 import nuvem  # noqa: E402
 import utilidades as u  # noqa: E402
@@ -65,6 +65,7 @@ class Aba(Gtk.Box):
         self.local = local
         if self.pagina is not None:
             self.remove(self.pagina)
+            u.descartar_depois(self.pagina)     # senão cada pasta visitada ficava na memória
         self.vista = None
         if isinstance(local, str):
             if local == "inicio":
@@ -258,7 +259,9 @@ class Janela(Adw.ApplicationWindow):
 
         self._sinais_ops = [self.ops.connect("progresso", self._progresso), self.ops.connect("terminou", self._terminou)]
         self.connect("close-request", self._fechar_janela)
-        vm = Gio.VolumeMonitor.get()
+        # guarda o monitor: Gio.VolumeMonitor.get() pode devolver outro objeto depois, e aí o
+        # disconnect falhava e a janela fechada ficava presa na memória (pesa no modo residente)
+        self._vm = vm = Gio.VolumeMonitor.get()
         self._sinais_vm = [vm.connect(s, lambda *a: GLib.timeout_add(600, self._mudou_montagem))
                            for s in ("mount-added", "mount-removed", "volume-added", "volume-removed")]
 
@@ -1765,9 +1768,28 @@ class Janela(Adw.ApplicationWindow):
         self.app.estilo.esquecer(self._sinal_estilo)
         for s in self._sinais_ops:
             self.ops.disconnect(s)
-        vm = Gio.VolumeMonitor.get()
         for s in self._sinais_vm:
-            vm.disconnect(s)
+            self._vm.disconnect(s)
+        self._sinais_vm = []
+        GLib.timeout_add(200, self._liberar, u.coletar(self))
+        return False
+
+    def connect(self, *a, **k):
+        # sinais ligados na própria janela (por nós): lembrados para desligar ao fechar —
+        # destruir todos os da janela levaria junto os internos do GTK
+        hid = super().connect(*a, **k)
+        self.__dict__.setdefault("_hids", []).append(hid)
+        return hid
+
+    def _liberar(self, todos):
+        """Janela fechada: desmonta tudo (u.liberar). Na própria janela só saem os sinais que
+        nós ligamos — destruir todos levaria junto os internos do GTK."""
+        for hid in self.__dict__.get("_hids", []):
+            if GObject.signal_handler_is_connected(self, hid):
+                self.disconnect(hid)
+        u.liberar(todos, poupar=(self,))
+        import gc
+        gc.collect()
         return False
 
 
@@ -1789,6 +1811,7 @@ class App(Adw.Application):
         self.ops.perguntar = self._conflito
         self.estilo = None
         self.servico = False     # iniciado pelo D-Bus (FileManager1): sem janela inicial
+        self.residente = False   # explorador.service: fica carregado sem janela; abrir vira só criar a janela
 
     def _conflito(self, nome, responder):
         jan = self.get_active_window() or next(iter(self.get_windows()), None)
@@ -1874,6 +1897,13 @@ class App(Adw.Application):
         return j
 
     def do_activate(self):
+        if self.residente:
+            # 1ª ativação do processo residente (systemd/D-Bus): não abre janela; as próximas abrem
+            self.residente = False
+            self.hold()
+            GLib.idle_add(self._aquecer)
+            self._vigiar_atualizacao()
+            return
         if self.servico:
             # aberto pelo D-Bus: espera o pedido (ShowItems…) e sai se ninguém abrir janela
             self.servico = False
@@ -1881,6 +1911,43 @@ class App(Adw.Application):
             GLib.timeout_add_seconds(20, lambda: (self.release(), False)[1])
             return
         self.nova_janela(None)
+
+    def _aquecer(self):
+        """Paga antes o que a 1ª janela pagaria: tema de ícones, ícones da lateral, recentes, CSS."""
+        try:
+            j = Janela(self)
+            j.nova_aba(None)
+            # realizar sem mostrar: cria o renderizador e calcula CSS/tamanhos uma vez
+            j.realize()
+            j.measure(Gtk.Orientation.HORIZONTAL, -1)
+            j.measure(Gtk.Orientation.VERTICAL, 1240)
+            tema = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+            for n in ("folder", "user-home", "folder-pictures", "folder-documents", "folder-download", "folder-music",
+                      "folder-videos", "user-desktop", "computer", "folder-remote", "user-trash", "drive-harddisk",
+                      "text-x-generic", "image-x-generic", "go-previous-symbolic", "go-next-symbolic", "go-up-symbolic"):
+                tema.lookup_icon(n, None, 24, 1, Gtk.TextDirection.NONE, 0)
+            j._fechar_janela()
+            j.unrealize()
+            j.destroy()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+
+    def _vigiar_atualizacao(self):
+        """Pacote atualizado: o residente sai (quando não há janela) e o systemd o sobe com o código novo."""
+        self._mon_codigo = Gio.File.new_for_path(os.path.abspath(__file__)).monitor_file(Gio.FileMonitorFlags.NONE, None)
+        self._codigo_mudou = False
+
+        def mudou(*a):
+            self._codigo_mudou = True
+            self._sair_se_livre()
+        self._mon_codigo.connect("changed", lambda *a: GLib.timeout_add_seconds(3, lambda: (mudou(), False)[1]))
+        self.connect("window-removed", lambda *a: GLib.idle_add(self._sair_se_livre))
+
+    def _sair_se_livre(self):
+        if getattr(self, "_codigo_mudou", False) and not any(isinstance(w, Janela) for w in self.get_windows()):
+            self.quit()
+        return False
 
     def do_open(self, arquivos, n, dica):
         self.nova_janela_varios(list(arquivos))
@@ -1892,9 +1959,25 @@ class App(Adw.Application):
         return False
 
 
-if __name__ == "__main__":
+def main():
     app = App()
     if "--servico" in sys.argv:
         sys.argv.remove("--servico")
         app.servico = True
-    sys.exit(app.run(sys.argv))
+    if "--residente" in sys.argv:
+        sys.argv.remove("--residente")
+        app.register(None)
+        if app.get_is_remote():
+            # já tem um Explorador comum aberto: espera ele fechar e assume o lugar
+            # (sem abrir janela à toa e sem o systemd reiniciar em laço)
+            argv = [sys.executable, *sys.orig_argv[1:]]
+            Gio.bus_watch_name(Gio.BusType.SESSION, APP_ID, Gio.BusNameWatcherFlags.NONE, None,
+                               lambda *a: os.execv(sys.executable, argv))
+            GLib.MainLoop().run()
+            return 0
+        app.residente = True
+    return app.run(sys.argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -36,7 +36,13 @@ ATRIBUTOS = ",".join([
 
 def tipo(info):
     """Tipo MIME do item (content-type, se lido, senão o rápido pelo nome)."""
-    return info.get_content_type() or info.get_attribute_string("standard::fast-content-type") or ""
+    # has_attribute antes: get_content_type() sem o atributo lido gera um GLib-CRITICAL por
+    # item (milhares por janela, todos indo para o journal no modo residente)
+    if info.has_attribute("standard::content-type"):
+        ct = info.get_content_type()
+        if ct:
+            return ct
+    return info.get_attribute_string("standard::fast-content-type") or ""
 
 
 # Pastas montadas de nuvem (rclone): sem miniaturas nem leitura de conteúdo nelas.
@@ -270,8 +276,18 @@ def _gerar(gfile, ct, mtime, grande, local=None):
         return None
 
 
+def _textura(caminho):
+    """Decodifica o PNG fora do laço do GTK (GdkTexture é imutável, pode nascer em outra thread)."""
+    from gi.repository import Gdk
+    try:
+        return Gdk.Texture.new_from_filename(caminho)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def pedir_miniatura(info, grande, pronto):
-    """Gera/acha a miniatura em segundo plano; pronto(caminho) no laço do GTK."""
+    """Gera/acha a miniatura em segundo plano; pronto(textura) no laço do GTK.
+    Nada de decodificar imagem na thread principal: abrir pasta/Início não engasga."""
     gfile = arquivo_de(info)
     ct = tipo(info)
     mtime = info.get_attribute_uint64("time::modified")
@@ -283,16 +299,15 @@ def pedir_miniatura(info, grande, pronto):
         local = copia_em_cache(gfile.get_path(), info.get_size())
         if not local:
             return
+    pronta = None
     if not grande:
-        p = info.get_attribute_byte_string("thumbnail::path") if info.has_attribute("thumbnail::path") else None
-        if p and os.path.exists(p):
-            pronto(p)
-            return
+        pronta = info.get_attribute_byte_string("thumbnail::path") if info.has_attribute("thumbnail::path") else None
 
     def trabalho():
-        r = _gerar(gfile, ct, mtime, grande, local)
-        if r:
-            GLib.idle_add(pronto, r)
+        r = pronta if pronta and os.path.exists(pronta) else _gerar(gfile, ct, mtime, grande, local)
+        tex = _textura(r) if r else None
+        if tex is not None:
+            GLib.idle_add(pronto, tex)
     _executor.submit(trabalho)
 
 
@@ -323,9 +338,9 @@ def mini_no_icone(info, img):
     if not miniaturavel(tipo(info)):
         return
 
-    def pronto(path):
+    def pronto(tex):
         if getattr(img, "_token_mini", None) is token:
-            img.set_from_file(path)
+            img.set_from_paintable(tex)
         return False
     pedir_miniatura(info, False, pronto)
 
@@ -347,3 +362,63 @@ def retangulo(x, y, w=1, h=1):
     r = Gdk.Rectangle()
     r.x, r.y, r.width, r.height = int(x), int(y), int(w), int(h)
     return r
+
+
+# ── liberar memória de widgets descartados ──────────────────────────────────
+# As funções Python ligadas a sinais (e header/filter/sort funcs) ficam presas pelo lado C:
+# um ciclo que o coletor do Python não enxerga. Sem desmontar, cada pasta visitada e cada
+# janela fechada ficavam inteiras na memória (uns 7 MB por janela no Explorador residente).
+def coletar(raiz):
+    """Tudo que é só desta árvore: widgets, gestos/atalhos, fábricas e modelos das listas,
+    ações. Objetos compartilhados (copiador, monitor de volumes, estilo) não entram."""
+    from gi.repository import Gtk
+    vistos, pilha, todos = set(), [raiz], []
+    while pilha:
+        o = pilha.pop()
+        if o is None or id(o) in vistos:
+            continue
+        vistos.add(id(o))
+        todos.append(o)
+        if isinstance(o, Gtk.Widget):
+            c = o.get_first_child()
+            while c is not None:
+                pilha.append(c)
+                c = c.get_next_sibling()
+            ctl = o.observe_controllers()
+            pilha.extend(ctl.get_item(k) for k in range(ctl.get_n_items()))
+            # fábricas: só têm sinais nossos. Os modelos não entram (o GTK liga sinais internos
+            # neles); quem os criou solta os seus em liberar()
+            if isinstance(o, (Gtk.ListView, Gtk.GridView)):
+                pilha.append(o.get_factory())
+            elif isinstance(o, Gtk.ColumnView):
+                cols = o.get_columns()
+                pilha.extend(cols.get_item(k).get_factory() for k in range(cols.get_n_items()))
+        if isinstance(o, Gio.ActionMap):
+            pilha.extend(o.lookup_action(n) for n in o.list_actions())
+    return todos
+
+
+def liberar(todos, poupar=()):
+    """Desliga os sinais e solta as referências Python do que coletar() juntou. Quem tem
+    liberar() (Vista, Inicio, Lateral…) solta antes o que só ele sabe (modelos, globais)."""
+    from gi.repository import GObject
+    for o in todos:
+        if hasattr(type(o), "liberar"):
+            try:
+                o.liberar()
+            except Exception:  # noqa: BLE001
+                pass
+        if not any(o is x for x in poupar):
+            GObject.signal_handlers_destroy(o)
+        d = getattr(o, "__dict__", None)
+        if d:
+            d.clear()
+    todos.clear()
+    return False
+
+
+def descartar_depois(widget):
+    """Widget que acabou de sair da tela (página trocada): desmonta num instante, sem pressa."""
+    todos = coletar(widget)
+    GLib.timeout_add(300, liberar, todos)
+

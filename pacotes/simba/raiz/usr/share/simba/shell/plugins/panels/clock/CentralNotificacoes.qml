@@ -531,11 +531,12 @@ Item {
                 visible: text.length > 0
                 text: (it.urgente ? "! " : "") + (it.modelData.summary || "")
                 font.family: root.fonteTitulo
-                font.pixelSize: root.pixel ? 15 : 12.5
+                font.pixelSize: root.pixel ? 10 : 12.5
                 font.bold: true
                 color: root.cTexto
+                wrapMode: Text.WordWrap
                 elide: Text.ElideRight
-                maximumLineCount: 1
+                maximumLineCount: 2
                 renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
               }
 

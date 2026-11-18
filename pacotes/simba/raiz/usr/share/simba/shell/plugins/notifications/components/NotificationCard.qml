@@ -63,9 +63,9 @@ BorderSurface {
   readonly property bool pixel: estilosPixel.indexOf(est) >= 0
   readonly property string tam: ["pequeno", "medio", "grande"].indexOf(tamanho) >= 0 ? tamanho : "pequeno"
   // pixel art: só ampliações inteiras (px = tamanho do pixel da moldura, fz = fonte 10 = 1×, 20 = 2×)
-  // fz = título (Simba Pixel 20 = 2×); corpo em sans no pequeno/médio (legível), pixel no grande
-  readonly property var tamPixel: ({ pequeno: { px: 1, fz: 20, corpo: 11, sans: true,  ic: 24, w: 304, linhas: 2 },
-                                     medio:   { px: 2, fz: 20, corpo: 12, sans: true,  ic: 32, w: 336, linhas: 3 },
+  // fz = título (Simba Pixel 10 = 1× no pequeno/médio, 20 = 2× no grande); corpo em sans no pequeno/médio (legível), pixel no grande
+  readonly property var tamPixel: ({ pequeno: { px: 1, fz: 10, corpo: 11, sans: true,  ic: 24, w: 304, linhas: 2 },
+                                     medio:   { px: 2, fz: 10, corpo: 12, sans: true,  ic: 32, w: 336, linhas: 3 },
                                      grande:  { px: 2, fz: 20, corpo: 20, sans: false, ic: 48, w: 384, linhas: 3 } })[tam]
   // clássicos (especificação de UI): largura, ícone, título, corpo, linhas; margens escalam
   readonly property var tamNormal: ({ pequeno: { w: 300, ic: 24, t: 12, c: 11, linhas: 2 },
@@ -342,7 +342,7 @@ BorderSurface {
         text: root.glyph
         color: root.corTitulo
         font.family: root.fontFamily
-        font.pixelSize: root.pixel ? root.tamPixel.fz : Math.round(Style.font.displayLarge * root.esc)
+        font.pixelSize: root.pixel ? Math.round(root.tamIcone * 0.75) : Math.round(Style.font.displayLarge * root.esc)
       }
     }
 
@@ -364,7 +364,7 @@ BorderSurface {
         renderType: root.pixel ? Text.NativeRendering : Text.QtRendering
         wrapMode: Text.WordWrap
         elide: Text.ElideRight
-        maximumLineCount: 1
+        maximumLineCount: root.est === "pilula" ? 1 : 2
       }
       Text {
         Layout.fillWidth: true

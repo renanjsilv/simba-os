@@ -23,10 +23,10 @@ Guia passo a passo, do download ao primeiro uso. Leva uns 30 minutos.
 ## 2. Baixar
 
 Baixe a ISO e o arquivo de verificação em
-**[sourceforge.net/projects/simba-os/files/0.1.0](https://sourceforge.net/projects/simba-os/files/0.1.0/)**:
+**[sourceforge.net/projects/simba-os/files/0.1.9](https://sourceforge.net/projects/simba-os/files/0.1.9/)**:
 
-- `simba-os-0.1.0-x86_64.iso` (4,0 GB)
-- `simba-os-0.1.0-x86_64.iso.sha256`
+- `simba-os-0.1.9-x86_64.iso` (4,6 GB)
+- `simba-os-0.1.9-x86_64.iso.sha256`
 
 ### Conferir o download
 
@@ -35,16 +35,16 @@ Com os dois arquivos na mesma pasta:
 **Linux**
 
 ```bash
-sha256sum -c simba-os-0.1.0-x86_64.iso.sha256
+sha256sum -c simba-os-0.1.9-x86_64.iso.sha256
 ```
 
-Deve aparecer `simba-os-0.1.0-x86_64.iso: OK` (ou `SUCESSO`).
+Deve aparecer `simba-os-0.1.9-x86_64.iso: OK` (ou `SUCESSO`).
 
 **Windows** (PowerShell, na pasta dos arquivos)
 
 ```powershell
-(Get-FileHash .\simba-os-0.1.0-x86_64.iso).Hash.ToLower()
-Get-Content .\simba-os-0.1.0-x86_64.iso.sha256
+(Get-FileHash .\simba-os-0.1.9-x86_64.iso).Hash.ToLower()
+Get-Content .\simba-os-0.1.9-x86_64.iso.sha256
 ```
 
 Os dois códigos têm que ser iguais. Se não forem, baixe de novo.

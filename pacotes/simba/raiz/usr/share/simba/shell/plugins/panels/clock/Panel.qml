@@ -1,20 +1,15 @@
 import QtQuick 6.11
+import QtQuick.Layouts
 import Quickshell
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
+import "../../notifications/components/PixelArte.js" as Px
 
-// The clock's calendar popup: a month grid with ISO week numbers, built to
-// sit beside the weather panel — same hero-over-detail composition, same
-// spacing scale, same small-caps labels.
-//
-// The grid is a read-out rather than a picker: today is the only marked
-// day, and the only thing that moves is which month is on screen —
-// chevrons, the scroll wheel, and the arrow keys all step it.
-//
-// BarWidget.qml owns the bar label and hands this panel the button to
-// anchor against.
+// Painel do Relógio: Central de Notificações e Calendário flutuantes estilo Windows 11.
+// Dois cartões flutuantes desacoplados (notificações em cima, data/calendário/foco embaixo),
+// compactos (360 px), alinhados ao widget do relógio na barra de tarefas.
 Panel {
   id: root
   moduleName: "simba.clock"
@@ -22,81 +17,55 @@ Panel {
   manageIpc: false
 
   property var anchorItem: null
-
-  // The bar tracks the widget mounted in its slot — BarWidget.qml — not this
-  // nested panel. Everything the bar identifies a panel by has to be that
-  // widget: the popout coordinator (and with it the open-panel dot under the
-  // pill) compares against `slot.activeItem`, and switchPanelFrom looks the
-  // slot up the same way.
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
 
-  // ---- Today. SystemClock keeps this honest across midnight so the
-  //      highlight rolls over without the panel being reopened.
+  // ---- Data de hoje e navegação do mês
   property date today: new Date()
   readonly property string todayKey: Model.keyForDate(today)
 
-  // The month on screen. Stepping moves this and nothing else: the grid is
-  // a read-out, not a picker, so there is no per-day cursor to keep in sync.
   property int viewYear: today.getFullYear()
   property int viewMonth: today.getMonth()
-
-  // Local noon, so a first of the month with no midnight (Havana, April 2012)
-  // still names its own month; UTC would name the previous one west of Greenwich.
   readonly property date viewDate: new Date(viewYear, viewMonth, 1, 12)
   readonly property bool viewingCurrentMonth: viewYear === today.getFullYear() && viewMonth === today.getMonth()
 
-  // Pinned to today, not to the month being browsed — stepping through the
-  // calendar does not change how much of the year is gone.
-  readonly property real yearDone: Model.yearProgress(today.getFullYear(), today.getMonth(), today.getDate())
-  readonly property int yearDonePercent: Model.yearProgressPercent(today.getFullYear(), today.getMonth(), today.getDate())
-
-  // Memento mori, for anyone who goes looking: double-tapping the year bar
-  // asks for a birth year and a life expectancy, and a second bar tracks one
-  // against the other. A birth year rather than an age, so it keeps counting
-  // on its own. Without one the bar stays hidden.
-  readonly property int birthYear: Model.parseBirthYear(setting("birthYear", 0), today.getFullYear())
-  readonly property int age: Model.ageFromBirthYear(birthYear, today.getFullYear())
-  readonly property int lifeExpectancy: Model.parseLifeExpectancy(setting("lifeExpectancy", 0))
-  readonly property real lifeDone: Model.lifeProgress(age, lifeExpectancy)
-  readonly property int lifeDonePercent: Model.lifeProgressPercent(age, lifeExpectancy)
-  property bool editingLife: false
-
-  // Unset falls through to the locale's own first day, so a fresh install
-  // starts out matching the rest of the desktop rather than a hardcoded
-  // convention. Clicking the grid's "W" heading writes the choice back to
-  // shell.json.
-  readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), Qt.locale().firstDayOfWeek)
-  // The interface is English throughout, so day names are not taken from the
-  // system locale. Where the week starts still is: that is a regional
-  // convention rather than a translation, and it stays overridable above.
+  readonly property int weekStart: Model.normalizedWeekStart(setting("weekStartDay", null), 0)
   readonly property var labelLocale: Qt.locale("pt_BR")
-  readonly property string nextWeekStartLabel: labelLocale.dayName(Model.toggledWeekStart(weekStart), Locale.LongFormat)
-  readonly property var weekdays: Model.weekdayOrder(weekStart)
   readonly property var weeks: Model.monthGrid(viewYear, viewMonth, weekStart, todayKey)
 
-
-  // Guarded so the widget renders before the bar is injected (the bar-widget
-  // contract instantiates it bare).
   readonly property color contentForeground: bar ? bar.foreground : Commons.Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
 
-  readonly property int cellWidth: Style.space(36)
-  readonly property int cellHeight: Style.space(26)
-  readonly property int cellSpacing: Style.space(2)
-  readonly property int weekColumnWidth: Style.space(22)
-  readonly property int gutterWidth: Style.space(8)
-
+  // Estado recolhido do calendário (estilo Windows 11)
   property bool calendarioRecolhido: false
+
+  // Sessão de Foco (Windows 11)
+  property int focoMinutos: 25
+  property bool focoAtivo: false
+
+  function passoFoco(delta) {
+    var v = focoMinutos + delta
+    if (v < 5) v = 5
+    if (v > 120) v = 120
+    focoMinutos = v
+  }
+
+  function alternarFoco() {
+    focoAtivo = !focoAtivo
+    if (focoAtivo) {
+      Quickshell.execDetached(["simba-shell", "notifications", "toggleDnd"])
+      Quickshell.execDetached(["notify-send", "-a", "Sessão de Foco", "-i", "preferences-system-time",
+                               "Sessão de Foco iniciada", "Duração: " + focoMinutos + " minutos. Não perturbe ativado."])
+    } else {
+      Quickshell.execDetached(["simba-shell", "notifications", "toggleDnd"])
+      Quickshell.execDetached(["notify-send", "-a", "Sessão de Foco", "-i", "preferences-system-time",
+                               "Sessão de Foco encerrada", "Modo normal restaurado."])
+    }
+  }
 
   function open() {
     refresh()
     root.controller.show()
-    // Set after showing, not before: showing hands the popout coordinator
-    // over, which closes whichever panel was open, and that close clears the
-    // shared flag. Deferring means the panel taking over always wins, while
-    // a handoff to a panel that does not manage the flag still leaves it
-    // cleared rather than stuck on.
     Qt.callLater(function() {
       if (root.opened) setCenterHoverRevealSuppressed(true)
     })
@@ -104,9 +73,6 @@ Panel {
 
   function close() {
     setCenterHoverRevealSuppressed(false)
-    // Dismissing the panel mid-edit would otherwise leave the inputs up,
-    // waiting behind a closed popup for the next time it opens.
-    if (root.editingLife) root.cancelEditingLife()
     root.controller.hide()
   }
 
@@ -121,8 +87,6 @@ Panel {
     return false
   }
 
-  // Summoning by hotkey moves no pointer, so a hover the bar was still
-  // holding must not keep the center indicators revealed behind the panel.
   function setCenterHoverRevealSuppressed(value) {
     if (root.bar && typeof root.bar.setCenterHoverRevealSuppressed === "function")
       root.bar.setCenterHoverRevealSuppressed(value)
@@ -150,85 +114,6 @@ Panel {
     moveMonth(delta * 12)
   }
 
-  // Applied locally first so the panel redraws on the click itself; the
-  // shell.json write comes back through the bar as the same value. With no
-  // writable entry (the widget is not in the layout) it stays a session-only
-  // preference rather than doing nothing. The host widget builds its own
-  // entry when the label format is cycled, so it has to be kept in step or
-  // it would write this key straight back out from a stale copy.
-  function persistSettings(values) {
-    var entry = { id: root.moduleName }
-    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
-    for (var key in values) entry[key] = values[key]
-
-    root.settings = entry
-    if (root.hostWidget && "settings" in root.hostWidget) root.hostWidget.settings = entry
-    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
-      root.bar.shell.updateEntryInline(root.moduleName, entry)
-  }
-
-  function setWeekStart(day) {
-    var next = Model.normalizedWeekStart(day, root.weekStart)
-    if (next === root.weekStart) return
-    persistSettings({ weekStartDay: Model.weekStartSettingName(next) })
-  }
-
-  function startEditingLife() {
-    root.editingLife = true
-    Qt.callLater(function() {
-      bornField.text = root.birthYear > 0 ? String(root.birthYear) : ""
-      expectancyField.text = String(root.lifeExpectancy)
-      bornField.selectAll()
-      bornField.forceActiveFocus()
-    })
-  }
-
-  function cancelEditingLife() {
-    root.editingLife = false
-    Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
-  }
-
-  // Shared by both fields: Tab hops to the other one, Enter commits the pair,
-  // Escape drops the lot.
-  function handleLifeKey(event, other) {
-    if (event.key === Qt.Key_Escape) {
-      root.cancelEditingLife()
-      event.accepted = true
-    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-      root.commitLife()
-      event.accepted = true
-    } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
-      other.selectAll()
-      other.forceActiveFocus()
-      event.accepted = true
-    }
-  }
-
-  // Double-tapping the life bar puts it away again. The expectancy stays in
-  // the config so setting a birth year again brings your own number back
-  // rather than the default.
-  function clearLife() {
-    if (root.birthYear <= 0) return
-    persistSettings({ birthYear: 0 })
-  }
-
-  function commitLife() {
-    var born = Model.parseBirthYear(bornField.text, today.getFullYear())
-    var span = Model.parseLifeExpectancy(expectancyField.text)
-    if (born !== root.birthYear || span !== root.lifeExpectancy)
-      persistSettings({ birthYear: born, lifeExpectancy: span })
-    cancelEditingLife()
-  }
-
-  function toggleWeekStart() {
-    setWeekStart(Model.toggledWeekStart(root.weekStart))
-  }
-
-  // English short day names, matching the rest of the interface.
-  function weekdayLabel(weekday) {
-    return String(labelLocale.dayName(weekday, Locale.ShortFormat)).toUpperCase()
-  }
-
   SystemClock {
     id: clock
     precision: SystemClock.Minutes
@@ -246,14 +131,14 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
+    framed: false
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(360))
-    contentHeight: panel.fittedContentHeight(calendarColumn.implicitHeight)
+    contentWidth: Style.space(360)
+    contentHeight: panel.availableCardHeight > 0 ? panel.availableCardHeight : Style.space(680)
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: root.editingLife
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.moveMonth(dx)
         if (dy !== 0) root.moveYear(dy)
@@ -267,510 +152,236 @@ Panel {
         else if (t === "{") root.moveYear(-1)
         else if (t === "}") root.moveYear(1)
         else if (t === "t" || t === "T") root.goToToday()
-        else if (t === "w" || t === "W") root.toggleWeekStart()
       }
 
-      Flickable {
-        id: calendarScroll
+      Item {
+        id: painelConteudo
         anchors.fill: parent
-        contentWidth: calendarColumn.width
-        contentHeight: calendarColumn.implicitHeight
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
-        interactive: contentHeight > height || contentWidth > width
 
-        Column {
-          id: calendarColumn
-          // Never narrower than the grid. The popup width is capped to what
-          // the screen allows, and a fixed seven-column grid would otherwise
-          // lose its last days off the edge instead of scrolling.
-          width: Math.max(calendarScroll.width, gridColumn.width)
-          spacing: Style.space(6)
+        // ========================================================
+        // CARTÃO 2: DATA, CALENDÁRIO & FOCO (FLUTUANTE INFERIOR)
+        // ========================================================
+        Item {
+          id: calCard
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.bottom: parent.bottom
+          height: calLayout.implicitHeight
 
-          // ---- Simba: central de notificações (estilo Windows 11), acima da data.
-          CentralNotificacoes {
-            id: central
-            width: parent.width
-            ativo: root.opened
-            fg: root.contentForeground
-            onAcionado: root.close()
-          }
-
-          // separador (tracejado nos temas pixel)
-          Item {
-            width: parent.width
-            height: Style.space(8)
+            // Fundo e borda do cartão do calendário (segue o tema da central)
             Rectangle {
+              anchors.fill: parent
               visible: !central.pixel
-              anchors.verticalCenter: parent.verticalCenter
-              width: parent.width; height: 1
-              color: root.contentForeground; opacity: 0.12
+              radius: central.raio
+              color: central.cFundo
+              border.width: 1
+              border.color: central.cBorda
             }
-            Row {
+
+            Canvas {
+              id: calMoldura
+              anchors.fill: parent
               visible: central.pixel
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: 2
-              Repeater { model: Math.floor(parent.parent.width / 4); Rectangle { width: 2; height: 2; color: root.contentForeground; opacity: 0.35 } }
-            }
-          }
-
-          // ---- Hero: hora e data alinhadas à direita, com botão de recolher à esquerda (estilo Windows 11)
-          Item {
-            width: parent.width
-            height: Math.max(heroRow.height, Style.space(32))
-
-            PanelActionButton {
-              anchors.left: parent.left
-              anchors.leftMargin: root.pixel ? 4 : 2
-              anchors.verticalCenter: parent.verticalCenter
-              iconText: root.calendarioRecolhido ? (central.pixel ? "▼" : "󰅀") : (central.pixel ? "▲" : "󰅃")
-              tooltipText: root.calendarioRecolhido ? "Expandir calendário" : "Recolher calendário"
-              foreground: root.contentForeground
-              fontFamily: root.contentFontFamily
-              onClicked: root.calendarioRecolhido = !root.calendarioRecolhido
+              antialiasing: false
+              property string chave: central.tema + width + "x" + height + central.fg + central.bg
+              onChaveChanged: requestPaint()
+              onPaint: {
+                var c = getContext("2d"); c.reset()
+                if (!central.pixel) return
+                var P = central.px, W = Math.floor(width / P), H = Math.floor(height / P)
+                var f = String(central.cFundo), t = String(central.cBorda)
+                Px.caixa(c, P, 0, 0, W, H, f, t, 2)
+                Px.caixa(c, P, 2, 2, W - 4, H - 4, f, String(central.cBordaItem), 1)
+              }
             }
 
-            Column {
-              id: heroRow
-              anchors.right: parent.right
-              anchors.rightMargin: root.pixel ? 4 : 2
+            ColumnLayout {
+              id: calLayout
+              width: parent.width
               spacing: 0
 
-              Text {
-                id: heroTime
-                anchors.right: parent.right
-                horizontalAlignment: Text.AlignRight
-                textFormat: Text.PlainText
-                text: Qt.locale("pt_BR").toString(clock.date, "HH:mm")
-                color: root.contentForeground
-                font.family: central.pixel ? "Simba Pixel" : "Adwaita Sans"
-                font.pixelSize: central.pixel ? 22 : 20
-                font.weight: central.pixel ? Font.Bold : Font.DemiBold
-                renderType: central.pixel ? Text.NativeRendering : Text.QtRendering
-              }
-              Text {
-                id: heroDate
-                anchors.right: parent.right
-                horizontalAlignment: Text.AlignRight
-                elide: Text.ElideRight
-                fontSizeMode: Text.HorizontalFit
-                minimumPixelSize: 10
-                textFormat: Text.PlainText
-                text: {
-                  var t = Qt.locale("pt_BR").toString(root.today, "dddd, d 'de' MMMM")
-                  return t.charAt(0).toUpperCase() + t.slice(1)
-                }
-                color: heroMouse.containsMouse
-                  ? Style.hoverStateColor(root.contentForeground, Commons.Color.accent)
-                  : Qt.darker(root.contentForeground, 1.25)
-                font.family: "Adwaita Sans"
-                font.pixelSize: 11
-              }
-            }
-
-            MouseArea {
-              id: heroMouse
-              x: heroRow.x
-              y: heroRow.y
-              width: heroRow.width
-              height: heroRow.height
-              enabled: !root.viewingCurrentMonth
-              hoverEnabled: enabled
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.goToToday()
-
-              PanelToolTip {
-                visible: heroMouse.containsMouse
-                text: "Voltar para hoje"
-                fontFamily: root.contentFontFamily
-              }
-            }
-          }
-
-          // ---- Seção do calendário (recolhível ao estilo Windows 11)
-          Column {
-            id: calendarioSecao
-            visible: !root.calendarioRecolhido
-            width: parent.width
-            spacing: Style.space(6)
-
-            // Progresso do ano (Memento Mori / trilho sutil sob a data)
-            Item {
-              width: parent.width
-              height: yearBlock.y + yearBlock.height
-
-              Item {
-                id: yearBlock
-                y: Style.space(2)
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: gridColumn.width
-                height: Math.max(yearLabel.implicitHeight, Style.space(12))
-
-                TapHandler {
-                  enabled: !root.editingLife
-                  onDoubleTapped: root.startEditingLife()
-                }
-
-                Row {
-                  visible: root.editingLife
-                  anchors.horizontalCenter: parent.horizontalCenter
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(10)
-
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "NASCIMENTO"
-                    color: Qt.darker(root.contentForeground, 1.5)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    font.letterSpacing: 1
-                  }
-
-                  TextField {
-                    id: bornField
-                    width: Style.space(70)
-                    anchors.verticalCenter: parent.verticalCenter
-                    placeholderText: "year"
-                    foreground: root.contentForeground
-                    font.family: root.contentFontFamily
-                    inputMethodHints: Qt.ImhDigitsOnly
-
-                    Keys.onPressed: function(event) { root.handleLifeKey(event, expectancyField) }
-                  }
-
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.verticalCenterOffset: 0
-                    leftPadding: Style.space(6)
-                    text: "VIVER ATÉ"
-                    color: Qt.darker(root.contentForeground, 1.5)
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    font.letterSpacing: 1
-                  }
-
-                  TextField {
-                    id: expectancyField
-                    width: Style.space(60)
-                    anchors.verticalCenter: parent.verticalCenter
-                    placeholderText: "90"
-                    foreground: root.contentForeground
-                    font.family: root.contentFontFamily
-                    inputMethodHints: Qt.ImhDigitsOnly
-
-                    Keys.onPressed: function(event) { root.handleLifeKey(event, bornField) }
-                  }
-                }
+              // ── 1. Linha da Data (com botão de recolher/expandir à direita) ──
+              RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: central.pixel ? 12 : 14
+                Layout.rightMargin: central.pixel ? 12 : 14
+                Layout.topMargin: central.pixel ? 8 : 10
+                Layout.bottomMargin: central.pixel ? 8 : 10
+                spacing: 8
 
                 Text {
-                  id: yearLabel
+                  Layout.fillWidth: true
                   textFormat: Text.PlainText
-                  visible: !root.editingLife
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: root.today.getFullYear()
-                  color: Qt.darker(root.contentForeground, 1.5)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                  font.letterSpacing: 1
-                }
-
-                Text {
-                  id: yearPercent
-                  textFormat: Text.PlainText
-                  visible: !root.editingLife
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: root.yearDonePercent + "%"
-                  color: root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                }
-
-                Rectangle {
-                  id: yearTrack
-                  visible: !root.editingLife
-                  anchors.left: yearLabel.right
-                  anchors.right: yearPercent.left
-                  anchors.leftMargin: Style.space(8)
-                  anchors.rightMargin: Style.space(8)
-                  anchors.verticalCenter: parent.verticalCenter
-                  height: Style.space(3)
-                  radius: Style.cornerRadius > 0 ? height / 2 : 0
-                  color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
-
-                  Rectangle {
-                    width: Math.round(parent.width * root.yearDone)
-                    height: parent.height
-                    radius: parent.radius
-                    color: Style.selectedStateColor(root.contentForeground, Commons.Color.accent)
-
-                    Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                  elide: Text.ElideRight
+                  text: {
+                    var t = Qt.locale("pt_BR").toString(root.today, "dddd, d 'de' MMMM")
+                    return t.charAt(0).toUpperCase() + t.slice(1)
                   }
-                }
-              }
-            }
-
-            // Memento mori (somente se definido)
-            Item {
-              visible: root.birthYear > 0
-              width: parent.width
-              height: visible ? lifeBlock.height : 0
-
-              Item {
-                id: lifeBlock
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: gridColumn.width
-                height: Math.max(lifeLabel.implicitHeight, Style.space(12))
-
-                Text {
-                  id: lifeLabel
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "VIDA"
-                  color: Qt.darker(root.contentForeground, 1.5)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                  font.letterSpacing: 1
-                }
-
-                Text {
-                  id: lifePercent
-                  textFormat: Text.PlainText
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: root.lifeDonePercent + "%"
-                  color: root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                }
-
-                Rectangle {
-                  anchors.left: lifeLabel.right
-                  anchors.right: lifePercent.left
-                  anchors.leftMargin: Style.space(8)
-                  anchors.rightMargin: Style.space(8)
-                  anchors.verticalCenter: parent.verticalCenter
-                  height: Style.space(3)
-                  radius: Style.cornerRadius > 0 ? height / 2 : 0
-                  color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
-
-                  Rectangle {
-                    width: Math.round(parent.width * root.lifeDone)
-                    height: parent.height
-                    radius: parent.radius
-                    color: Style.selectedStateColor(root.contentForeground, Commons.Color.accent)
-
-                    Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                  }
-                }
-
-                TapHandler {
-                  onDoubleTapped: root.clearLife()
-                }
-
-                MouseArea {
-                  id: lifeMouse
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  acceptedButtons: Qt.NoButton
-
-                  PanelToolTip {
-                    visible: lifeMouse.containsMouse
-                    text: "Memento Mori"
-                    fontFamily: root.contentFontFamily
-                  }
-                }
-              }
-            }
-
-            // ---- Navegação de mês (acima da grade, estilo Windows 11)
-            Item {
-              width: parent.width
-              height: monthNav.height
-
-              Item {
-                id: monthNav
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: gridColumn.width
-                height: Style.space(24)
-
-                Text {
-                  id: monthLabel
-                  textFormat: Text.PlainText
-                  anchors.left: parent.left
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: Qt.locale("pt_BR").toString(root.viewDate, "MMMM yyyy").toUpperCase()
-                  color: Qt.darker(root.contentForeground, 1.3)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                  font.letterSpacing: 0.5
+                  color: central.cTexto
+                  font.family: central.fonteTitulo
+                  font.pixelSize: central.pixel ? 15 : 13.5
                   font.bold: true
+                  renderType: central.pixel ? Text.NativeRendering : Text.QtRendering
                 }
 
-                Row {
-                  anchors.right: parent.right
-                  anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(2)
-
-                  PanelActionButton {
-                    iconText: central.pixel ? "<" : "󰅁"
-                    tooltipText: "Mês anterior"
-                    foreground: root.contentForeground
-                    fontFamily: root.contentFontFamily
-                    onClicked: root.moveMonth(-1)
+                Rectangle {
+                  implicitWidth: 24; implicitHeight: 24
+                  radius: central.pixel ? 0 : 5
+                  color: btnRecolherMouse.containsMouse ? central.cHover : "transparent"
+                  border.width: central.pixel ? 1 : 0
+                  border.color: central.cBorda
+                  Text {
+                    anchors.centerIn: parent
+                    text: root.calendarioRecolhido ? "▼" : "▲"
+                    font.family: central.pixel ? "Simba Pixel" : "Adwaita Sans"
+                    font.pixelSize: 11
+                    color: central.cTexto
                   }
-
-                  PanelActionButton {
-                    iconText: central.pixel ? ">" : "󰅂"
-                    tooltipText: "Próximo mês"
-                    foreground: root.contentForeground
-                    fontFamily: root.contentFontFamily
-                    onClicked: root.moveMonth(1)
+                  MouseArea {
+                    id: btnRecolherMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.calendarioRecolhido = !root.calendarioRecolhido
                   }
                 }
               }
-            }
 
-            // ---- Grade do mês: números das semanas na calha esquerda + 7 colunas de dias
-            Item {
-              width: parent.width
-              height: gridColumn.y + gridColumn.height
-
-              WheelHandler {
-                onWheel: function(event) {
-                  if (event.angleDelta.y === 0) return
-                  root.moveMonth(event.angleDelta.y > 0 ? -1 : 1)
-                }
+              // Linha separadora
+              Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: central.pixel ? "transparent" : central.cBorda
+                opacity: central.pixel ? 0 : 0.6
               }
 
-              Column {
-                id: gridColumn
-                y: Style.space(2)
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: Style.space(2)
+              // ── 2. Seção do Calendário (Mês e Grade de Dias) ──
+              ColumnLayout {
+                id: secaoGrade
+                visible: !root.calendarioRecolhido
+                Layout.fillWidth: true
+                Layout.leftMargin: central.pixel ? 10 : 12
+                Layout.rightMargin: central.pixel ? 10 : 12
+                Layout.topMargin: 8
+                Layout.bottomMargin: 8
+                spacing: 6
 
-                Row {
-                  id: headerRow
-                  spacing: root.cellSpacing
+                // Linha de navegação do Mês
+                RowLayout {
+                  Layout.fillWidth: true
+                  spacing: 4
 
-                  Rectangle {
-                    width: root.weekColumnWidth
-                    height: Style.space(16)
-                    radius: Style.cornerRadius
-                    color: weekStartMouse.containsMouse
-                      ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
-                      : "transparent"
+                  Text {
+                    Layout.fillWidth: true
+                    text: Qt.locale("pt_BR").toString(root.viewDate, "MMMM 'de' yyyy")
+                    color: central.cTexto
+                    font.family: central.fonteTitulo
+                    font.pixelSize: central.pixel ? 14 : 13
+                    font.bold: true
+                    font.capitalization: central.pixel ? Font.AllUppercase : Font.MixedCase
+                    renderType: central.pixel ? Text.NativeRendering : Text.QtRendering
+                  }
 
+                  // Steppers de mês < e >
+                  Row {
+                    spacing: 2
+                    Rectangle {
+                      width: 22; height: 22
+                      radius: central.pixel ? 0 : 4
+                      color: prevMesMouse.containsMouse ? central.cHover : "transparent"
+                      border.width: central.pixel ? 1 : 0
+                      border.color: central.cBorda
+                      Text { anchors.centerIn: parent; text: "<"; font.family: central.fonteTitulo; font.pixelSize: 12; color: central.cTexto }
+                      MouseArea { id: prevMesMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.moveMonth(-1) }
+                    }
+                    Rectangle {
+                      width: 22; height: 22
+                      radius: central.pixel ? 0 : 4
+                      color: nextMesMouse.containsMouse ? central.cHover : "transparent"
+                      border.width: central.pixel ? 1 : 0
+                      border.color: central.cBorda
+                      Text { anchors.centerIn: parent; text: ">"; font.family: central.fonteTitulo; font.pixelSize: 12; color: central.cTexto }
+                      MouseArea { id: nextMesMouse; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: root.moveMonth(1) }
+                    }
+                  }
+                }
+
+                // Cabeçalhos dos dias da semana (D S T Q Q S S)
+                RowLayout {
+                  Layout.fillWidth: true
+                  spacing: 0
+                  Repeater {
+                    model: ["D", "S", "T", "Q", "Q", "S", "S"]
                     Text {
-                      anchors.centerIn: parent
-                      text: "S"
-                      color: weekStartMouse.containsMouse
-                        ? Style.hoverStateColor(root.contentForeground, Commons.Color.accent)
-                        : Qt.darker(root.contentForeground, 1.9)
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.caption
-                      font.letterSpacing: 0.5
+                      required property string modelData
+                      Layout.fillWidth: true
+                      horizontalAlignment: Text.AlignHCenter
+                      text: modelData
+                      font.family: central.pixel ? "Simba Pixel" : "Adwaita Sans"
+                      font.pixelSize: central.pixel ? 12 : 11
                       font.bold: true
-                    }
-
-                    MouseArea {
-                      id: weekStartMouse
-                      anchors.fill: parent
-                      hoverEnabled: true
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: root.toggleWeekStart()
-                    }
-
-                    PanelToolTip {
-                      visible: weekStartMouse.containsMouse
-                      text: "Começar semanas em " + root.nextWeekStartLabel
-                      fontFamily: root.contentFontFamily
+                      color: central.cApagado
                     }
                   }
+                }
 
-                  Item {
-                    width: root.gutterWidth
-                    height: Style.space(16)
-                  }
+                // Grade dos dias (6 semanas de 7 dias)
+                ColumnLayout {
+                  Layout.fillWidth: true
+                  spacing: 2
 
                   Repeater {
-                    model: root.weekdays
-
-                    Text {
-                      textFormat: Text.PlainText
+                    model: root.weeks
+                    delegate: RowLayout {
+                      id: semanaRow
                       required property var modelData
-                      width: root.cellWidth
-                      height: Style.space(16)
-                      horizontalAlignment: Text.AlignHCenter
-                      verticalAlignment: Text.AlignVCenter
-                      text: root.weekdayLabel(modelData)
-                      color: Qt.darker(root.contentForeground, 1.5)
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.caption
-                      font.bold: true
-                    }
-                  }
-                }
+                      Layout.fillWidth: true
+                      spacing: 0
 
-                Repeater {
-                  model: root.weeks
+                      Repeater {
+                        model: semanaRow.modelData.days
+                        delegate: Item {
+                          id: celulaDia
+                          required property var modelData
+                          Layout.fillWidth: true
+                          implicitHeight: 26
 
-                  Row {
-                    required property var modelData
-                    spacing: root.cellSpacing
+                          readonly property bool hoje: modelData.today
+                          readonly property bool mesAtual: modelData.inMonth
+                          readonly property bool sobre: mouseDia.containsMouse
 
-                    Text {
-                      textFormat: Text.PlainText
-                      width: root.weekColumnWidth
-                      height: root.cellHeight
-                      horizontalAlignment: Text.AlignHCenter
-                      verticalAlignment: Text.AlignVCenter
-                      text: modelData.week
-                      color: Qt.darker(root.contentForeground, 1.9)
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.caption
-                    }
+                          Rectangle {
+                            anchors.centerIn: parent
+                            width: 24; height: 24
+                            radius: central.pixel ? 0 : (hoje ? 12 : 4)
+                            color: hoje ? central.destaque : (sobre && mesAtual ? central.cHover : "transparent")
+                            border.width: (hoje && central.pixel) ? 1 : 0
+                            border.color: central.cTexto
 
-                    Item {
-                      width: root.gutterWidth
-                      height: root.cellHeight
-                    }
+                            Text {
+                              anchors.centerIn: parent
+                              text: celulaDia.modelData.day
+                              font.family: central.pixel ? "Simba Pixel" : "Adwaita Sans"
+                              font.pixelSize: central.pixel ? 13 : 11
+                              font.bold: celulaDia.hoje
+                              color: celulaDia.hoje ? "#ffffff" : (celulaDia.mesAtual ? central.cTexto : central.cApagado)
+                              opacity: celulaDia.mesAtual ? 1.0 : 0.4
+                            }
+                          }
 
-                    Repeater {
-                      model: modelData.days
-
-                      Rectangle {
-                        id: dayCell
-                        required property var modelData
-
-                        width: root.cellWidth
-                        height: root.cellHeight
-                        radius: Style.cornerRadius
-                        color: modelData.today
-                          ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent)
-                          : (dayMouse.containsMouse && modelData.inMonth ? Style.hoverFillFor(root.contentForeground, Commons.Color.accent) : "transparent")
-                        border.width: modelData.today ? (central.pixel ? 2 : 1) : 0
-                        border.color: Style.normalBorderFor(root.contentForeground, Commons.Color.accent)
-
-                        Text {
-                          textFormat: Text.PlainText
-                          anchors.centerIn: parent
-                          text: modelData.day
-                          color: modelData.inMonth
-                            ? (modelData.weekend ? Qt.darker(root.contentForeground, 1.45) : root.contentForeground)
-                            : Qt.darker(root.contentForeground, 2.2)
-                          font.family: root.contentFontFamily
-                          font.pixelSize: Style.font.caption
-                          font.bold: modelData.today
-                        }
-
-                        MouseArea {
-                          id: dayMouse
-                          anchors.fill: parent
-                          hoverEnabled: true
-                          enabled: modelData.inMonth
-                          cursorShape: Qt.ArrowCursor
+                          MouseArea {
+                            id: mouseDia
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: celulaDia.mesAtual ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            onClicked: {
+                              if (celulaDia.hoje) root.goToToday()
+                              else if (!celulaDia.mesAtual) {
+                                if (celulaDia.modelData.day > 15) root.moveMonth(-1)
+                                else root.moveMonth(1)
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -778,19 +389,132 @@ Panel {
                 }
               }
 
-              // Hairline down the week-number gutter
+              // Linha separadora antes da barra de foco
               Rectangle {
-                x: gridColumn.x + root.weekColumnWidth + root.cellSpacing + Math.round((root.gutterWidth - width) / 2)
-                y: gridColumn.y + headerRow.height + gridColumn.spacing
-                width: Style.spacing.hairline
-                height: gridColumn.height - headerRow.height - gridColumn.spacing
-                color: root.contentForeground
-                opacity: 0.1
+                Layout.fillWidth: true
+                height: 1
+                color: central.pixel ? "transparent" : central.cBorda
+                opacity: central.pixel ? 0 : 0.6
+              }
+
+              // ── 3. Barra de Sessão de Foco (Windows 11) ──
+              RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: central.pixel ? 12 : 14
+                Layout.rightMargin: central.pixel ? 12 : 14
+                Layout.topMargin: central.pixel ? 6 : 8
+                Layout.bottomMargin: central.pixel ? 6 : 8
+                spacing: 8
+
+                // Stepper [-] 25 min [+]
+                Rectangle {
+                  implicitHeight: 28
+                  Layout.preferredWidth: 106
+                  radius: central.pixel ? 0 : 5
+                  color: central.cItem
+                  border.width: 1
+                  border.color: central.cBordaItem
+
+                  RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 2
+                    spacing: 0
+
+                    Rectangle {
+                      Layout.preferredWidth: 24; Layout.fillHeight: true
+                      radius: central.pixel ? 0 : 4
+                      color: minusMouse.containsMouse ? central.cHover : "transparent"
+                      Text { anchors.centerIn: parent; text: "−"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 12; color: central.cTexto }
+                      MouseArea {
+                        id: minusMouse
+                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: root.passoFoco(-5)
+                      }
+                    }
+
+                    Text {
+                      Layout.fillWidth: true
+                      horizontalAlignment: Text.AlignHCenter
+                      text: root.focoMinutos + " min"
+                      font.family: central.fonteTitulo
+                      font.pixelSize: central.pixel ? 13 : 11.5
+                      font.bold: true
+                      color: central.cTexto
+                    }
+
+                    Rectangle {
+                      Layout.preferredWidth: 24; Layout.fillHeight: true
+                      radius: central.pixel ? 0 : 4
+                      color: plusMouse.containsMouse ? central.cHover : "transparent"
+                      Text { anchors.centerIn: parent; text: "+"; font.family: "JetBrainsMono Nerd Font"; font.pixelSize: 12; color: central.cTexto }
+                      MouseArea {
+                        id: plusMouse
+                        anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                        onClicked: root.passoFoco(5)
+                      }
+                    }
+                  }
+                }
+
+                Item { Layout.fillWidth: true }
+
+                // Botão de Foco [▶ Foco]
+                Rectangle {
+                  implicitHeight: 28
+                  implicitWidth: focoConteudo.implicitWidth + 22
+                  radius: central.pixel ? 0 : 6
+                  color: root.focoAtivo ? central.destaque : (focoMouse.containsMouse ? central.cHover : central.cItem)
+                  border.width: 1
+                  border.color: root.focoAtivo ? central.destaque : central.cBordaItem
+
+                  Row {
+                    id: focoConteudo
+                    anchors.centerIn: parent
+                    spacing: 6
+
+                    Text {
+                      text: central.pixel ? (root.focoAtivo ? "⏹" : "😺") : (root.focoAtivo ? "󰓛" : "󰐊")
+                      font.family: central.pixel ? "Simba Pixel" : "JetBrainsMono Nerd Font"
+                      font.pixelSize: 12
+                      color: root.focoAtivo ? "#ffffff" : (central.pixel ? central.cTexto : central.destaque)
+                    }
+
+                    Text {
+                      text: root.focoAtivo ? "Parar" : "Foco"
+                      font.family: central.fonteTitulo
+                      font.pixelSize: central.pixel ? 13 : 11.5
+                      font.bold: true
+                      color: root.focoAtivo ? "#ffffff" : central.cTexto
+                    }
+                  }
+
+                  MouseArea {
+                    id: focoMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.alternarFoco()
+                  }
+                }
               }
             }
+          }
+
+          // ========================================================
+          // CARTÃO 1: CENTRAL DE NOTIFICAÇÕES (FLUTUANTE SUPERIOR)
+          // ========================================================
+          CentralNotificacoes {
+            id: central
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: calCard.top
+            anchors.bottomMargin: Style.space(10) // Vão de 10px entre os 2 cartões flutuantes
+            ativo: root.opened
+            fg: root.contentForeground
+            onAcionado: root.close()
           }
         }
       }
     }
   }
-}

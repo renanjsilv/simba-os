@@ -66,6 +66,7 @@ hl.layer_rule({ match = { namespace = "configuracoes-.*" }, no_anim = true, anim
 hl.layer_rule({ match = { namespace = "configuracoes-iniciar" }, blur = true, ignore_alpha = 0.5 })
 hl.layer_rule({ match = { namespace = "simba-notifications" }, blur = true, ignore_alpha = 0.5 })
 hl.layer_rule({ match = { namespace = "simba-transicao-tema" }, no_anim = true, animation = "none" })
+hl.layer_rule({ match = { namespace = "simba-keyboard-panel" }, blur = true, ignore_alpha = 0.5 })
 
 -- Gerenciador de Tarefas (~/.local/share/gerenciador-tarefas, Ctrl+Shift+Esc): janela flutuante opaca
 o.window("com.simba.GerenciadorTarefas", { float = true })

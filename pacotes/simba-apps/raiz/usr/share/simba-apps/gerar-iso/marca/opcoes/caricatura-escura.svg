@@ -1,31 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
   <defs>
     <radialGradient id="olho_esq" cx="35%" cy="35%" r="65%">
-      <stop offset="0%" stop-color="#fef08a"/>
-      <stop offset="50%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#b45309"/>
+      <stop offset="0%" stop-color="#6b6b6b"/>
+      <stop offset="50%" stop-color="#2e2e2e"/>
+      <stop offset="100%" stop-color="#111111"/>
     </radialGradient>
     <radialGradient id="olho_dir" cx="65%" cy="35%" r="65%">
-      <stop offset="0%" stop-color="#fef08a"/>
-      <stop offset="50%" stop-color="#f59e0b"/>
-      <stop offset="100%" stop-color="#b45309"/>
+      <stop offset="0%" stop-color="#6b6b6b"/>
+      <stop offset="50%" stop-color="#2e2e2e"/>
+      <stop offset="100%" stop-color="#111111"/>
     </radialGradient>
     <linearGradient id="pelo_grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#f59e0b"/>
-      <stop offset="50%" stop-color="#d97706"/>
-      <stop offset="100%" stop-color="#b45309"/>
+      <stop offset="0%" stop-color="#bdbdbb"/>
+      <stop offset="50%" stop-color="#9c9c9a"/>
+      <stop offset="100%" stop-color="#777775"/>
     </linearGradient>
     <linearGradient id="focinho_grad" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#fef3c7"/>
+      <stop offset="100%" stop-color="#e2e2e0"/>
     </linearGradient>
     <linearGradient id="boca_grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#4c0519"/>
-      <stop offset="100%" stop-color="#881337"/>
+      <stop offset="0%" stop-color="#0d0d0d"/>
+      <stop offset="100%" stop-color="#262626"/>
     </linearGradient>
     <linearGradient id="lingua_grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#fb7185"/>
-      <stop offset="100%" stop-color="#e11d48"/>
+      <stop offset="0%" stop-color="#5c5c5c"/>
+      <stop offset="100%" stop-color="#3b3b3b"/>
     </linearGradient>
   </defs>
 
@@ -41,14 +41,14 @@
              C 188 545, 198 465, 237 395 C 295 298, 385 262, 500 262 Z"/>
   </g>
 
-  <!-- Cabeça e detalhes do leãozinho Simba -->
+  <!-- Cabeça e detalhes do Simba (gato cinza) -->
   <g stroke="#1c1917" stroke-linecap="round" stroke-linejoin="round">
     <!-- orelhas -->
     <path d="M255 420 C 222 300, 205 190, 222 100 C 295 140, 362 205, 412 280 Z" fill="url(#pelo_grad)" stroke-width="16"/>
     <path d="M748 425 C 782 305, 800 205, 785 118 C 712 155, 642 215, 590 285 Z" fill="url(#pelo_grad)" stroke-width="16"/>
     <!-- interior da orelha -->
-    <path d="M272 372 C 258 292, 252 222, 260 168 C 305 205, 343 248, 370 295" fill="#fecdd3" stroke="#e11d48" stroke-width="7"/>
-    <path d="M730 375 C 746 298, 752 232, 746 182 C 700 214, 662 254, 633 298" fill="#fecdd3" stroke="#e11d48" stroke-width="7"/>
+    <path d="M272 372 C 258 292, 252 222, 260 168 C 305 205, 343 248, 370 295" fill="#d2d2d0" stroke="#3b3b3b" stroke-width="7"/>
+    <path d="M730 375 C 746 298, 752 232, 746 182 C 700 214, 662 254, 633 298" fill="#d2d2d0" stroke="#3b3b3b" stroke-width="7"/>
 
     <!-- cabeça larga com tufos -->
     <path d="M500 262 C 615 262, 705 298, 763 395 C 802 465, 812 545, 800 615
@@ -64,15 +64,15 @@
 
     <!-- listras -->
     <path d="M500 290 L 500 372 M 452 292 C 440 325, 444 352, 460 380 M 548 292 C 560 325, 556 352, 540 380
-             M 400 310 C 388 340, 394 362, 412 382 M 600 310 C 612 340, 606 362, 588 382" fill="none" stroke="#78350f" stroke-width="13"/>
+             M 400 310 C 388 340, 394 362, 412 382 M 600 310 C 612 340, 606 362, 588 382" fill="none" stroke="#2f2f2f" stroke-width="13"/>
     <path d="M222 470 C 250 478, 275 490, 296 506 M 212 525 C 245 532, 272 542, 292 556
-             M 778 470 C 750 478, 725 490, 704 506 M 788 525 C 755 532, 728 542, 708 556" fill="none" stroke="#78350f" stroke-width="11"/>
+             M 778 470 C 750 478, 725 490, 704 506 M 788 525 C 755 532, 728 542, 708 556" fill="none" stroke="#2f2f2f" stroke-width="11"/>
 
     <!-- sobrancelhas expressivas -->
     <path d="M315 440 C 362 412, 405 420, 452 458" fill="none" stroke="#1c1917" stroke-width="16"/>
     <path d="M685 440 C 638 412, 595 420, 548 458" fill="none" stroke="#1c1917" stroke-width="16"/>
 
-    <!-- olhos amendoados e expressivos com gradiente dourado -->
+    <!-- olhos amendoados e expressivos com gradiente cinza -->
     <path d="M325 478 C 362 455, 418 462, 452 497 C 410 518, 362 512, 325 478 Z" fill="url(#olho_esq)" stroke="#1c1917" stroke-width="9"/>
     <path d="M675 478 C 638 455, 582 462, 548 497 C 590 518, 638 512, 675 478 Z" fill="url(#olho_dir)" stroke="#1c1917" stroke-width="9"/>
     <ellipse cx="402" cy="484" rx="6" ry="9" fill="#1c1917" stroke="none"/>
@@ -83,15 +83,15 @@
     <circle cx="601" cy="488" r="2" fill="#ffffff" opacity="0.7" stroke="none"/>
 
     <!-- nariz carmim e philtrum -->
-    <path d="M466 548 C 478 537, 522 537, 534 548 L 500 582 Z" fill="#e11d48" stroke="#1c1917" stroke-width="8"/>
+    <path d="M466 548 C 478 537, 522 537, 534 548 L 500 582 Z" fill="#3b3b3b" stroke="#1c1917" stroke-width="8"/>
     <path d="M500 582 L 500 606" fill="none" stroke="#1c1917" stroke-width="9"/>
 
     <!-- boca aberta sorrindo/rugindo com interior profundo -->
     <path d="M392 616 C 430 600, 470 603, 500 606 C 530 603, 570 600, 608 616
              C 615 695, 578 772, 500 782 C 422 772, 385 695, 392 616 Z" fill="url(#boca_grad)" stroke="#1c1917" stroke-width="14"/>
     <!-- língua viva -->
-    <path d="M436 742 C 458 708, 542 708, 564 742 C 548 768, 452 768, 436 742 Z" fill="url(#lingua_grad)" stroke="#9f1239" stroke-width="6"/>
-    <path d="M500 718 L 500 748" fill="none" stroke="#9f1239" stroke-width="4"/>
+    <path d="M436 742 C 458 708, 542 708, 564 742 C 548 768, 452 768, 436 742 Z" fill="url(#lingua_grad)" stroke="#1c1c1c" stroke-width="6"/>
+    <path d="M500 718 L 500 748" fill="none" stroke="#1c1c1c" stroke-width="4"/>
 
     <!-- presas brancas afiadas -->
     <path d="M416 621 L 435 682 L 453 617 Z" fill="#ffffff" stroke="#1c1917" stroke-width="7"/>

@@ -48,6 +48,7 @@ PanelWindow {
   property var borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
   property bool centerOnBar: false
   property bool open: false
+  property bool framed: true
   property int gap: Style.gapsOut  // distance between bar edge and panel
   property bool popoutSwitching: false
   property bool popoutSwitchClosing: false
@@ -157,7 +158,7 @@ PanelWindow {
   readonly property real availableCardHeight: screenH > 0
     ? Math.max(120, screenH - ((barPos === "top" || barPos === "bottom") ? barH + gap + margin : margin * 2))
     : 0
-  readonly property real verticalContentInset: padding * 2 + Border.top(borderSpec) + Border.bottom(borderSpec)
+  readonly property real verticalContentInset: root.framed ? (padding * 2 + Border.top(borderSpec) + Border.bottom(borderSpec)) : 0
 
   function fittedContentWidth(width, cap) {
     var desired = Math.max(1, Number(width) || 1)
@@ -383,10 +384,10 @@ PanelWindow {
     y: root.cardOrigin.y
     width: root.contentWidth
     height: root.contentHeight
-    color: Commons.Color.popups.background
-    borderSpec: root.borderSpec
-    padding: root.padding
-    radius: Style.cornerRadius
+    color: root.framed ? Commons.Color.popups.background : "transparent"
+    borderSpec: root.framed ? root.borderSpec : null
+    padding: root.framed ? root.padding : 0
+    radius: root.framed ? Style.cornerRadius : 0
     opacity: root.open || root.popoutSwitching ? 1.0 : 0
 
     Behavior on opacity {

@@ -259,6 +259,24 @@ def _arvore(repo):
     return info, ref, arv.get("tree", [])
 
 
+def _filtrar_pastas(pastas, limite=80):
+    """Pastas com SKILL.md que valem como skill. Pastas ocultas contam (.agents/skills, skills/.curated…),
+    menos .git; ficam de fora node_modules e pastas de teste/exemplo inteiras (não skills com 'test' no nome).
+    A mesma skill copiada em vários lugares (.agents/ e .cursor-plugin/, por exemplo) aparece uma vez só."""
+    ruins = re.compile(r"(^|/)(\.git|node_modules|tests?|__tests__|fixtures|examples?)(/|$)")
+    ok = [p for p in pastas if not ruins.search(p)]
+    # preferida: menos pastas ocultas, depois caminho mais curto
+    ok.sort(key=lambda p: (sum(s.startswith(".") for s in p.split("/")), p.count("/"), p))
+    vistas, res = set(), []
+    for p in ok:
+        nome = p.rsplit("/", 1)[-1].lower()
+        if nome in vistas:
+            continue
+        vistas.add(nome)
+        res.append(p)
+    return res[:limite]
+
+
 def skills_do_repo(repo):
     """Todas as skills (pastas com SKILL.md) de um repositório."""
     def montar():
@@ -266,7 +284,7 @@ def skills_do_repo(repo):
         shas = {e["path"]: e["sha"] for e in arv if e.get("type") == "tree"}
         pastas = [e["path"][:-len("SKILL.md")].rstrip("/") for e in arv
                   if e.get("type") == "blob" and (e["path"] == "SKILL.md" or e["path"].endswith("/SKILL.md"))]
-        pastas = [p for p in pastas if not re.search(r"(^|/)(\.|node_modules/|test|example)", p)][:80]
+        pastas = _filtrar_pastas(pastas)
 
         def ler(p):
             try:

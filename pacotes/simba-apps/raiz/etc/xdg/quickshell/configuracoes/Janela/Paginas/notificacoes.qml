@@ -13,15 +13,12 @@ Pagina {
   // Estilo dos cartões (lido pelo shell em ~/.config/simba/notificacoes.json; sem arquivo = "rpg")
   property string estilo: "rpg"
   property string tamanho: "pequeno"
-  property string central: "auto"
+  property string central: "escuro"
   readonly property var temasCentral: [
-    { id: "auto", nome: I18n.t("Automático"), desc: I18n.t("Combina com o estilo dos avisos") },
-    { id: "fluent", nome: I18n.t("Fluent"), desc: I18n.t("Cartões suaves, como no Windows 11") },
-    { id: "minimal", nome: I18n.t("Minimal"), desc: I18n.t("Lista limpa separada por linhas") },
-    { id: "escuro", nome: I18n.t("Escuro"), desc: I18n.t("Painel escuro mesmo no tema claro") },
-    { id: "pixel-rpg", nome: I18n.t("Pixel RPG"), desc: I18n.t("Moldura dupla com cantos em degrau") },
-    { id: "pixel-portatil", nome: I18n.t("Pixel Portátil"), desc: I18n.t("Tons de cinza de videogame portátil") },
-    { id: "pixel-noturno", nome: I18n.t("Pixel Noturno"), desc: I18n.t("Escuro com faixa pontilhada") }
+    { id: "escuro", nome: I18n.t("Windows 11 Dark Mica (Padrão)"), desc: I18n.t("Modo escuro translúcido com brilho e azul elétrico") },
+    { id: "fluent", nome: I18n.t("Windows 11 Fluent Fiel"), desc: I18n.t("Vidro acrílico translúcido com cartões suaves") },
+    { id: "pixel-rpg", nome: I18n.t("Simba Pixel Art Retrô"), desc: I18n.t("Estrutura Win11 em pixel art com fonte Simba Pixel e gatinho") },
+    { id: "minimal", nome: I18n.t("Simba Minimal Moderno"), desc: I18n.t("Design limpo e monocromático sem transparências") }
   ]
   readonly property string arqEstilo: Sistema.home + "/.config/simba/notificacoes.json"
   readonly property string pastaPrevias: "file:///usr/share/simba-apps/notificacoes-estilos/"
@@ -45,7 +42,7 @@ Pagina {
     Sistema.sh("cat " + Sistema.q(pg.arqEstilo) + " 2>/dev/null", function(o) {
       var v = {}
       try { v = JSON.parse(o || "{}") || {} } catch (e) {}
-      pg.estilo = v.estilo || "rpg"; pg.tamanho = v.tamanho || "pequeno"; pg.central = v.central || "auto"
+      pg.estilo = v.estilo || "rpg"; pg.tamanho = v.tamanho || "pequeno"; pg.central = v.central || "escuro"
     })
   }
   function salvarPreferencias(testar) {

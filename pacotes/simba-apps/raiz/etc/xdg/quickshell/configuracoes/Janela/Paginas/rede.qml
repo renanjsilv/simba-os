@@ -129,7 +129,8 @@ Pagina {
     })
   }
   Component.onCompleted: { carregar(); lerFirewall(); abrirPelaBusca() }
-  Timer { interval: 5000; running: true; repeat: true; onTriggered: pg.carregar() }
+  Timer { interval: 5000; running: pg.visible; repeat: true; onTriggered: pg.carregar() }
+  onVisibleChanged: if (visible) { carregar(); lerFirewall(); abrirPelaBusca() }
 
   function barras(s) { return s >= 75 ? Icones.wifiStrength4 : s >= 50 ? Icones.wifiStrength3 : s >= 25 ? Icones.wifiStrength2 : Icones.wifiStrength1 }
 

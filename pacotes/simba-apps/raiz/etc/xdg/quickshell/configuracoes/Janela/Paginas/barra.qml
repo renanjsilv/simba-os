@@ -100,7 +100,8 @@ Pagina {
 
   // ── relógio ──────────────────────────────────────────────────────────────
   property date agora: new Date()
-  Timer { interval: 1000; running: true; repeat: true; onTriggered: pg.agora = new Date() }
+  Timer { interval: 1000; running: pg.visible; repeat: true; onTriggered: pg.agora = new Date() }
+  onVisibleChanged: if (visible) pg.agora = new Date()
   function fmt(f, d) { return Qt.locale().toString(d || agora, f) }
   readonly property var datas: [
     { valor: "", rotulo: I18n.t("Sem data") },

@@ -31,7 +31,8 @@ Pagina {
   }
 
   Component.onCompleted: atualizar()
-  Timer { interval: 10000; running: true; repeat: true; onTriggered: pg.atualizar() }
+  Timer { interval: 10000; running: pg.visible; repeat: true; onTriggered: pg.atualizar() }
+  onVisibleChanged: if (visible) pg.atualizar()
   Timer { id: desarmar; interval: 5000; onTriggered: { pg.apagarConfirma = -1; pg.reiniciarConfirma = false; pg.fabricaConfirma = false } }
 
   Aviso {

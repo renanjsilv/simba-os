@@ -63,7 +63,8 @@ Pagina {
     Sistema.json([Sistema.ajudante, "notificacoes"], function(v) { if (v) pg.historico = v })
   }
   Component.onCompleted: { carregar(); lerEstilo() }
-  Timer { interval: 4000; running: true; repeat: true; onTriggered: pg.carregar() }
+  Timer { interval: 4000; running: pg.visible; repeat: true; onTriggered: pg.carregar() }
+  onVisibleChanged: if (visible) pg.carregar()
 
   function quando(ms) {
     var d = (Date.now() - ms) / 1000

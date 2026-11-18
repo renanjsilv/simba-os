@@ -34,7 +34,8 @@ Pagina {
     Sistema.sh("nmcli -t -f NAME,TYPE connection show --active 2>/dev/null | grep -E ':802-11-wireless$' | head -1 | sed 's/:802-11-wireless$//'", function(o) { pg.ssid = o.trim() })
   }
   Component.onCompleted: atualizar()
-  Timer { interval: 4000; running: true; repeat: true; onTriggered: pg.atualizar() }
+  Timer { interval: 4000; running: pg.visible; repeat: true; onTriggered: pg.atualizar() }
+  onVisibleChanged: if (visible) pg.atualizar()
 
   readonly property var nomesModo: ({ notebook: I18n.t("Somente tela do notebook"), duplicar: I18n.t("Duplicada"), estender: I18n.t("Estendida"), segunda: I18n.t("Somente segunda tela"), unico: I18n.t("Uma tela") })
   readonly property string perfil: PowerProfiles.profile === PowerProfile.Performance ? I18n.t("Desempenho") : PowerProfiles.profile === PowerProfile.PowerSaver ? I18n.t("Economia") : I18n.t("Equilibrado")

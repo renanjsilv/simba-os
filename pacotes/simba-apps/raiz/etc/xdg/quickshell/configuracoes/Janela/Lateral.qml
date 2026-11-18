@@ -209,7 +209,10 @@ Item {
           enabled: !item.modelData.separador
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
-          onClicked: l.escolhida(item.modelData.id)
+          onClicked: {
+            lista.currentIndex = index
+            l.escolhida(item.modelData.id)
+          }
         }
       }
     }

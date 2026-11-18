@@ -319,29 +319,105 @@ Scope {
             }
 
             // ── page host ────────────────────────────────────────────────
-            Loader {
+            Item {
               id: pagina
               anchors.left: parent.left
               anchors.right: parent.right
               anchors.bottom: parent.bottom
               anchors.top: abas.bottom
               property string atual: ""
+              property var cache: ({})
               opacity: raiz.buscando ? 0 : 1
               visible: opacity > 0
               Behavior on opacity { NumberAnimation { duration: Tema.rapido } }
-              asynchronous: false
+
+              Component {
+                id: compLoader
+                Loader {
+                  anchors.fill: parent
+                  asynchronous: true
+                  visible: false
+                  opacity: 0
+                  property string chave: ""
+                  Behavior on opacity { NumberAnimation { duration: Tema.animacoes ? 90 : 0 } }
+                  onStatusChanged: {
+                    if (status === Loader.Ready) {
+                      if (pagina.atual === chave) {
+                        visible = true
+                        opacity = 1
+                        Navegacao.paginaAtual = item
+                      }
+                    } else if (status === Loader.Error) {
+                      console.warn("configuracoes: falha ao carregar página", chave)
+                    }
+                  }
+                }
+              }
+
               function carregar(id) {
                 if (atual === id) return
+                var anterior = cache[atual]
+                if (anterior) {
+                  anterior.visible = false
+                  anterior.opacity = 0
+                }
                 atual = id
-                saida.restart()
+
+                var l = cache[id]
+                if (!l) {
+                  l = compLoader.createObject(pagina, {
+                    chave: id,
+                    source: Qt.resolvedUrl("Paginas/" + id + ".qml")
+                  })
+                  var c = Object.assign({}, cache)
+                  c[id] = l
+                  cache = c
+                }
+
+                if (l.status === Loader.Ready) {
+                  l.visible = true
+                  l.opacity = 1
+                  Navegacao.paginaAtual = l.item
+                }
               }
-              SequentialAnimation {
-                id: saida
-                NumberAnimation { target: pagina.item; property: "opacity"; to: 0; duration: Tema.animacoes ? 80 : 0 }
-                ScriptAction { script: pagina.source = Qt.resolvedUrl("Paginas/" + pagina.atual + ".qml") }
+
+              function precarregar(id) {
+                if (cache[id]) return
+                var l = compLoader.createObject(pagina, {
+                  chave: id,
+                  source: Qt.resolvedUrl("Paginas/" + id + ".qml")
+                })
+                var c = Object.assign({}, cache)
+                c[id] = l
+                cache = c
               }
-              onStatusChanged: if (status === Loader.Error) console.warn("configuracoes: falha ao carregar página", atual)
-              Component.onCompleted: { atual = Navegacao.pagina; source = Qt.resolvedUrl("Paginas/" + atual + ".qml") }
+
+              Timer {
+                id: precarregador
+                interval: 180
+                repeat: true
+                property var fila: ["g-contas", "g-sistema", "g-dispositivos", "g-rede", "g-personalizacao", "g-apps"]
+                property int pos: 0
+                onTriggered: {
+                  if (pos >= fila.length) { stop(); return }
+                  var gid = fila[pos++]
+                  var pid = ""
+                  for (var i = 0; i < j.grupos.length; i++) {
+                    if (j.grupos[i].id === gid && j.grupos[i].paginas && j.grupos[i].paginas.length > 0) {
+                      pid = j.grupos[i].paginas[0].id
+                      break
+                    }
+                  }
+                  if (pid && !pagina.cache[pid]) {
+                    pagina.precarregar(pid)
+                  }
+                }
+              }
+
+              Component.onCompleted: {
+                carregar(Navegacao.pagina)
+                precarregador.start()
+              }
               Connections {
                 target: Navegacao
                 function onPaginaChanged() { pagina.carregar(Navegacao.pagina) }

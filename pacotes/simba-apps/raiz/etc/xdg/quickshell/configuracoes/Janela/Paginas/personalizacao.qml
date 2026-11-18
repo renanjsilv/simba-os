@@ -131,7 +131,8 @@ Pagina {
     function onTemaTrocado() { recarregarTudo.restart() }
   }
   Timer { id: recarregarTudo; interval: 900; onTriggered: { pg.aplicandoTema = ""; pg.carregar() } }
-  Timer { interval: 3000; running: true; repeat: true; onTriggered: pg.carregarFundos() }
+  Timer { interval: 3000; running: pg.visible; repeat: true; onTriggered: pg.carregarFundos() }
+  onVisibleChanged: if (visible) pg.carregarFundos()
 
   function aplicarTema(slug, nome) {
     if (aplicandoTema) return

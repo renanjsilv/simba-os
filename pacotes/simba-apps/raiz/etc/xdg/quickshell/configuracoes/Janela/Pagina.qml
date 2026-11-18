@@ -33,12 +33,18 @@ Flickable {
     }
   }
 
+  Component {
+    id: compTranslate
+    Translate {}
+  }
+
   NumberAnimation on revelacao {
     id: revelar
     from: 0; to: 1
-    duration: Tema.animacoes ? 900 : 0
-    easing.type: Easing.Linear
+    duration: Tema.animacoes ? 300 : 0
+    easing.type: Easing.OutCubic
     running: true
+    onFinished: f.limparRevelacao()
   }
 
   function itens() {
@@ -50,11 +56,15 @@ Flickable {
     return lista
   }
   function prepararRevelacao() {
+    if (!Tema.animacoes) {
+      f.revelacao = 1
+      return
+    }
     var lista = itens()
     var n = Math.min(lista.length, 14)
     for (var i = 0; i < lista.length; i++) {
       (function(item, idx) {
-        var deslize = Qt.createQmlObject(I18n.t('import QtQuick; Translate {}'), item)
+        var deslize = compTranslate.createObject(item)
         deslize.y = Qt.binding(function() {
           var p = Math.max(0, Math.min(1, (f.revelacao * (n + 5) - Math.min(idx, n)) / 5))
           var e = 1 - Math.pow(1 - p, 3)
@@ -69,6 +79,12 @@ Flickable {
           return 1 - Math.pow(1 - p, 2)
         })
       })(lista[i], i)
+    }
+  }
+  function limparRevelacao() {
+    var lista = itens()
+    for (var i = 0; i < lista.length; i++) {
+      lista[i].opacity = 1
     }
   }
   Component.onCompleted: { Navegacao.paginaAtual = f; Qt.callLater(prepararRevelacao) }

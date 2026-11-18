@@ -310,7 +310,8 @@ Pagina {
   // ── remembered screens ───────────────────────────────────────────────────
   property var conhecidas: ({})
   function carregarConhecidas() { Sistema.json([Sistema.tela, "memoria"], function(v) { if (v) pg.conhecidas = v }) }
-  Timer { interval: 4000; running: true; repeat: true; onTriggered: pg.carregarConhecidas() }
+  Timer { interval: 4000; running: pg.visible; repeat: true; onTriggered: pg.carregarConhecidas() }
+  onVisibleChanged: if (visible) { carregar(); carregarConhecidas() }
   readonly property var nomesModo: ({ notebook: I18n.t("Somente notebook"), duplicar: I18n.t("Duplicar"), estender: I18n.t("Estender"), segunda: I18n.t("Somente segunda tela") })
   function quando(iso) {
     var d = new Date(iso)

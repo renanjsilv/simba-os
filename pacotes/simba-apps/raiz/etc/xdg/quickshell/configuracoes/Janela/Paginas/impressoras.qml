@@ -20,7 +20,8 @@ Pagina {
   }
 
   Component.onCompleted: atualizar()
-  Timer { interval: 6000; running: true; repeat: true; onTriggered: pg.atualizar() }
+  Timer { interval: 6000; running: pg.visible; repeat: true; onTriggered: pg.atualizar() }
+  onVisibleChanged: if (visible) pg.atualizar()
 
   Aviso {
     visible: pg.s !== null && !pg.s.cups

@@ -248,6 +248,7 @@ class AgentStreamParser:
         self._tipos = {}           # id do passo → tipo (para saber o que fazer com o resultado)
         self._fundo = set()        # passos que continuam em segundo plano depois do tool_result
         self._tarefa_passo = {}    # task_id → id do passo
+        self.ultimo_status = None
         self._seq = 0
         self._pensou_parcial = False
         self.agente = agente
@@ -298,6 +299,7 @@ class AgentStreamParser:
         self.on_text(txt)
 
     def _status(self, desc, acao=False):
+        self.ultimo_status = desc
         if acao and desc not in self.actions:
             self.actions.append(desc)
         self.on_status(desc)
@@ -362,7 +364,7 @@ class AgentStreamParser:
         if mudou:
             self.on_meta(mudou)
 
-    def _contexto(self, u, chaves=("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")):
+    def _contexto(self, u, chaves=("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "cache_read_tokens")):
         """Tamanho da conversa que o modelo está lendo (a última chamada do agente principal)."""
         if not isinstance(u, dict):
             return
@@ -444,6 +446,11 @@ class AgentStreamParser:
         event = data.get("event")
         if event == "step_update":
             su = data.get("step_update", {})
+            u = su.get("usage")
+            if isinstance(u, dict):
+                self._contexto(u)
+                self._somar_uso(int(u.get("input_tokens") or 0) + int(u.get("cache_read_tokens") or 0),
+                                int(u.get("output_tokens") or 0))
             st, state = su.get("step_type"), su.get("state")
             if st == "tool":
                 tinfo = su.get("tool_info", {}) or {}
@@ -462,6 +469,11 @@ class AgentStreamParser:
                 self._texto(su.get("text_delta"))
         elif event == "result":
             res = data.get("result", {}) or {}
+            u = res.get("usage")
+            if isinstance(u, dict):
+                self._contexto(u)
+                self._somar_uso(int(u.get("input_tokens") or 0) + int(u.get("cache_read_tokens") or 0),
+                                int(u.get("output_tokens") or 0))
             self.last_response = res.get("response", "") or ""
             self._registrar(self.last_response)
             if res.get("error"):

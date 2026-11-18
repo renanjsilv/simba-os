@@ -623,15 +623,10 @@ class LinhaPasso(Gtk.Box):
             self.corpo.add_css_class("passo-codigo")
             self.corpo.set_selectable(True)
             self.corpo.set_wrap(True)
-            self.corpo.set_wrap_mode(Pango.WrapMode.CHAR)
-            self.corpo.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
+            self.corpo.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            self.corpo.set_hexpand(True)
             _sem_hifen(self.corpo)
-            rol_corpo = Gtk.ScrolledWindow()
-            rol_corpo.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-            rol_corpo.set_propagate_natural_height(True)
-            rol_corpo.set_hexpand(True)
-            rol_corpo.set_child(self.corpo)
-            self.append(rol_corpo)
+            self.append(self.corpo)
             self.btn_diff = Gtk.Button()
             self.btn_diff.add_css_class("flat")
             self.btn_diff.add_css_class("passo-mais")
@@ -841,6 +836,7 @@ class LinhaPasso(Gtk.Box):
             cmd = e.get("comando") or ""
             corte = len(cmd) > 1600
             self.corpo.set_markup(realce_shell(cmd[:1600]) + (" …" if corte else ""))
+            _sem_hifen(self.corpo)
             self.corpo.set_visible(bool(cmd))
             return
         linhas = (e.get("diff") or "").split("\n") if e.get("diff") else []
@@ -848,6 +844,7 @@ class LinhaPasso(Gtk.Box):
         resto = len(linhas) - PREVIA_DIFF
         mostra = linhas if self.diff_cheio or resto <= 2 else linhas[:PREVIA_DIFF]
         self.corpo.set_markup(realce_diff(mostra))
+        _sem_hifen(self.corpo)
         if resto > 2:
             self.btn_diff.set_visible(True)
             cortado = e.get("cortado")
@@ -908,13 +905,9 @@ class LinhaPasso(Gtk.Box):
             # quebra as linhas longas na largura disponível (sem rolagem lateral escondida)
             self.saida_lbl.set_wrap(True)
             self.saida_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            self.saida_lbl.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
+            self.saida_lbl.set_hexpand(True)
             _sem_hifen(self.saida_lbl)
-            rolagem = Gtk.ScrolledWindow()
-            rolagem.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
-            rolagem.set_propagate_natural_height(True)
-            rolagem.set_child(self.saida_lbl)
-            caixa.append(rolagem)
+            caixa.append(self.saida_lbl)
             self.btn_saida_mais = Gtk.Button()
             self.btn_saida_mais.add_css_class("flat")
             self.btn_saida_mais.add_css_class("passo-mais")

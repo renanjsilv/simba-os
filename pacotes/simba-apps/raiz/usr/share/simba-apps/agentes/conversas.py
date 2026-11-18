@@ -13,7 +13,7 @@ import time
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import GLib, Gtk, Pango  # noqa: E402
+from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 sys.path.insert(0, "/usr/share/simba-apps/idiomas")
 from simba_i18n import t as _t  # noqa: E402
@@ -90,6 +90,7 @@ class BarraConversas(Gtk.Box):
         self.renomear, self.apagar, self.quando = renomear, apagar, quando
         self.itens = []
         self.atual = None
+        self.rodando = set()
         self._lendo = False
         self._de_novo = False
 
@@ -224,6 +225,29 @@ class BarraConversas(Gtk.Box):
             linha = linha.get_next_sibling()
         self.lista.unselect_all()
 
+    def definir_rodando(self, cid, rodando=True):
+        if not cid:
+            return
+        if rodando:
+            self.rodando.add(cid)
+        else:
+            self.rodando.discard(cid)
+        linha = self.lista.get_first_child()
+        while linha is not None:
+            if getattr(linha, "dados", None) and linha.dados.get("id") == cid:
+                girador = getattr(linha, "girador", None)
+                if girador is not None:
+                    girador.set_visible(rodando)
+                    if hasattr(girador, "set_spinning"):
+                        girador.set_spinning(rodando)
+                    elif hasattr(girador, "start") and hasattr(girador, "stop"):
+                        if rodando:
+                            girador.start()
+                        else:
+                            girador.stop()
+                break
+            linha = linha.get_next_sibling()
+
     def _preencher(self):
         filho = self.lista.get_first_child()
         while filho is not None:
@@ -294,6 +318,24 @@ class BarraConversas(Gtk.Box):
         sub.set_hexpand(True)
         sub.add_css_class("barra-conversa-sub")
         meta.append(sub)
+
+        girador = Adw.Spinner() if hasattr(Adw, "Spinner") else Gtk.Spinner()
+        girador.add_css_class("barra-conversa-girador")
+        girador.set_valign(Gtk.Align.CENTER)
+        girador.set_size_request(14, 14)
+        cid = dados.get("id")
+        esta_rodando = bool(cid and cid in self.rodando)
+        girador.set_visible(esta_rodando)
+        if hasattr(girador, "set_spinning"):
+            girador.set_spinning(esta_rodando)
+        elif hasattr(girador, "start") and hasattr(girador, "stop"):
+            if esta_rodando:
+                girador.start()
+            else:
+                girador.stop()
+        linha.girador = girador
+        meta.append(girador)
+
         hora = Gtk.Label(label=quando_curto(dados.get("atualizada")), xalign=1)
         hora.add_css_class("barra-conversa-hora")
         meta.append(hora)

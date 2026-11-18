@@ -236,6 +236,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         # execução antiga (thread de leitura, callbacks) são ignorados.
         self.exec_seq = 0
         self.exec_atual = 0
+        self.execucoes = {}            # cid -> ExecucaoInfo (permite múltiplas conversas simultâneas)
         self.finalizado = True
         # Mensagens enviadas enquanto o agente responde: saem quando ele terminar.
         self.fila = []
@@ -1030,13 +1031,164 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             return
         split.set_show_sidebar(False if split.get_collapsed() else bool(ler_janela_cfg().get(chave, True)))
 
+    def _desanexar_widgets_ativos(self, info):
+        """Desconecta a conversa em execução dos widgets de tela ao trocar de conversa."""
+        if info.get("parser"):
+            if info.get("ativo_registro") is not None and info["parser"].texto:
+                info["ativo_registro"]["texto"] = info["parser"].texto
+            if info.get("ativo_registro") is not None and info["parser"].contexto:
+                info["ativo_registro"]["contexto"] = info["parser"].contexto
+        info["ativo_mensagem"] = None
+        info["ativo_bloco"] = None
+        info["ativo_digitando"] = None
+        info["ativo_duracao_lbl"] = None
+        info["ativo_card"] = None
+        info["ativo_modelo"] = None
+        self.ativo_mensagem = None
+        self.ativo_bloco = None
+        self.ativo_digitando = None
+        self.ativo_duracao_lbl = None
+        self.ativo_card = None
+        self.ativo_modelo = None
+        self.ativo_registro = None
+        self.proc = None
+        self.finalizado = True
+
+    def _esvaziar_chat_visual(self):
+        while True:
+            child = self.box_mensagens.get_first_child()
+            if not child:
+                break
+            self.box_mensagens.remove(child)
+        self.empty_state.set_visible(True)
+        self.ativo_texto = ""
+        self.ativo_mensagem = None
+        self.ativo_bloco = None
+        self.ativo_digitando = None
+        self.ativo_duracao_lbl = None
+        self.ativo_card = None
+        self.ativo_modelo = None
+        self.ativo_parser = None
+        self.ativo_renderizado = False
+        self.ativo_registro = None
+        self.proc = None
+        self.finalizado = True
+        self.text_input_buf.set_text("")
+        self._limpar_anexos()
+        self.btn_parar.set_visible(False)
+        self.btn_enviar.set_visible(True)
+
+    def _restaurar_conversa_rodando(self, info):
+        cid = info["cid"]
+        self.conversa_id = cid
+        self.conversa_criada = info.get("criada") or time.time()
+        self.conversa_titulo_manual = info.get("titulo_manual")
+        self.conversa_mensagens = info.get("conversa_mensagens") or []
+        self.work_dir = Path(str(info.get("work_dir") or self.work_dir))
+        self._atualizar_pasta_ui()
+        self.sessoes = info.get("sessoes") or {}
+        self.conversas_iniciadas = set(self.sessoes)
+        self.agente_atual = info.get("agente")
+        self.proc = info.get("proc")
+        self.exec_atual = info.get("eid", 0)
+        self.finalizado = False
+        self.inicio_agente = info.get("inicio_agente", 0.0)
+        self.ativo_parser = info.get("parser")
+        self.ativo_registro = info.get("ativo_registro")
+        self.ativo_texto = info.get("parser").texto if info.get("parser") else (info.get("ativo_texto") or "")
+        self.fila = info.get("fila") or []
+
+        mensagens = list(self.conversa_mensagens)
+        ativo_msg = self.ativo_registro
+        if mensagens and mensagens[-1] is ativo_msg:
+            anteriores = mensagens[:-1]
+        else:
+            anteriores = mensagens
+
+        for msg in anteriores:
+            tipo = msg.get("tipo")
+            if tipo == "user":
+                self._adicionar_bolha_usuario(msg.get("texto", ""), registro=False, anexos=msg.get("anexos"))
+            elif tipo == "assistant":
+                widgets = self._adicionar_bolha_assistente(
+                    msg.get("agente", ""),
+                    registro=False,
+                    ativo=False,
+                    modelo=msg.get("modelo", ""),
+                    hora=msg.get("hora"),
+                    duracao=msg.get("duracao"),
+                )
+                texto = msg.get("texto", "")
+                if texto:
+                    widgets["mensagem"].definir(texto)
+                    widgets["mensagem"].concluir()
+                widgets["bloco"].seguro = bool(msg.get("seguro"))
+                widgets["bloco"].registro_msg = msg
+                widgets["bloco"].carregar(msg)
+                widgets["card"].atualizar_acoes(widgets["bloco"].passos)
+            elif tipo == "sistema":
+                self._adicionar_sistema(msg.get("texto", ""), registro=False)
+            elif tipo == "handover":
+                self._adicionar_aviso_handover(msg.get("antigo", ""), msg.get("proximo", ""), registro=False)
+
+        widgets = self._adicionar_bolha_assistente(
+            self.agente_atual,
+            registro=False,
+            ativo=True,
+            modelo=(ativo_msg.get("modelo") if ativo_msg else "") or "",
+            hora=(ativo_msg.get("hora") if ativo_msg else None),
+        )
+        if ativo_msg and ativo_msg.get("seguro"):
+            widgets["bloco"].seguro = True
+        if self.ativo_texto:
+            widgets["mensagem"].definir(self._texto_do_trecho(self.ativo_texto), ao_vivo=True)
+        if self.ativo_parser and getattr(self.ativo_parser, "ultimo_status", None):
+            widgets["bloco"].status(self.ativo_parser.ultimo_status)
+
+        info["ativo_mensagem"] = widgets["mensagem"]
+        info["ativo_bloco"] = widgets["bloco"]
+        info["ativo_digitando"] = widgets.get("digitando")
+        info["ativo_duracao_lbl"] = widgets.get("duracao")
+        info["ativo_card"] = widgets.get("card")
+
+        self.ativo_mensagem = widgets["mensagem"]
+        self.ativo_bloco = widgets["bloco"]
+        self.ativo_digitando = widgets.get("digitando")
+        self.ativo_duracao_lbl = widgets.get("duracao")
+        self.ativo_card = widgets.get("card")
+
+        self.empty_state.set_visible(False)
+        self.btn_parar.set_visible(True)
+        self.btn_enviar.set_visible(True)
+
+        if hasattr(self, "detalhes"):
+            self._detalhes_bloco(widgets["bloco"], abrir=False)
+            if ativo_msg and ativo_msg.get("contexto"):
+                self.detalhes.contexto(
+                    ativo_msg["contexto"],
+                    detalhes.janela_contexto(self.agente_atual, ativo_msg.get("modelo"))
+                )
+            self._atualizar_detalhes_ambiente()
+
+        self.barra.marcar_atual(cid)
+        self._scroll_para_fim(forcar=True)
+        self._focar_composer()
+
     def _abrir_da_barra(self, dados):
-        if self._rodando():
-            self.barra.marcar_atual(self.conversa_id)
-            self._adicionar_sistema(_t("Espere a resposta terminar (ou pare com Esc) para abrir outra conversa."),
-                                    registro=False)
+        novo_cid = dados.get("id")
+        if novo_cid == self.conversa_id:
             return
-        self._carregar_conversa(dados, None)
+        if self.conversa_id and self.conversa_id not in self.execucoes:
+            self._salvar_conversa()
+        elif self.conversa_id and self.conversa_id in self.execucoes:
+            self._desanexar_widgets_ativos(self.execucoes[self.conversa_id])
+
+        self._esvaziar_chat_visual()
+
+        if novo_cid in self.execucoes:
+            self._restaurar_conversa_rodando(self.execucoes[novo_cid])
+        else:
+            self._carregar_conversa(dados, None)
         self.barra.marcar_atual(self.conversa_id)
         if self.split_barra.get_collapsed():
             self.split_barra.set_show_sidebar(False)
@@ -1757,35 +1909,25 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
 
     def _limpar_chat(self, descartar=False):
-        if descartar:
-            self.conversa_id = None
-            self.conversa_criada = None
-            self.conversa_mensagens = []
-            self.ativo_registro = None
-        self.fila = []
-        self._interromper()
-        self._salvar_conversa()
-        while True:
-            child = self.box_mensagens.get_first_child()
-            if not child:
-                break
-            self.box_mensagens.remove(child)
-        self.empty_state.set_visible(True)
+        if self.conversa_id and self.conversa_id in self.execucoes:
+            self._desanexar_widgets_ativos(self.execucoes[self.conversa_id])
+        elif self.conversa_id:
+            if descartar:
+                self.conversa_id = None
+                self.conversa_criada = None
+                self.conversa_mensagens = []
+                self.ativo_registro = None
+            self.fila = []
+            self._interromper()
+            self._salvar_conversa()
+        self._esvaziar_chat_visual()
         self.usados.clear()
         self.conversas_iniciadas.clear()
         self.sessoes = {}
         self.fila = []
         self.interrompido = False
-        self.ativo_texto = ""
         self.anterior_passagem = None
         self.agente_atual = None
-        self.ativo_mensagem = None
-        self.ativo_bloco = None
-        self.ativo_digitando = None
-        self.ativo_modelo = None
-        self.ativo_parser = None
-        self.ativo_renderizado = False
-        self.ativo_registro = None
         self.conversa_id = None
         self.conversa_criada = None
         self.conversa_mensagens = []
@@ -1798,8 +1940,11 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 pass
             self.salvar_fonte = 0
         self.btn_historico.set_sensitive(True)
-        self.text_input_buf.set_text("")
-        self._limpar_anexos()
+        if hasattr(self, "barra"):
+            self.barra.marcar_atual(None)
+        if hasattr(self, "detalhes"):
+            self.detalhes.limpar()
+            self._atualizar_detalhes_ambiente()
         self.text_input.grab_focus()
 
     def _on_input_text_changed(self, buf):
@@ -1902,8 +2047,12 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
 
     # ── Envio, fila e execução ───────────────────────────────────────────────
-    def _rodando(self):
-        return self.proc is not None and not self.finalizado
+    def _rodando(self, cid=None):
+        if cid is None:
+            cid = self.conversa_id
+        if not cid:
+            return self.proc is not None and not self.finalizado
+        return cid in self.execucoes or (cid == self.conversa_id and self.proc is not None and not self.finalizado)
 
     def _on_enviar(self):
         start, end = self.text_input_buf.get_bounds()
@@ -1914,12 +2063,15 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.text_input_buf.set_text("")
         self._limpar_anexos()
         self.empty_state.set_visible(False)
+        cid = self._garantir_id_conversa()
+        if hasattr(self, "barra"):
+            self.barra.marcar_atual(cid)
         item = {"texto": texto, "anexos": arquivos}
 
         # O agente ainda está respondendo: a mensagem espera a vez dela. (Antes
         # ela era escrita no pty, mas no modo print os agentes não leem a
         # entrada e a mensagem se perdia.)
-        if self._rodando():
+        if self._rodando(cid):
             item["widgets"] = self._adicionar_bolha_usuario(texto, registro=False, na_fila=True, anexos=arquivos)
             self.fila.append(item)
             return
@@ -1975,6 +2127,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         return None if aid in (None, "auto") else aid
 
     def _iniciar_execucao(self, pedido, agente_forcado=None, arq_passagem=None):
+        cid = self._garantir_id_conversa()
         cfg = M.ler_config(verificar=False)
         seguro = bool(cfg.get("seguro"))
         if not agente_forcado and arq_passagem is None:
@@ -2087,10 +2240,39 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         os.close(escravo)
         self.proc = proc
 
+        exec_info = {
+            "cid": cid,
+            "eid": eid,
+            "proc": proc,
+            "parser": None,
+            "agente": agente,
+            "work_dir": self.work_dir,
+            "inicio_agente": self.inicio_agente,
+            "conversa_mensagens": self.conversa_mensagens,
+            "criada": self.conversa_criada,
+            "titulo_manual": getattr(self, "conversa_titulo_manual", None),
+            "sessoes": self.sessoes,
+            "ativo_registro": self.ativo_registro,
+            "ativo_texto": self.ativo_texto,
+            "ativo_mensagem": self.ativo_mensagem,
+            "ativo_bloco": self.ativo_bloco,
+            "ativo_digitando": self.ativo_digitando,
+            "ativo_duracao_lbl": self.ativo_duracao_lbl,
+            "ativo_card": getattr(self, "ativo_card", None),
+            "ativo_modelo": getattr(self, "ativo_modelo", None),
+            "fila": self.fila,
+            "finalizado": False,
+            "ultimo_sinal": time.monotonic(),
+            "vigia_cfg": cfg,
+        }
+        self.execucoes[cid] = exec_info
+        if hasattr(self, "barra"):
+            self.barra.definir_rodando(cid, True)
+
         def na_gui(fn, *args):
             def chamar():
-                if self.exec_atual == eid:
-                    fn(*args)
+                if exec_info.get("eid") == eid and not exec_info.get("interrompido"):
+                    fn(*args, info=exec_info)
                 return False
             GLib.idle_add(chamar)
 
@@ -2102,6 +2284,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             on_meta=lambda m: na_gui(self._meta_recebida, agente, m),
             on_evento=lambda e: na_gui(self._evento_ativo, e),
         )
+        exec_info["parser"] = parser
         self.ativo_parser = parser
 
         self.btn_parar.set_visible(True)
@@ -2110,7 +2293,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self.ultimo_sinal = time.monotonic()
         self.vigia_cfg = cfg
         GLib.timeout_add_seconds(VIGIA_PASSO, self._vigiar, eid)
-        threading.Thread(target=self._loop_leitura, args=(mestre, proc, eid, parser, cfg),
+        threading.Thread(target=self._loop_leitura, args=(mestre, proc, eid, parser, cfg, exec_info),
                          daemon=True).start()
 
     # ── vigia: nenhuma execução fica presa para sempre ───────────────────────
@@ -2119,21 +2302,28 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
     # ficar sem dar NENHUM sinal por muito tempo, repetir a mesma ação sem parar,
     # ou não sair depois de responder. Nesses casos o chat cancela sozinho.
     def _vigiar(self, eid):
-        if self.exec_atual != eid or self.finalizado or self.proc is None:
+        info = next((v for v in self.execucoes.values() if v.get("eid") == eid), None)
+        if info is None and self.exec_atual == eid:
+            info = self.execucoes.get(self.conversa_id)
+        if info is None or info.get("finalizado") or info.get("proc") is None:
             return False
-        parser, cfg = self.ativo_parser, self.vigia_cfg or {}
-        if self.perguntas:
-            self.ultimo_sinal = time.monotonic()   # esperando a pessoa responder não é travamento
-        parado = time.monotonic() - self.ultimo_sinal
+        parser, cfg = info.get("parser"), info.get("vigia_cfg") or {}
+        cid = info.get("cid")
+        if self.conversa_id == cid and self.perguntas:
+            info["ultimo_sinal"] = time.monotonic()   # esperando a pessoa responder não é travamento
+        parado = time.monotonic() - info.get("ultimo_sinal", time.monotonic())
         pendentes = parser.tarefas_pendentes() if parser else []
         comandos = [d for d in pendentes if d not in parser.tarefas_pendentes("local_agent")] if parser else []
         if parser and parser.fim_rodada and not pendentes and parado >= VIGIA_SAIDA:
-            self._encerrar_execucao()  # já respondeu; só o processo não saiu
-            self._finalizar_resposta()
-            self._proximo_da_fila()
+            proc = info.get("proc")
+            if proc:
+                self._encerrar_proc(proc)
+            self._finalizar_resposta(info=info)
+            if self.conversa_id == cid:
+                self._proximo_da_fila()
             return False
         if parser and parser.repeticoes >= VIGIA_REPETICOES:
-            self._cancelar_sozinho(_t("repetiu a mesma ação %1 vezes seguidas", parser.repeticoes))
+            self._cancelar_sozinho_info(info, _t("repetiu a mesma ação %1 vezes seguidas", parser.repeticoes))
             return False
         # um comando em segundo plano (compilação, download) pode ficar calado por muito tempo
         minutos = cfg.get("semSinalFundoMin", 150) if comandos else cfg.get("semSinalMin", 20)
@@ -2142,9 +2332,9 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         except (TypeError, ValueError):
             limite = 20 * 60
         if parado >= limite:
-            self._cancelar_sozinho(_t("ficou %1 min sem dar nenhum sinal", int(parado // 60)))
+            self._cancelar_sozinho_info(info, _t("ficou %1 min sem dar nenhum sinal", int(parado // 60)))
             return False
-        if parado >= VIGIA_AVISO and self.ativo_bloco is not None:
+        if parado >= VIGIA_AVISO and self.conversa_id == cid and self.ativo_bloco is not None:
             falta = max(1, int((limite - parado) // 60))
             self.ativo_bloco.aviso(
                 _t("sem novidade há %1 min (cancela sozinho em %2 min)", int(parado // 60), falta))
@@ -2152,12 +2342,43 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
 
     def _encerrar_execucao(self):
         """Solta a execução atual e encerra o processo dela em segundo plano."""
+        cid = self.conversa_id
+        if cid and cid in self.execucoes:
+            proc = self.execucoes[cid].get("proc")
+            self.execucoes[cid]["proc"] = None
+            if proc is not None:
+                threading.Thread(target=self._encerrar_proc, args=(proc,), daemon=True).start()
         proc, self.proc = self.proc, None
         self.exec_atual = 0  # eventos atrasados desta execução passam a ser ignorados
         if proc is not None:
             threading.Thread(target=self._encerrar_proc, args=(proc,), daemon=True).start()
 
+    def _cancelar_sozinho_info(self, info, motivo):
+        agente = info.get("agente")
+        nome = M.AGENTES.get(agente, {}).get("nome", _t("Agente de IA"))
+        proc = info.get("proc")
+        if proc:
+            info["proc"] = None
+            threading.Thread(target=self._encerrar_proc, args=(proc,), daemon=True).start()
+        info["interrompido"] = motivo
+        if self.conversa_id == info.get("cid") or not self.conversa_id:
+            self.interrompido = motivo
+        self._finalizar_resposta(interrompida=True, motivo=f"{_t('Cancelado automaticamente:')} {nome} {motivo}", info=info)
+        if self.conversa_id == info.get("cid"):
+            self._devolver_fila()
+        if not self.is_active():
+            try:
+                subprocess.Popen(["notify-send", "-a", _t("Agentes de IA"), "-i", "simba-agente",
+                                  _t("Resposta cancelada automaticamente"), f"{nome} {motivo}"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except OSError:
+                pass
+
     def _cancelar_sozinho(self, motivo):
+        info = self.execucoes.get(self.conversa_id) if self.conversa_id else None
+        if info:
+            self._cancelar_sozinho_info(info, motivo)
+            return
         nome = M.AGENTES.get(self.agente_atual, {}).get("nome", _t("Agente de IA"))
         self._encerrar_execucao()
         self.interrompido = motivo
@@ -2171,7 +2392,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             except OSError:
                 pass
 
-    def _loop_leitura(self, mestre, proc, eid, parser, cfg):
+    def _loop_leitura(self, mestre, proc, eid, parser, cfg, info=None):
         """Lê o pty até o processo acabar (e esvazia o que sobrou). Roda numa thread.
 
         A thread é a única dona do fd `mestre` e o fecha sempre, inclusive na troca
@@ -2180,7 +2401,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
         tela = bytearray()
         trocar = False
-        while self.exec_atual == eid:
+        while proc.poll() is None and not (info and info.get("interrompido")):
             try:
                 prontos, _, _ = select.select([mestre], [], [], 0.15)
             except (OSError, ValueError):
@@ -2192,7 +2413,11 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                     break
                 if not dados:
                     break
-                self.ultimo_sinal = time.monotonic()
+                agora = time.monotonic()
+                if info:
+                    info["ultimo_sinal"] = agora
+                if info and info.get("cid") == self.conversa_id:
+                    self.ultimo_sinal = agora
                 tela += dados
                 if len(tela) > 400000:
                     del tela[:100000]
@@ -2208,7 +2433,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             os.close(mestre)
         except OSError:
             pass
-        if self.exec_atual != eid:  # interrompido: quem interrompeu já encerrou
+        if info and info.get("interrompido"):  # interrompido: quem interrompeu já encerrou
             return
         if trocar:
             self._encerrar_proc(proc)
@@ -2220,7 +2445,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         except subprocess.TimeoutExpired:
             self._encerrar_proc(proc)
             rc = None
-        GLib.idle_add(self._fim_execucao, eid, parser, rc, bytes(tela), cfg)
+        GLib.idle_add(self._fim_execucao, eid, parser, rc, bytes(tela), cfg, info)
 
     @staticmethod
     def _encerrar_proc(proc):
@@ -2258,33 +2483,70 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             suspeito = rc not in (0, None) or bool(parser.erro) or len(resposta) < 300
         return suspeito and M.detectar_limite(parser.texto_detectavel)
 
-    def _fim_execucao(self, eid, parser, rc, tela, cfg):
-        if eid != self.exec_atual or self.finalizado:
+    def _fim_execucao(self, eid, parser, rc, tela, cfg, info=None):
+        if info is None:
+            info = next((v for v in self.execucoes.values() if v.get("eid") == eid), None)
+        if info is None and (eid != self.exec_atual or self.finalizado):
             return False
-        self.proc = None
-        agente = self.agente_atual
+        cid = info.get("cid") if info else self.conversa_id
+        if info:
+            info["proc"] = None
+        if self.conversa_id == cid:
+            self.proc = None
+        agente = (info.get("agente") if info else self.agente_atual)
         if cfg.get("trocaAutomatica", True) and self._limite_atingido(parser, rc):
-            self._executar_troca_transparente(agente, cfg, tela, parser)
-            return False
+            if self.conversa_id == cid:
+                self._executar_troca_transparente(agente, cfg, tela, parser)
+                return False
         if parser.erro and not parser.has_text:
-            self.ativo_texto = f"⚠ {parser.erro.strip()}"
+            msg = f"⚠ {parser.erro.strip()}"
+            if info:
+                info["ativo_texto"] = msg
+            if self.conversa_id == cid:
+                self.ativo_texto = msg
         elif not parser.has_text and rc not in (0, None):
             linhas = [l for l in M.tela_limpa(tela) if l.strip()][-8:]
             if linhas:
-                self.ativo_texto = "⚠ " + _t("O agente terminou com erro:") + "\n\n```\n" + "\n".join(linhas) + "\n```"
-        self._finalizar_resposta()
-        self._proximo_da_fila()
+                msg = "⚠ " + _t("O agente terminou com erro:") + "\n\n```\n" + "\n".join(linhas) + "\n```"
+                if info:
+                    info["ativo_texto"] = msg
+                if self.conversa_id == cid:
+                    self.ativo_texto = msg
+        self._finalizar_resposta(info=info)
+        if self.conversa_id == cid:
+            self._proximo_da_fila()
         return False
 
-    def _meta_recebida(self, agente, meta):
+    def _meta_recebida(self, agente, meta, info=None):
+        if info is None and self.conversa_id:
+            info = self.execucoes.get(self.conversa_id)
+        cid = info.get("cid") if info else self.conversa_id
+        eh_visivel = bool(not cid or cid == self.conversa_id)
         if meta.get("sessao"):
             self.sessoes[agente] = meta["sessao"]
+            if info:
+                info.setdefault("sessoes", {})[agente] = meta["sessao"]
             self._agendar_salvamento()
-        if meta.get("modelo") and self.ativo_registro is not None:
-            if not M.modelo_escolhido(agente, M.ler_config(verificar=False)):
-                self.ativo_registro["modelo"] = meta["modelo"]
-                if getattr(self, "ativo_modelo", None):
-                    self.ativo_modelo(meta["modelo"])
+        if meta.get("contexto") is not None:
+            if info and info.get("ativo_registro") is not None:
+                info["ativo_registro"]["contexto"] = meta["contexto"]
+            elif self.ativo_registro is not None:
+                self.ativo_registro["contexto"] = meta["contexto"]
+            if eh_visivel and hasattr(self, "detalhes"):
+                self.detalhes.contexto(
+                    meta["contexto"],
+                    detalhes.janela_contexto(agente, (self.ativo_registro or {}).get("modelo"))
+                )
+        if meta.get("modelo"):
+            mod = meta["modelo"]
+            if info and info.get("ativo_registro") is not None:
+                if not M.modelo_escolhido(agente, M.ler_config(verificar=False)):
+                    info["ativo_registro"]["modelo"] = mod
+            if eh_visivel and self.ativo_registro is not None:
+                if not M.modelo_escolhido(agente, M.ler_config(verificar=False)):
+                    self.ativo_registro["modelo"] = mod
+                    if getattr(self, "ativo_modelo", None):
+                        self.ativo_modelo(mod)
         if meta.get("voltas"):
             self.janelas_volta[agente] = meta["voltas"]
         if meta.get("janelas"):
@@ -2432,8 +2694,13 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._atualizar_seguro_ui()
         self._carregar_agentes()
 
-    def _atualizar_status_ativo(self, status_texto):
+    def _atualizar_status_ativo(self, status_texto, info=None):
         """Status em texto do agente: vira o passo atual no cabeçalho do bloco "Pensando"."""
+        if info:
+            info["ultimo_status"] = status_texto
+        cid = info.get("cid") if info else self.conversa_id
+        if cid and cid != self.conversa_id:
+            return
         bloco = self.ativo_bloco
         if bloco is None or not status_texto or not status_texto.strip():
             return
@@ -2443,8 +2710,11 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         self._agendar_salvamento()
         self._scroll_para_fim()
 
-    def _evento_ativo(self, ev):
+    def _evento_ativo(self, ev, info=None):
         """Evento estruturado do parser: passo (com entrada, saída, estado) ou raciocínio."""
+        cid = info.get("cid") if info else self.conversa_id
+        if cid and cid != self.conversa_id:
+            return
         bloco = self.ativo_bloco
         if bloco is None:
             return
@@ -2456,7 +2726,14 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 self._scroll_para_fim()
         self._agendar_salvamento()
 
-    def _anexar_texto_ativo(self, texto):
+    def _anexar_texto_ativo(self, texto, info=None):
+        if info:
+            info["ativo_texto"] = (info.get("ativo_texto") or "") + texto
+            if info.get("ativo_registro") is not None:
+                info["ativo_registro"]["texto"] = info["ativo_texto"]
+        cid = info.get("cid") if info else self.conversa_id
+        if cid and cid != self.conversa_id:
+            return
         self.ativo_texto += texto
         # Markdown durante a resposta: atualiza a mensagem a cada ~120 ms. Só o
         # último bloco muda (MensagemView), então o custo não cresce com o tamanho.
@@ -2540,26 +2817,44 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         if self.gravador and self.gravador.gravando:
             self.gravador.cancelar()
             self._ditado_ui("parado")
-        if not self._rodando():
+        cid = self.conversa_id
+        info = self.execucoes.get(cid) if cid else None
+        if not self._rodando(cid):
             return
-        self._encerrar_execucao()
+        if info:
+            proc = info.get("proc")
+            if proc is not None:
+                info["proc"] = None
+                threading.Thread(target=self._encerrar_proc, args=(proc,), daemon=True).start()
+            info["interrompido"] = True
+        else:
+            self._encerrar_execucao()
         self.interrompido = True
-        self._finalizar_resposta(interrompida=True)
+        self._finalizar_resposta(interrompida=True, info=info)
         self._devolver_fila()
 
-    def _finalizar_resposta(self, interrompida=False, notificar=True, motivo=None):
-        if self.finalizado:
-            return
-        self.finalizado = True
-        if self.render_fonte:
-            GLib.source_remove(self.render_fonte)
-            self.render_fonte = 0
-        self._cancelar_perguntas()
-        self._concluir_status_ativo(interrompida)
+    def _finalizar_resposta(self, interrompida=False, notificar=True, motivo=None, info=None):
+        if info is None and self.conversa_id:
+            info = self.execucoes.get(self.conversa_id)
+        cid = info.get("cid") if info else self.conversa_id
+        eh_visivel = bool(not cid or cid == self.conversa_id)
+
+        if info:
+            info["finalizado"] = True
+        if eh_visivel or not info:
+            if self.finalizado and not info:
+                return
+            self.finalizado = True
+            if self.render_fonte:
+                GLib.source_remove(self.render_fonte)
+                self.render_fonte = 0
+            self._cancelar_perguntas()
+            self._concluir_status_ativo(interrompida)
 
         tempo_fmt = None
-        if self.inicio_agente > 0:
-            duracao = time.time() - self.inicio_agente
+        inicio = info.get("inicio_agente", 0.0) if info else self.inicio_agente
+        if inicio > 0:
+            duracao = time.time() - inicio
             if duracao >= 60:
                 tempo_fmt = f"{int(duracao // 60)}m {int(duracao % 60)}s"
             elif duracao >= 1.0:
@@ -2567,7 +2862,7 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
             else:
                 tempo_fmt = "< 1s"
 
-        parser = self.ativo_parser
+        parser = info.get("parser") if info else self.ativo_parser
         uso = dict(parser.uso) if parser is not None and parser.uso else {}
         if parser is not None and parser.uso_tarefas:
             uso["subagentes"] = sum(parser.uso_tarefas.values())
@@ -2575,11 +2870,8 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
         extra = formatar_uso(uso)
         if extra:
             rotulo = f"{rotulo} · {extra}" if rotulo else extra
-        if self.ativo_duracao_lbl and rotulo:
-            self.ativo_duracao_lbl.set_label(rotulo)
-            self.ativo_duracao_lbl.set_visible(True)
 
-        texto = self.ativo_texto
+        texto = (info.get("ativo_texto") if info else self.ativo_texto) or ""
         if not texto.strip():
             if parser is not None and parser.last_response:
                 texto = parser.last_response
@@ -2587,47 +2879,78 @@ class MainWindow(CentralMixin, HistoricoMixin, MarkdownMixin, BuscaMixin, Painel
                 texto = _t("(Concluído sem texto adicional)")
         if interrompida:
             texto = texto.rstrip() + ("\n\n" if texto.strip() else "") + f"_⏹ {motivo or _t('Interrompido pelo usuário')}_"
-        self.ativo_texto = texto
 
-        if self.ativo_registro is not None:
-            self.ativo_registro["texto"] = texto
+        if info:
+            info["ativo_texto"] = texto
+        if eh_visivel or not info:
+            self.ativo_texto = texto
+
+        reg = info.get("ativo_registro") if info else self.ativo_registro
+        if reg is not None:
+            reg["texto"] = texto
             if tempo_fmt:
-                self.ativo_registro["duracao"] = tempo_fmt
+                reg["duracao"] = tempo_fmt
             if uso:
-                self.ativo_registro["uso"] = uso
+                reg["uso"] = uso
+            if parser is not None and parser.contexto:
+                reg["contexto"] = parser.contexto
             if interrompida:
-                self.ativo_registro["interrompida"] = True
-        if self.ativo_mensagem is not None:
-            if self.ativo_trechos and not texto.startswith(self.ativo_prefixo):
-                # texto trocado por inteiro (erro): mostra tudo num trecho só
-                for t in self.ativo_trechos:
-                    t.set_visible(False)
-                self.ativo_prefixo = ""
-            self.ativo_mensagem.definir(self._texto_do_trecho(texto))
-            self.ativo_mensagem.concluir(recolher=self.seguir_fim)
-            self.ativo_renderizado = True
+                reg["interrompida"] = True
 
-        if notificar and not interrompida and not self.is_active():
-            nome = M.AGENTES.get(self.agente_atual, {}).get("nome", _t("Agente de IA"))
-            self._notificar_conclusao(nome)
+        if eh_visivel or not info:
+            if self.ativo_duracao_lbl and rotulo:
+                self.ativo_duracao_lbl.set_label(rotulo)
+                self.ativo_duracao_lbl.set_visible(True)
+            if self.ativo_mensagem is not None:
+                if self.ativo_trechos and not texto.startswith(self.ativo_prefixo):
+                    # texto trocado por inteiro (erro): mostra tudo num trecho só
+                    for t in self.ativo_trechos:
+                        t.set_visible(False)
+                    self.ativo_prefixo = ""
+                self.ativo_mensagem.definir(self._texto_do_trecho(texto))
+                self.ativo_mensagem.concluir(recolher=self.seguir_fim)
+                self.ativo_renderizado = True
 
-        card = getattr(self, "ativo_card", None)
-        if card is not None:
-            card.texto_total = texto
-            card.remove_css_class("ativo")
-            card.acoes.set_visible(True)
-            if self.ativo_bloco is not None:
-                card.atualizar_acoes(self.ativo_bloco.passos)
+            card = getattr(self, "ativo_card", None)
+            if card is not None:
+                card.texto_total = texto
+                card.remove_css_class("ativo")
+                card.acoes.set_visible(True)
+                if self.ativo_bloco is not None:
+                    card.atualizar_acoes(self.ativo_bloco.passos)
 
-        self.proc = None
-        self._salvar_conversa()
-        self._pedir_titulo_ia()
+            if reg and reg.get("contexto") and hasattr(self, "detalhes"):
+                self.detalhes.contexto(
+                    reg["contexto"],
+                    detalhes.janela_contexto(info.get("agente") if info else self.agente_atual, reg.get("modelo"))
+                )
+
+            self.proc = None
+            self.btn_historico.set_sensitive(True)
+            self.btn_parar.set_visible(False)
+            self.btn_enviar.set_visible(True)
+            self._focar_composer()
+            self._scroll_para_fim()
+
+        agente_nome = (info.get("agente") if info else self.agente_atual) or _t("Agente de IA")
+        nome = M.AGENTES.get(agente_nome, {}).get("nome", agente_nome)
+        if notificar and not interrompida:
+            if not self.is_active() or not eh_visivel:
+                self._notificar_conclusao(nome)
+
+        if info:
+            self._salvar_execucao(info)
+            self._pedir_titulo_ia_cid(info.get("cid"), info.get("conversa_mensagens"))
+        else:
+            self._salvar_conversa()
+            self._pedir_titulo_ia()
+
+        if cid:
+            if hasattr(self, "barra"):
+                self.barra.definir_rodando(cid, False)
+            self.execucoes.pop(cid, None)
+
         self._atualizar_uso_ui()
-        self.btn_historico.set_sensitive(True)
-        self.btn_parar.set_visible(False)
-        self.btn_enviar.set_visible(True)
-        self._focar_composer()
-        self._scroll_para_fim()
 
     def _focar_composer(self):
         """Volta o foco para a caixa de texto, sem roubar de quem está digitando em outro lugar."""

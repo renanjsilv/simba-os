@@ -118,15 +118,20 @@ class HistoricoMixin:
             self._conversas_mudaram()
         return False
 
+    def _pedir_titulo_ia_cid(self, cid, mensagens):
+        if not cid or self._titulos_ia().get(cid):
+            return
+        if not any(m.get("tipo") == "assistant" and str(m.get("texto") or "").strip()
+                   for m in mensagens or []):
+            return
+        self._fila_titulos(cid, [dict(m) for m in mensagens], prioridade=True)
+
     def _pedir_titulo_ia(self):
         """Depois de uma resposta: resume o assunto, se a conversa ainda não tem título."""
         cid = self.conversa_id
         if not cid or getattr(self, "conversa_titulo_manual", None) or self._titulos_ia().get(cid):
             return
-        if not any(m.get("tipo") == "assistant" and str(m.get("texto") or "").strip()
-                   for m in self.conversa_mensagens):
-            return
-        self._fila_titulos(cid, [dict(m) for m in self.conversa_mensagens], prioridade=True)
+        self._pedir_titulo_ia_cid(cid, self.conversa_mensagens)
 
     def _titulos_antigos(self, limite=40):
         """As conversas recentes ainda sem título resumido entram na fila (uma por vez)."""
@@ -200,6 +205,59 @@ class HistoricoMixin:
             if hasattr(self, "_conversas_mudaram"):
                 self._conversas_mudaram()
 
+    def _salvar_execucao(self, info):
+        cid = info.get("cid")
+        if not cid:
+            return
+        mensagens = info.get("conversa_mensagens") or []
+        if not any(m.get("tipo") == "user" for m in mensagens):
+            return
+        reg = info.get("ativo_registro")
+        if reg is not None:
+            parser = info.get("parser")
+            if parser and parser.texto:
+                reg["texto"] = parser.texto
+            if parser and parser.contexto:
+                reg["contexto"] = parser.contexto
+        titulo = info.get("titulo")
+        if not titulo:
+            if info.get("titulo_manual"):
+                titulo = info["titulo_manual"]
+            else:
+                titulo = self._titulos_ia().get(cid)
+            if not titulo:
+                for msg in mensagens:
+                    if msg.get("tipo") == "user":
+                        texto = " ".join(str(msg.get("texto", "")).split())
+                        if texto:
+                            titulo = texto[:38] + ("…" if len(texto) > 38 else "")
+                            break
+            if not titulo:
+                titulo = _t("Nova conversa")
+        dados = {
+            "id": cid,
+            "titulo": titulo,
+            "titulo_manual": bool(info.get("titulo_manual")),
+            **({"titulo_ia": titulo, "titulo_ia_v": TIT.VERSAO}
+               if self._titulos_ia().get(cid) == titulo else {}),
+            "criada": info.get("criada") or time.time(),
+            "atualizada": time.time(),
+            "pasta": str(info.get("work_dir") or self.work_dir),
+            "sessoes": dict(info.get("sessoes") or {}),
+            "mensagens": mensagens,
+        }
+        try:
+            CONVERSAS.mkdir(parents=True, exist_ok=True, mode=0o700)
+            destino = CONVERSAS / f"{cid}.json"
+            temporario = destino.with_suffix(".json.tmp")
+            temporario.write_text(json.dumps(dados, ensure_ascii=False), encoding="utf-8")
+            os.chmod(temporario, 0o600)
+            os.replace(temporario, destino)
+        except OSError:
+            pass
+        if hasattr(self, "_conversas_mudaram"):
+            self._conversas_mudaram()
+
     def _agendar_salvamento(self, atraso=1200):
         if self.salvar_fonte:
             try:
@@ -214,6 +272,16 @@ class HistoricoMixin:
         return False
 
     def _ao_fechar(self, *_args):
+        if hasattr(self, "execucoes"):
+            for info in list(self.execucoes.values()):
+                proc = info.get("proc")
+                if proc is not None:
+                    info["proc"] = None
+                    try:
+                        self._encerrar_proc(proc)
+                    except Exception:
+                        pass
+                self._salvar_execucao(info)
         self._salvar_conversa()
         return False
 
@@ -251,8 +319,6 @@ class HistoricoMixin:
         return dt.strftime("%d/%m/%Y, %H:%M")
 
     def _abrir_historico(self):
-        if self._rodando():
-            return
         if self.historico_dialog:
             try:
                 self.historico_dialog.close()
@@ -498,12 +564,11 @@ class HistoricoMixin:
         alerta.present(dialog or self)
 
     def _carregar_conversa(self, dados, dialog):
-        if self._rodando():
-            return
-        try:
-            dialog.close()
-        except Exception:
-            pass
+        if dialog:
+            try:
+                dialog.close()
+            except Exception:
+                pass
         self.historico_dialog = None
 
         mensagens = dados.get("mensagens")
@@ -588,6 +653,14 @@ class HistoricoMixin:
                         if m.get("tipo") == "assistant" and m.get("contexto")), None)
             if reg is not None:
                 self.detalhes.contexto(reg["contexto"], detalhes.janela_contexto(reg.get("agente"), reg.get("modelo")))
+            else:
+                ultimo_ast = next((m for m in reversed(self.conversa_mensagens) if m.get("tipo") == "assistant"), None)
+                if ultimo_ast is not None:
+                    toks = sum(len(str(m.get("texto") or "")) for m in self.conversa_mensagens) // 4
+                    self.detalhes.contexto(toks if toks > 0 else None,
+                                           detalhes.janela_contexto(ultimo_ast.get("agente"), ultimo_ast.get("modelo")))
+                else:
+                    self.detalhes.contexto(None, None)
             self._atualizar_detalhes_ambiente()
         if hasattr(self, "barra"):
             self.barra.marcar_atual(self.conversa_id)

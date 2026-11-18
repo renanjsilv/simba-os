@@ -208,5 +208,55 @@ class Descricao(unittest.TestCase):
         self.assertEqual(r.get("arquivo"), "/home/usuario/foto.jpg")
 
 
+class Antigravity(unittest.TestCase):
+    def test_contexto_e_uso(self):
+        import detalhes
+        metas = []
+        p = AgentStreamParser(lambda s: None, lambda t: None, lambda d: None,
+                              agente="agy", on_meta=metas.append)
+        p.feed('{"event":"step_update","step_update":{"step_type":"tool","tool_name":"run_command","state":"ACTIVE","usage":{"input_tokens":1200,"cache_read_tokens":400,"output_tokens":80}}}\n')
+        self.assertEqual(p.contexto, 1600)
+        self.assertEqual(p.uso.get("entrada"), 1600)
+        self.assertEqual(p.uso.get("saida"), 80)
+        self.assertTrue(any(m.get("contexto") == 1600 for m in metas))
+
+        # Evento result
+        p.feed('{"event":"result","result":{"response":"Concluído","usage":{"input_tokens":2000,"cache_read_tokens":500,"output_tokens":120}}}\n')
+        self.assertEqual(p.contexto, 2500)
+        self.assertEqual(detalhes.janela_contexto("agy", "gemini-2.5-pro"), 1_000_000)
+        self.assertEqual(detalhes.janela_contexto("antigravity", None), 1_000_000)
+
+
+class ConversasConcorrentes(unittest.TestCase):
+    def test_barra_conversas_girador(self):
+        import conversas
+        barra = conversas.BarraConversas(
+            listar=lambda: [{"id": "c1", "titulo": "Chat 1", "atualizada": 1000},
+                            {"id": "c2", "titulo": "Chat 2", "atualizada": 2000}],
+            abrir=lambda d: None, nova=lambda: None,
+            renomear=lambda d: None, apagar=lambda d: None, quando=lambda e: "Hoje"
+        )
+        barra._lidas(barra.listar())
+        self.assertNotIn("c1", barra.rodando)
+        barra.definir_rodando("c1", True)
+        self.assertIn("c1", barra.rodando)
+
+        linha = barra.lista.get_first_child()
+        while linha:
+            if getattr(linha, "dados", None) and linha.dados.get("id") == "c1":
+                self.assertTrue(linha.girador.get_visible())
+            elif getattr(linha, "dados", None) and linha.dados.get("id") == "c2":
+                self.assertFalse(linha.girador.get_visible())
+            linha = linha.get_next_sibling()
+
+        barra.definir_rodando("c1", False)
+        self.assertNotIn("c1", barra.rodando)
+        linha = barra.lista.get_first_child()
+        while linha:
+            if getattr(linha, "dados", None) and linha.dados.get("id") == "c1":
+                self.assertFalse(linha.girador.get_visible())
+            linha = linha.get_next_sibling()
+
+
 if __name__ == "__main__":
     unittest.main()

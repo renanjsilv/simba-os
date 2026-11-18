@@ -521,7 +521,6 @@ CSS += """
   border: 1px solid alpha(@window_fg_color, 0.10);
   background-color: alpha(@window_fg_color, 0.025);
   padding: 6px 8px 6px 6px;
-  overflow: hidden;
 }
 .passo-cartao scrolledwindow, .passo-saida scrolledwindow {
   background: transparent;
@@ -934,6 +933,10 @@ row.barra-conversa:selected .barra-conversa-avatar {
   font-weight: 500;
   font-feature-settings: "tnum";
   color: alpha(@window_fg_color, 0.46);
+}
+.barra-conversa-girador {
+  color: @accent_bg_color;
+  margin-right: 2px;
 }
 row.barra-conversa:selected .barra-conversa-titulo { color: @window_fg_color; font-weight: 600; }
 row.barra-conversa:selected .barra-conversa-sub { color: alpha(@window_fg_color, 0.68); }

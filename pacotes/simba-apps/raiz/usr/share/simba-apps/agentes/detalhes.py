@@ -35,7 +35,7 @@ def janela_contexto(agente, modelo):
     m = str(modelo or "").lower()
     if "[1m]" in m or m.endswith("-1m"):
         return 1_000_000
-    if "gemini" in m or agente == "gemini":
+    if "gemini" in m or agente in ("gemini", "agy", "antigravity"):
         return 1_000_000
     if agente == "claude" or "claude" in m or m in ("opus", "sonnet", "haiku", "fable"):
         return 200_000

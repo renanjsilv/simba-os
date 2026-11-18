@@ -14,10 +14,10 @@ nome="simba-$variante"
 mkdir -p "$saida"
 rm -f "$saida"/*
 
-# símbolo do Simba OS (vai junto do gerador; recolorido para a variante)
-LOGO_SVG="$BASE/simba-simbolo.svg"   # cópia avulsa (pacote da marca)
-[ -f "$LOGO_SVG" ] || LOGO_SVG="$BASE/../simba-simbolo.svg"
-[ -f "$LOGO_SVG" ] || LOGO_SVG=/usr/share/simba/icon.png
+# retrato do Simba OS em pixel art (vai junto do gerador; ampliado sem suavizar)
+PIX="$BASE/marca-pixel"                       # cópia avulsa (pacote da marca)
+[ -f "$PIX/retrato-288.png" ] || PIX="$BASE/../marca-pixel"
+[ -f "$PIX/retrato-288.png" ] || PIX=/usr/share/simba-apps/marca-pixel
 L=1280 A=720   # fundo (o Plymouth escala para a tela)
 
 # cor → "r, g, b" em 0..1 para o script
@@ -47,15 +47,23 @@ esac
 # Logo (símbolo do Simba recolorido), 150 px de altura em 1080p
 if [ "$variante" = marca ]; then
   # logo da marca como está (o tema mostra pela metade: 600 px → 300 px em 1080p)
-  magick "$MARCA_LOGO" -trim +repage -resize 600x480 -strip "PNG32:$saida/logo.png"
+  if [ "${MARCA_PIXEL:-0}" = 1 ]; then   # pixel art: só reduz se precisar, sem suavizar
+    magick "$MARCA_LOGO" -trim +repage -filter point -resize '600x480>' -strip "PNG32:$saida/logo.png"
+  else
+    magick "$MARCA_LOGO" -trim +repage -resize 600x480 -strip "PNG32:$saida/logo.png"
+  fi
 else
-  magick -background none -density 600 "$LOGO_SVG" -trim +repage -resize 300x300 -fill "$logo" -colorize 100 -strip "PNG32:$saida/logo.png"
+  cp "$PIX/retrato-288.png" "$saida/logo.png"
 fi
 # Abertura do boot: o mesmo logo em 4× (1200 px), que encolhe até o tamanho do logo.png
 if [ "$variante" = marca ]; then
-  magick "$MARCA_LOGO" -trim +repage -resize 2400x1920 -strip "PNG32:$saida/logo-grande.png"
+  if [ "${MARCA_PIXEL:-0}" = 1 ]; then
+    magick "$MARCA_LOGO" -trim +repage -scale 400% -strip "PNG32:$saida/logo-grande.png"
+  else
+    magick "$MARCA_LOGO" -trim +repage -resize 2400x1920 -strip "PNG32:$saida/logo-grande.png"
+  fi
 else
-  magick -background none -density 2400 "$LOGO_SVG" -trim +repage -resize 1200x1200 -fill "$logo" -colorize 100 -strip "PNG32:$saida/logo-grande.png"
+  cp "$PIX/retrato-1152.png" "$saida/logo-grande.png"
 fi
 # Ponto do anel (desenhado grande e reduzido = borda suave)
 magick -size 64x64 xc:none -fill "$ponto" -draw "circle 32,32 32,2" -resize 16x16 -strip "PNG32:$saida/ponto.png"

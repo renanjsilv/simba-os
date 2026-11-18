@@ -161,7 +161,7 @@ Item {
       color: Qt.rgba(1, 1, 1, 0.14)
       border.width: 2
       border.color: Qt.rgba(1, 1, 1, 0.35)
-      SimbaSimbolo { anchors.centerIn: parent; width: 70; height: 70; cor: "white" }
+      SimbaSimbolo { anchors.centerIn: parent; width: 72; height: 72 }
     }
     // nome de quem está usando, entre o avatar e a senha
     Text {
@@ -180,7 +180,7 @@ Item {
       anchors { right: parent.right; bottom: parent.bottom; rightMargin: Math.round(parent.width * 0.035); bottomMargin: Math.round(parent.height * 0.06) + 6 }
       spacing: 8
       opacity: 0.75
-      SimbaSimbolo { width: 20; height: 20; cor: "white"; anchors.verticalCenter: parent.verticalCenter }
+      SimbaSimbolo { width: 24; height: 24; anchors.verticalCenter: parent.verticalCenter }
       Text { text: I18n.t("Simba OS"); color: "white"; font.family: "Adwaita Sans"; font.pixelSize: 14; font.weight: Font.DemiBold; anchors.verticalCenter: parent.verticalCenter }
     }
 

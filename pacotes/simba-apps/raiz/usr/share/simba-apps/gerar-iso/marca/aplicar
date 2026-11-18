@@ -52,7 +52,7 @@ if [ -x "$pac/temas-boot/gerar" ]; then
   gerador=/usr/local/share/marca/temas-boot
 fi
 if [ -x "$T$gerador/gerar" ]; then
-  arch-chroot "$T" env MARCA_LOGO=/usr/local/share/marca/logo-nome.png MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" \
+  arch-chroot "$T" env MARCA_LOGO=/usr/local/share/marca/logo-nome.png MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" MARCA_PIXEL="$([ "${ESTILO:-}" = pixel ] && echo 1 || echo 0)" \
     "$gerador/gerar" marca /usr/share/plymouth/themes/simba-marca >/dev/null
 fi
 # nome no menu de boot (Limine)

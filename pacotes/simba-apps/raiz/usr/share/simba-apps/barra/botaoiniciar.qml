@@ -1,5 +1,4 @@
 import QtQuick 6.11
-import QtQuick.Shapes
 import QtQuick.Window
 import Quickshell
 import qs.Commons
@@ -29,28 +28,20 @@ Item {
     opacity: area.pressed ? 0.16 : (area.containsMouse ? 0.09 : 0)
     Behavior on opacity { NumberAnimation { duration: 100 } }
   }
-  // Símbolo do Simba OS (/usr/share/simba-apps/simba-simbolo.svg) em vetor, na cor do tema
+  // Retrato do Simba OS em pixel art (/usr/share/simba-apps/marca-pixel)
   Item {
     id: simbolo
     anchors.centerIn: parent
-    readonly property real lado: Math.round(root.barSize * 0.62)
+    readonly property real lado: Math.round(root.barSize * 0.74)
     width: lado; height: lado
     scale: area.pressed ? 0.85 : (area.containsMouse ? 1.06 : 1)
     Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-    Shape {
-      width: 100; height: 100
-      transform: Scale { xScale: simbolo.lado / 100; yScale: simbolo.lado / 100 }
-      preferredRendererType: Shape.CurveRenderer
-      ShapePath {
-        fillColor: root.fg
-        strokeWidth: -1
-        fillRule: ShapePath.OddEvenFill
-        PathSvg {
-          path: "M50 92C27 92 12 78 12 58C12 47 15 38 19.5 30.5L17 9.5C16.8 7.6 18.7 6.4 20.3 7.4L37.5 19.6C41.5 18.6 45.7 18 50 18C54.3 18 58.5 18.6 62.5 19.6L79.7 7.4C81.3 6.4 83.2 7.6 83 9.5L80.5 30.5C85 38 88 47 88 58C88 78 73 92 50 92Z "
-              + "M26.5 54C31 50.2 38.5 50.4 43.5 56.5C39.5 62.5 31.5 62.8 26.5 54Z M73.5 54C69 50.2 61.5 50.4 56.5 56.5C60.5 62.5 68.5 62.8 73.5 54Z "
-              + "M46.8 70H53.2C54.2 70 54.6 71.1 53.9 71.8L50.8 74.6C50.3 75 49.7 75 49.2 74.6L46.1 71.8C45.4 71.1 45.8 70 46.8 70Z"
-        }
-      }
+    Image {
+      anchors.fill: parent
+      source: "file:///usr/share/simba-apps/marca-pixel/retrato-144.png"
+      fillMode: Image.PreserveAspectFit
+      smooth: true
+      mipmap: true
     }
   }
   // Lei de Fitts: o clique vale até o canto da tela (como no Windows). A área

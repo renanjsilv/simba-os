@@ -5,6 +5,8 @@
 #   tinta (padrão) · retrato · gravura · selo   → fundo escuro
 #   tinta-claro · lapis · caricatura            → fundo claro
 #   caricatura-escura                           → fundo escuro
+#   pixel (padrão do Simba OS)                  → fundo escuro, retrato em pixel art
+#                                                 (/usr/share/simba-apps/marca-pixel)
 # Saída: logo.png, logo-nome.png (tela de inicialização), papel-de-parede.png,
 #        icone.png (botão Iniciar), marca.env
 set -euo pipefail
@@ -21,13 +23,28 @@ case $estilo in
   lapis)       cab=lapis.png    claro=1 ;;
   caricatura)  cab=carc-claro.png  claro=1 ;;
   caricatura-escura) cab=carc-escuro.png claro=0 ;;
+  pixel)       cab=/usr/share/simba-apps/marca-pixel/retrato-1152.png claro=0 ;;
   *) echo "estilo desconhecido: $estilo" >&2; exit 2 ;;
 esac
 if [ "$claro" = 1 ]; then tinta='#111111' fundo='#f4f4f2' fundo2='#d9d9d6'; else tinta='#ffffff' fundo='#000000' fundo2='#000000'; fi
 NOME_MAIUSC=$(printf '%s' "$nome" | tr '[:lower:]' '[:upper:]')
 NOME_XML=$(printf '%s' "$NOME_MAIUSC" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
 
-magick "$OP/$cab" -trim +repage -resize 1024x1024 "PNG32:$out/logo.png"
+PIX=/usr/share/simba-apps/marca-pixel
+# outro nome que não "Simba OS": o retrato com o nome escrito na fonte normal (caminho de baixo)
+if [ "$estilo" = pixel ] && [ "$NOME_MAIUSC" = "SIMBA OS" ]; then
+  # tudo em múltiplos exatos dos pixels do desenho (ampliar com -scale, nunca suavizar)
+  cp "$PIX/retrato-1152.png" "$out/logo.png"
+  magick "$PIX/assinatura-escuro-1x.png" -scale 600% "PNG32:$out/logo-nome.png"
+  magick "$PIX/assinatura-escuro-1x.png" -scale 400% "PNG32:$out/nome.png"
+  magick -size 2560x1440 radial-gradient:'#1c1c1e'-'#050505' \
+    \( "$PIX/retrato.png" -scale 3200% -channel A -evaluate multiply 0.10 +channel \) -gravity center -geometry +560+40 -composite \
+    \( "$out/nome.png" -channel A -evaluate multiply 0.60 +channel \) -gravity southwest -geometry +120+110 -composite \
+    -strip "$out/papel-de-parede.png"
+  cp "$PIX/icone-256.png" "$out/icone.png"
+else
+case $cab in /*) ;; *) cab="$OP/$cab" ;; esac
+magick "$cab" -trim +repage -resize 1024x1024 "PNG32:$out/logo.png"
 magick -background none pango:"<span foreground='$tinta' font_desc='Adwaita Sans Heavy 70' letter_spacing='22000'>$NOME_XML</span>" \
   -trim +repage "$out/nome.png"
 # logo + nome (transparente), proporção da prévia aprovada
@@ -41,11 +58,19 @@ magick -size 2560x1440 radial-gradient:"$fundo"-"$fundo2" \
   \( "$out/nome.png" -resize 400x -channel A -evaluate multiply 0.55 +channel \) -gravity southwest -geometry +120+110 -composite \
   -strip "$out/papel-de-parede.png"
 magick "$out/logo.png" -resize 256x256 "PNG32:$out/icone.png"
+fi
 # gerador da tela de inicialização (vai junto: o do sistema clonado pode ser mais antigo)
 install -d "$out/temas-boot"
 install -m755 /usr/share/simba-apps/temas-boot/gerar "$out/temas-boot/gerar"
 install -m644 /usr/share/simba-apps/temas-boot/tema.script "$out/temas-boot/tema.script"
 install -m644 /usr/share/simba-apps/simba-simbolo.svg "$out/temas-boot/simba-simbolo.svg"
+cp -r "$PIX" "$out/temas-boot/marca-pixel"
+
+# mini game do instalador (corre em paralelo com o progresso no pendrive)
+DIR_GERAR="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$DIR_GERAR/simba-jogo-telhados" ]; then
+  install -m755 "$DIR_GERAR/simba-jogo-telhados" "$out/jogo"
+fi
 rm -f "$out/cab.tmp.png"
 cat > "$out/marca.env" <<ENV
 NOME='${nome//\'/}'

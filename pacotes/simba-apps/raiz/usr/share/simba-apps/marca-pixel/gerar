@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Gera todos os arquivos da marca do Simba OS em pixel art a partir dos mapas desenhados à mão.
+
+  gerar <pasta-de-saída>
+
+Fontes (nesta pasta): retrato.txt (o gato, opção A), mini.txt (16 px, console),
+cabecinha.txt (9 px). O letreiro "SIMBA OS" é desenhado aqui mesmo (LETRAS), na mesma
+grade de pixels do gato, para a assinatura (opção E) ficar com pixels do mesmo tamanho.
+
+Saída (sempre ampliado por vizinho mais próximo — nada de borrão):
+  retrato.png                 1 px por pixel (36×36, fundo transparente)
+  retrato-<N>.png             N = 72 144 288 576 1152 (múltiplos exatos)
+  icone-<N>.png               selo claro arredondado com o gato (ícone do sistema)
+  assinatura-claro.png        gato + SIMBA OS em preto (fundo transparente), 8×
+  assinatura-escuro.png       gato + SIMBA OS em branco, 8×
+  assinatura-<claro|escuro>-<N>x.png   N = 1 2 4 16
+  mini.png · cabecinha.png    1 px por pixel
+  mini-selo.txt               o mini num selo claro, em letras (console do instalador)
+  retrato.svg                 o retrato em vetor (um retângulo por pixel)
+  logo.txt                    o retrato em blocos (█▓░) para terminais
+Só depende de Python e do ImageMagick (magick).
+"""
+import os, subprocess, sys
+
+AQUI = os.path.dirname(os.path.abspath(__file__))
+COR = {"K": (16, 16, 16), "D": (70, 70, 72), "G": (150, 150, 152),
+       "L": (200, 200, 202), "W": (245, 245, 245)}
+SELO, SELO_BORDA = (234, 234, 232), (200, 200, 198)
+TEXTO = {"claro": (16, 16, 16), "escuro": (245, 245, 245)}
+
+LETRAS = {
+    "S": [".#####", "##....", "##....", ".####.", "....##", "....##", "#####."],
+    "I": ["######", "..##..", "..##..", "..##..", "..##..", "..##..", "######"],
+    "M": ["##...##", "###.###", "##.#.##", "##.#.##", "##...##", "##...##", "##...##"],
+    "B": ["#####.", "##..##", "##..##", "#####.", "##..##", "##..##", "#####."],
+    "A": [".####.", "##..##", "##..##", "######", "##..##", "##..##", "##..##"],
+    "O": [".####.", "##..##", "##..##", "##..##", "##..##", "##..##", ".####."],
+    " ": ["...", "...", "...", "...", "...", "...", "..."],
+}
+
+
+def mapa(nome):
+    linhas = [l.rstrip("\n") for l in open(os.path.join(AQUI, nome)) if not l.startswith("#")]
+    linhas = [l for l in linhas if l.strip()]
+    # tira linhas e colunas vazias das bordas
+    while linhas and set(linhas[0]) <= {"."}: linhas.pop(0)
+    while linhas and set(linhas[-1]) <= {"."}: linhas.pop()
+    w = max(map(len, linhas)); linhas = [l.ljust(w, ".") for l in linhas]
+    while all(l[0] == "." for l in linhas): linhas = [l[1:] for l in linhas]
+    while all(l[-1] == "." for l in linhas): linhas = [l[:-1] for l in linhas]
+    return linhas
+
+
+class Img:
+    def __init__(s, w, h):
+        s.w, s.h = w, h; s.px = [[None] * w for _ in range(h)]
+
+    def por(s, linhas, x, y, cores=COR):
+        for j, l in enumerate(linhas):
+            for i, c in enumerate(l):
+                if c in cores and 0 <= x + i < s.w and 0 <= y + j < s.h:
+                    s.px[y + j][x + i] = cores[c]
+
+    def salvar(s, caminho, esc=1):
+        dados = bytearray()
+        for linha in s.px:
+            for p in linha:
+                dados += bytes(p + (255,)) if p else b"\0\0\0\0"
+        subprocess.run(["magick", "-size", f"{s.w}x{s.h}", "-depth", "8", "rgba:-",
+                        "-scale", f"{esc * 100}%", "-strip", f"PNG32:{caminho}"],
+                       input=bytes(dados), check=True)
+
+
+def quadrado(linhas, lado=None):
+    h, w = len(linhas), len(linhas[0]); lado = lado or max(w, h)
+    im = Img(lado, lado); im.por(linhas, (lado - w) // 2, (lado - h) // 2)
+    return im
+
+
+def selo(linhas, margem=6, r=5):
+    """Gato num selo claro de cantos arredondados (degraus de pixel), como o ícone antigo."""
+    h, w = len(linhas), len(linhas[0]); lado = max(w, h) + margem
+    im = Img(lado, lado)
+    claro, borda = SELO, SELO_BORDA
+    for j in range(lado):
+        for i in range(lado):
+            dx = max(r - i, i - (lado - 1 - r), 0); dy = max(r - j, j - (lado - 1 - r), 0)
+            d2 = dx * dx + dy * dy
+            if d2 <= r * r: im.px[j][i] = claro
+            if (r - 1) ** 2 < d2 <= r * r or (dx == 0 and dy == 0 and (i in (0, lado - 1) or j in (0, lado - 1))):
+                im.px[j][i] = borda
+    im.por(linhas, (lado - w) // 2, (lado - h) // 2 + (1 if margem > 2 else 0))
+    return im
+
+
+def em_letras(im):
+    """Imagem → mapa de letras (para o console: logo-terminal e o jogo do instalador)."""
+    volta = {v: k for k, v in COR.items()}; volta[SELO] = "S"; volta[SELO_BORDA] = "B"
+    return "\n".join("".join(volta.get(p, ".") if p else "." for p in l) for l in im.px) + "\n"
+
+
+def letreiro(texto):
+    cols = []
+    for k, ch in enumerate(texto):
+        g = LETRAS[ch]
+        if k: cols.append(["."] * 7)
+        for i in range(len(g[0])): cols.append([g[j][i] for j in range(7)])
+    return ["".join(c[j] for c in cols) for j in range(7)]
+
+
+def assinatura(gato, tom):
+    txt = letreiro("SIMBA OS")
+    gh, gw = len(gato), len(gato[0]); tw = len(txt[0])
+    vao = 7
+    im = Img(gw + vao + tw, gh)
+    im.por(gato, 0, 0)
+    im.por(txt, gw + vao, (gh - 7) // 2 + 1, {"#": TEXTO[tom]})
+    return im
+
+
+def svg(linhas, cores=COR):
+    """Vetor nítido em qualquer tamanho: um retângulo por trecho de pixels da mesma cor."""
+    h, w = len(linhas), len(linhas[0]); lado = max(w, h); ox, oy = (lado - w) // 2, (lado - h) // 2
+    partes = []
+    for j, l in enumerate(linhas):
+        i = 0
+        while i < w:
+            c = l[i]; k = i
+            while k < w and l[k] == c: k += 1
+            if c in cores:
+                r, g, b = cores[c]
+                partes.append(f'<rect x="{i + ox}" y="{j + oy}" width="{k - i}" height="1" fill="#{r:02x}{g:02x}{b:02x}"/>')
+            i = k
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {lado} {lado}" shape-rendering="crispEdges">'
+            + "".join(partes) + "</svg>\n")
+
+
+def terminal(gato):
+    blocos = {"K": "██", "D": "██", "G": "▓▓", "L": "░░", "W": "░░", ".": "  "}
+    return "\n".join("".join(blocos[c] for c in l).rstrip() for l in gato) + "\n"
+
+
+def main():
+    out = sys.argv[1] if len(sys.argv) > 1 else "."
+    os.makedirs(out, exist_ok=True)
+    gato, mini, cab = mapa("retrato.txt"), mapa("mini.txt"), mapa("cabecinha.txt")
+    q = quadrado(gato)
+    q.salvar(f"{out}/retrato.png")
+    for n in (72, 144, 288, 576, 1152):
+        q.salvar(f"{out}/retrato-{n}.png", n // q.w)
+    s = selo(gato)
+    for n in (16, 22, 24, 32, 48, 64, 128, 256, 512, 1024):
+        k = max(1, n // s.w)
+        tmp = f"{out}/.icone.png"; s.salvar(tmp, k)
+        if n < s.w:   # tamanhos pequenos: o mini em vez do retrato reduzido
+            m = selo(mini) if n >= 22 else quadrado(mini)
+            m.salvar(tmp, max(1, n // m.w))
+        subprocess.run(["magick", tmp, "-background", "none", "-gravity", "center",
+                        "-extent", f"{n}x{n}", "-strip", f"PNG32:{out}/icone-{n}.png"], check=True)
+        os.remove(tmp)
+    for tom in ("claro", "escuro"):
+        a = assinatura(gato, tom)
+        a.salvar(f"{out}/assinatura-{tom}.png", 8)
+        for k in (1, 2, 4, 16):
+            a.salvar(f"{out}/assinatura-{tom}-{k}x.png", k)
+    quadrado(mini).salvar(f"{out}/mini.png")
+    quadrado(cab).salvar(f"{out}/cabecinha.png")
+    open(f"{out}/logo.txt", "w").write(terminal(gato))
+    open(f"{out}/retrato.svg", "w").write(svg(gato))
+    # mini no selo claro, para o console escuro do instalador (20×20, cabe em telas de 36 linhas)
+    open(f"{out}/mini-selo.txt", "w").write(
+        "# gerado por ./gerar — mini no selo (K D G L W = cores do retrato, S selo, B borda do selo)\n"
+        + em_letras(selo(mini, margem=2, r=3)))
+
+
+if __name__ == "__main__":
+    main()

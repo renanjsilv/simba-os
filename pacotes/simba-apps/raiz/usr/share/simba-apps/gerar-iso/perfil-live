@@ -70,7 +70,7 @@ done
 # ---------------------------------------------------------------- tela de inicialização
 sed -i 's/\bkms\b/kms plymouth/' "$A/etc/mkinitcpio.conf.d/archiso.conf"
 if [ -x /usr/share/simba-apps/temas-boot/gerar ]; then
-  MARCA_LOGO="$MARCA/logo-nome.png" MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" \
+  MARCA_LOGO="$MARCA/logo-nome.png" MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" MARCA_PIXEL="$([ "${ESTILO:-}" = pixel ] && echo 1 || echo 0)" \
     /usr/share/simba-apps/temas-boot/gerar marca "$A/usr/share/plymouth/themes/simba-marca" >/dev/null
   install -Dm644 /dev/stdin "$A/etc/plymouth/plymouthd.conf" <<EOF
 [Daemon]

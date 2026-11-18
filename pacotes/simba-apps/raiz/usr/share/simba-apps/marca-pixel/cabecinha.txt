@@ -1,0 +1,10 @@
+# Cabecinha 9 px (rodapé do instalador, jogo)
+K.......K
+KK.....KK
+KLKKKKKLK
+KGGGGGGGK
+KGKKGKKGK
+KGGGKGGGK
+.KWKKKWK.
+..KWWWK..
+...KKK...

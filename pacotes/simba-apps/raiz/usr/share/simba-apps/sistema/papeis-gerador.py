@@ -252,16 +252,16 @@ if quer("simba-patinhas"):
     salvar("simba-patinhas", img, 7)
 
 # ───────────────────────────────────────────── 8. Retrato do Simba (marca)
-RET = os.path.expanduser("~/.local/share/gerar-iso/marca/opcoes")
-for nome, arq, f1, f2, op in (("simba-retrato-escuro", "carc-escuro.png", "#202022", "#050505", 0.16),
-                              ("simba-retrato-claro", "carc-claro.png", "#f6f5f1", "#d9d8d3", 0.20)):
+PIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "marca-pixel", "retrato-1152.png")
+for nome, f1, f2, op in (("simba-retrato-escuro", "#202022", "#050505", 0.40),
+                         ("simba-retrato-claro", "#f6f5f1", "#d9d8d3", 0.45)):
     if not quer(nome):
         continue
     img = radial(f1, f2, 0.62, 0.48, 1.0, 1.3)
-    gato_img = Image.open(os.path.join(RET, arq)).convert("RGBA")
+    gato_img = Image.open(PIX).convert("RGBA")
     bb = gato_img.getbbox(); gato_img = gato_img.crop(bb)
-    alvo = 1650
-    gato_img = gato_img.resize((int(gato_img.width * alvo / gato_img.height), alvo), Image.LANCZOS)
+    alvo = 1296
+    gato_img = gato_img.resize((int(gato_img.width * alvo / gato_img.height), alvo), Image.NEAREST)
     cam = np.zeros((H, W, 4), np.float32)
     g = np.asarray(gato_img, np.float32) / 255
     x0, y0 = int(W * 0.63 - g.shape[1] / 2), int(H * 0.5 - g.shape[0] / 2)

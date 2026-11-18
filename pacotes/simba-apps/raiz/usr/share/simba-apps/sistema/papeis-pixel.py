@@ -341,21 +341,19 @@ if quer("pixel-retrato"):
     t = Tela()
     t.degrade(0, H, ["#0c0c0d", "#0a0a0b", "#080809", "#060607"])
     t.halo(430, 170, 10, 260, "#141416", 0.9)
-    arte = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "gerar-iso", "marca", "gato-pixel.txt")
+    arte = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "marca-pixel", "retrato.txt")
     linhas = [l.rstrip("\n") for l in open(arte) if l.strip() and not l.startswith("#")]
-    cores = {"D": "#0b0b0c", "G": "#3a3a3d", "W": "#6e6e72"}
-    s = 6
+    cores = {"K": "#0a0a0c", "D": "#18181b", "G": "#3c3c40", "L": "#727278", "W": "#c4c4ca"}
+    s = 5
     ox = 430 - len(linhas[0]) * s // 2
     oy = 170 - len(linhas) * s // 2
     for j, l in enumerate(linhas):
         for i, ch in enumerate(l):
             if ch in cores:
                 c = cores[ch]
-                if ch == "D" and l.count("D") > 0:
-                    c = "#1a1a1c" if (i + j) % 2 else "#141416"
                 t.rect(ox + i * s, oy + j * s, s, s, c)
                 if ch == "G":
-                    t.rect(ox + i * s, oy + j * s, s, 1, "#444448")
+                    t.rect(ox + i * s, oy + j * s, s, 1, "#48484e")
     # linhas de varredura sutis
     for y in range(0, H, 3):
         for x in range(W):

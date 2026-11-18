@@ -20,6 +20,8 @@ MARCA=$MEDIA/marca
 
 # ---------------------------------------------------------------- aparência
 # Paleta do console no tom da marca: 0 = fundo, 7 = texto, 8 = cinza, 15 = destaque.
+# Pixel art da marca e do jogo (cor de frente "██"): 2 preto · 4 cinza escuro · 9 cinza ·
+# 10 cinza claro · 11 branco · 12 selo · 13 fundo do jogo · 14 prédios (mesmos tons em claro e escuro).
 paleta() {
   [ -n "$SIMULAR" ] && [ "${TERM:-}" != linux ] && return 0
   local claro=0
@@ -28,14 +30,14 @@ paleta() {
   if [ "$claro" = 1 ]; then
     #   0   1   2   3   4   5   6   7    8   9  10  11  12  13  14  15
     printf '%s\n' \
-      "244,176,46,150,40,255,165,27,128,200,46,150,40,110,0,0" \
-      "244,40,125,100,80,255,165,27,128,50,125,100,80,60,120,0" \
-      "242,40,50,0,140,255,162,27,124,50,50,0,140,140,130,0" > "$f"
+      "244,176,16,150,70,255,165,27,128,150,200,245,234,42,60,0" \
+      "244,40,16,100,70,255,165,27,128,150,200,245,234,42,60,0" \
+      "242,40,16,0,72,255,162,27,124,152,202,245,232,44,62,0" > "$f"
   else
     printf '%s\n' \
-      "10,230,90,230,90,235,95,236,140,255,120,255,120,220,110,255" \
-      "10,90,200,190,150,235,95,236,140,120,230,220,180,150,220,255" \
-      "10,90,120,90,240,233,93,234,138,120,150,120,255,240,240,255" > "$f"
+      "10,230,16,230,70,235,95,236,140,150,200,245,234,42,60,255" \
+      "10,90,16,190,70,235,95,236,140,150,200,245,234,42,60,255" \
+      "10,90,16,90,72,233,93,234,138,152,202,245,232,44,62,255" > "$f"
   fi
   printf '\e%%G'                      # console em UTF-8 (os blocos do logo)
   kbd_mode -u 2>/dev/null || true
@@ -95,7 +97,7 @@ centro() {
 centro_bloco() {
   local l vis max=0 pad; local -a ls=()
   while IFS= read -r l; do
-    ls+=("$l"); vis=$(printf '%s' "$l" | sed 's/\x1b\[[0-9;]*m//g')
+    ls+=("$l"); vis=$(printf '%s' "$l" | sed 's/\x1b\[[0-9;]*m//g'); vis=${vis//█/X}   # █ = 1 coluna em qualquer locale
     if [ ${#vis} -gt $max ]; then max=${#vis}; fi
   done
   pad=$(( (COLS - max) / 2 )); if [ $pad -lt 0 ]; then pad=0; fi
@@ -294,23 +296,50 @@ tela_resumo() {
 # A barra é redesenhada a cada atualização (as porcentagens do unsquashfs chegam
 # várias vezes por segundo), com as últimas linhas do log embaixo.
 PCT=0 TXT=
+PROG_FILE=/tmp/simba-progresso
+JOGO_BIN=""
+JOGO_PID=""
+
 progresso() {
   PCT=$1; TXT=$2
-  local w cheio vazio barra ultimo
-  w=$(( COLS < 70 ? COLS - 10 : 60 )); cheio=$(( PCT * w / 100 ))
-  printf -v barra '%*s' "$cheio" ''; barra=${barra// /█}
-  printf -v vazio '%*s' $(( w - cheio )) ''
-  ultimo=$(tail -n 3 "$LOG" 2>/dev/null | tr -d '\r' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | cut -c1-$((COLS - 8)))
-  {
-    printf '\e[%d;1H\e[J' $((LOGO_LINHAS + 1))
-    printf '\n\e[1;37m%s\e[0;37m\n\n' "$(t "Instalando o $NOME_SISTEMA" "Installing $NOME_SISTEMA")" | centro
-    printf '%s\e[46m%s\e[40m  \e[1;37m%3d%%\e[0;37m\n\n' "$barra" "$vazio" "$PCT" | centro
-    printf '%s\n\n' "$TXT" | centro
-    printf '\e[1;30m%s\e[0;37m\n' "$ultimo" | centro
-  } >&4
+  printf '%d %s\n' "$PCT" "$TXT" > "$PROG_FILE" 2>/dev/null || true
+  if [ -z "$JOGO_PID" ] || ! kill -0 "$JOGO_PID" 2>/dev/null; then
+    local w cheio vazio barra ultimo
+    w=$(( COLS < 70 ? COLS - 10 : 60 )); cheio=$(( PCT * w / 100 ))
+    printf -v barra '%*s' "$cheio" ''; barra=${barra// /█}
+    printf -v vazio '%*s' $(( w - cheio )) ''
+    ultimo=$(tail -n 3 "$LOG" 2>/dev/null | tr -d '\r' | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' | cut -c1-$((COLS - 8)))
+    {
+      printf '\e[%d;1H\e[J' $((LOGO_LINHAS + 1))
+      printf '\n\e[1;37m%s\e[0;37m\n\n' "$(t "Instalando o $NOME_SISTEMA" "Installing $NOME_SISTEMA")" | centro
+      printf '%s\e[46m%s\e[40m  \e[1;37m%3d%%\e[0;37m\n\n' "$barra" "$vazio" "$PCT" | centro
+      printf '%s\n\n' "$TXT" | centro
+      printf '\e[1;30m%s\e[0;37m\n' "$ultimo" | centro
+    } >&4
+  fi
 }
-iniciar_desenho() { cabecalho "" grande; exec 4>&1; printf '\e[?25l'; }
-parar_desenho() { :; }
+iniciar_desenho() {
+  printf '0 %s\n' "$(t "Iniciando…" "Starting…")" > "$PROG_FILE"
+  # Acha o binário do mini game (na mídia da ISO, na marca ou relativo ao script)
+  for j in "$MARCA/jogo" "$MEDIA/jogo" "$(dirname "$(readlink -f "$0")")/simba-jogo-telhados" /usr/share/simba-apps/gerar-iso/simba-jogo-telhados; do
+    if [ -x "$j" ]; then JOGO_BIN="$j"; break; fi
+  done
+  if [ -n "$JOGO_BIN" ]; then
+    "$JOGO_BIN" "$PROG_FILE" & JOGO_PID=$!
+  else
+    cabecalho "" grande
+  fi
+  exec 4>&1
+  printf '\e[?25l'
+}
+parar_desenho() {
+  if [ -n "$JOGO_PID" ]; then
+    kill "$JOGO_PID" 2>/dev/null || true
+    wait "$JOGO_PID" 2>/dev/null || true
+    JOGO_PID=""
+  fi
+  printf '\e[?25h\e[0m'
+}
 
 # executa com a saída no log
 x() { "$@" >> "$LOG" 2>&1; local r=$?; [ -z "$TXT" ] || progresso "$PCT" "$TXT"; return $r; }

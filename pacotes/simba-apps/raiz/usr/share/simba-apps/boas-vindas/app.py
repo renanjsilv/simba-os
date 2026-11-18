@@ -353,7 +353,7 @@ class Janela(Adw.ApplicationWindow):
         return self.pagina(_t("Olá%1! Bem-vindo ao Simba OS", ', ' + nome if nome else ''),
                            _t("Rápido, bonito e feito para o seu dia a dia. Em menos de um minuto "
                            "mostramos o que dá para fazer por aqui."),
-                           self.mascote, tamanho=190)
+                           self.mascote, tamanho=180)
 
     def p_wifi(self):
         caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, width_request=440)
@@ -957,7 +957,7 @@ class Janela(Adw.ApplicationWindow):
           .link-acao:hover {{ color: {texto}; }}
           carouselindicatordots {{ color: {texto}; }}
         """)
-        self.mascote.set_from_file(os.path.join(AQUI, "img", "carc-escuro.png" if escuro else "carc-claro.png"))
+        self.mascote.set_from_file("/usr/share/simba-apps/marca-pixel/retrato-1152.png")  # retrato em pixel art (claro e escuro)
         for img, func in self.ilustracoes:
             img.set_from_paintable(textura_svg(func(texto, fundo, realce)))
         atual = tema_atual()

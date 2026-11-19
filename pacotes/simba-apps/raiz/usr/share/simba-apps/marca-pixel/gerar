@@ -3,8 +3,8 @@
 
   gerar <pasta-de-saída>
 
-Fontes (nesta pasta): retrato.txt (o gato, opção A), mini.txt (16 px, console),
-cabecinha.txt (9 px). O letreiro "SIMBA OS" é desenhado aqui mesmo (LETRAS), na mesma
+Fonte (nesta pasta): retrato.txt — o gato, opção A, o ÚNICO desenho do Simba.
+O letreiro "SIMBA OS" é desenhado aqui mesmo (LETRAS), na mesma
 grade de pixels do gato, para a assinatura (opção E) ficar com pixels do mesmo tamanho.
 
 Saída (sempre ampliado por vizinho mais próximo — nada de borrão):
@@ -14,8 +14,6 @@ Saída (sempre ampliado por vizinho mais próximo — nada de borrão):
   assinatura-claro.png        gato + SIMBA OS em preto (fundo transparente), 8×
   assinatura-escuro.png       gato + SIMBA OS em branco, 8×
   assinatura-<claro|escuro>-<N>x.png   N = 1 2 4 16
-  mini.png · cabecinha.png    1 px por pixel
-  mini-selo.txt               o mini num selo claro, em letras (console do instalador)
   retrato.svg                 o retrato em vetor (um retângulo por pixel)
   logo.txt                    o retrato em blocos (█▓░) para terminais
 Só depende de Python e do ImageMagick (magick).
@@ -143,7 +141,7 @@ def terminal(gato):
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else "."
     os.makedirs(out, exist_ok=True)
-    gato, mini, cab = mapa("retrato.txt"), mapa("mini.txt"), mapa("cabecinha.txt")
+    gato = mapa("retrato.txt")   # o único desenho do Simba (opção A)
     q = quadrado(gato)
     q.salvar(f"{out}/retrato.png")
     for n in (72, 144, 288, 576, 1152):
@@ -152,25 +150,21 @@ def main():
     for n in (16, 22, 24, 32, 48, 64, 128, 256, 512, 1024):
         k = max(1, n // s.w)
         tmp = f"{out}/.icone.png"; s.salvar(tmp, k)
-        if n < s.w:   # tamanhos pequenos: o mini em vez do retrato reduzido
-            m = selo(mini) if n >= 22 else quadrado(mini)
-            m.salvar(tmp, max(1, n // m.w))
-        subprocess.run(["magick", tmp, "-background", "none", "-gravity", "center",
-                        "-extent", f"{n}x{n}", "-strip", f"PNG32:{out}/icone-{n}.png"], check=True)
+        if n < s.w:   # menor que o desenho: o mesmo retrato reduzido (média de área)
+            s.salvar(tmp, 4)
+            subprocess.run(["magick", tmp, "-filter", "Box", "-resize", f"{n}x{n}", "-strip",
+                            f"PNG32:{out}/icone-{n}.png"], check=True)
+        else:
+            subprocess.run(["magick", tmp, "-background", "none", "-gravity", "center",
+                            "-extent", f"{n}x{n}", "-strip", f"PNG32:{out}/icone-{n}.png"], check=True)
         os.remove(tmp)
     for tom in ("claro", "escuro"):
         a = assinatura(gato, tom)
         a.salvar(f"{out}/assinatura-{tom}.png", 8)
         for k in (1, 2, 4, 16):
             a.salvar(f"{out}/assinatura-{tom}-{k}x.png", k)
-    quadrado(mini).salvar(f"{out}/mini.png")
-    quadrado(cab).salvar(f"{out}/cabecinha.png")
     open(f"{out}/logo.txt", "w").write(terminal(gato))
     open(f"{out}/retrato.svg", "w").write(svg(gato))
-    # mini no selo claro, para o console escuro do instalador (20×20, cabe em telas de 36 linhas)
-    open(f"{out}/mini-selo.txt", "w").write(
-        "# gerado por ./gerar — mini no selo (K D G L W = cores do retrato, S selo, B borda do selo)\n"
-        + em_letras(selo(mini, margem=2, r=3)))
 
 
 if __name__ == "__main__":

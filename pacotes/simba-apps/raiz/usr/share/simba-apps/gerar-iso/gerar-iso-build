@@ -315,11 +315,7 @@ etapa marca "Preparando a identidade visual"
 msg "Identidade visual: $NOME"
 ESTILO=$(cat "$SRC/marca/estilo" 2>/dev/null || echo caricatura-escura)
 "$SRC/marca/gerar-pacote" "$NOME" "$ESTILO" "$WORK/marca" >/dev/null
-if [ -f /usr/share/simba-apps/marca-pixel/mini-selo.txt ]; then   # retrato da marca em pixel art
-  "$SRC/marca/logo-terminal" /usr/share/simba-apps/marca-pixel/mini-selo.txt 0 "$WORK/marca/logo.ans"
-else
-  "$SRC/marca/logo-terminal" "$WORK/marca/logo.png" 40 "$WORK/marca/logo.ans"
-fi
+# o retrato das telas de texto é desenhado pelo próprio jogo (marca/jogo --logo)
 install -m755 "$SRC/marca/aplicar" "$WORK/marca/aplicar"
 cp -r "$SRC/marca/sddm" "$WORK/marca/"   # tela de login da marca (aplicar)
 rm -f "$WORK/marca/nome.png"

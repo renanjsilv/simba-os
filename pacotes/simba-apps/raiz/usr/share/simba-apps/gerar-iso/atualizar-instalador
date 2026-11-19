@@ -8,11 +8,7 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 xorriso -osirrox on -indev "$in" -extract /clone/clone.env "$tmp/clone.env" >/dev/null 2>&1
 NOME=$(. "$tmp/clone.env"; echo "${NOME_SISTEMA:-Simba OS}")
 "$SRC/marca/gerar-pacote" "$NOME" "$(cat "$SRC/marca/estilo" 2>/dev/null || echo caricatura-escura)" "$tmp/marca" >/dev/null
-if [ -f /usr/share/simba-apps/marca-pixel/mini-selo.txt ]; then   # retrato da marca em pixel art
-  "$SRC/marca/logo-terminal" /usr/share/simba-apps/marca-pixel/mini-selo.txt 0 "$tmp/marca/logo.ans"
-else
-  "$SRC/marca/logo-terminal" "$tmp/marca/logo.png" 40 "$tmp/marca/logo.ans"
-fi
+# o retrato das telas de texto é desenhado pelo próprio jogo (marca/jogo --logo)
 install -m755 "$SRC/marca/aplicar" "$tmp/marca/aplicar"
 rm -f "$tmp/marca/nome.png"
 VOLID=$(xorriso -indev "$in" -pvd_info 2>/dev/null | awk -F': ' '/^Volume Id/ {print $2}')

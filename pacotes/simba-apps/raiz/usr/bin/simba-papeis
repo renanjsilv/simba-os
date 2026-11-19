@@ -7,8 +7,8 @@
 SRC=/usr/share/backgrounds/simba
 [ -d "$SRC" ] || SRC="$HOME/.local/share/simba/sistema/papeis"
 DST="$HOME/.config/simba/backgrounds"
-CLAROS="pixel-floresta simba-traco-claro simba-dormindo simba-retrato-claro nevoa-clara dunas-claras topografia-clara montanhas simba-por-do-sol"
-ESCUROS="pixel-cidade pixel-montanhas pixel-chuva pixel-retrato simba-lua simba-espiando simba-traco-escuro simba-patinhas simba-retrato-escuro aurora-escura dunas-escuras eclipse topografia-escura ondas simba-por-do-sol montanhas"
+CLAROS="pixel-floresta simba-retrato-claro nevoa-clara dunas-claras topografia-clara montanhas"
+ESCUROS="pixel-cidade pixel-montanhas pixel-chuva pixel-retrato simba-retrato-escuro aurora-escura dunas-escuras eclipse topografia-escura ondas montanhas"
 claro() { # $1 = pasta do tema
   local c; c=$(grep -E '^\s*background\s*=' "$1/colors.toml" 2>/dev/null | grep -o '#[0-9A-Fa-f]\{6\}' | head -1)
   [ -n "$c" ] || return 1

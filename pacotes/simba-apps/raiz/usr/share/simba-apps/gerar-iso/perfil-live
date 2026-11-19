@@ -12,7 +12,7 @@ SRC="$(dirname "$(readlink -f "$0")")"
 A="$PROFILE/airootfs"
 SLUG=$(printf '%s' "$NOME" | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
 SLUG=${SLUG:-sistema}
-PARAMS="copytoram=n quiet splash loglevel=3 rd.udev.log_level=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0"
+PARAMS="copytoram=n quiet splash plymouth.use-simpledrm loglevel=3 rd.udev.log_level=3 systemd.show_status=false rd.systemd.show_status=false vt.global_cursor_default=0"
 # shellcheck disable=SC1091
 . "$MARCA/marca.env"
 
@@ -68,7 +68,16 @@ for f in "$PROFILE"/grub/*.cfg; do
 done
 
 # ---------------------------------------------------------------- tela de inicialização
-sed -i 's/\bkms\b/kms plymouth/' "$A/etc/mkinitcpio.conf.d/archiso.conf"
+# initramfs enxuto: o firmware lê kernel+initramfs do pendrive sem mostrar nada (era a tela
+# preta longa). Sem boot por rede (PXE/NFS/HTTP: ~1400 módulos), sem memdisk e sem
+# microcódigo (o sistema instalado tem o dele); zstd descompacta bem mais rápido que xz.
+# O Plymouth entra no initramfs e usa o framebuffer do firmware (simpledrm, abaixo em
+# PARAMS): o logo aparece assim que o kernel começa, sem esperar o driver da placa.
+cat > "$A/etc/mkinitcpio.conf.d/archiso.conf" <<'MKI'
+HOOKS=(base udev modconf plymouth archiso archiso_loop_mnt block filesystems keyboard)
+COMPRESSION="zstd"
+COMPRESSION_OPTIONS=(-19)
+MKI
 if [ -x /usr/share/simba-apps/temas-boot/gerar ]; then
   MARCA_LOGO="$MARCA/logo-nome.png" MARCA_NOME="$NOME" MARCA_CLARO="${CLARO:-0}" MARCA_PIXEL="$([ "${ESTILO:-}" = pixel ] && echo 1 || echo 0)" \
     /usr/share/simba-apps/temas-boot/gerar marca "$A/usr/share/plymouth/themes/simba-marca" >/dev/null
@@ -76,7 +85,7 @@ if [ -x /usr/share/simba-apps/temas-boot/gerar ]; then
 [Daemon]
 Theme=simba-marca
 ShowDelay=0
-DeviceTimeout=8
+DeviceTimeout=2
 EOF
 fi
 # Sem "plymouth quit --retain-splash": ele deixa o tty em modo gráfico (KD_GRAPHICS) e, em

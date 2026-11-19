@@ -103,13 +103,22 @@ centro_bloco() {
   pad=$(( (COLS - max) / 2 )); if [ $pad -lt 0 ]; then pad=0; fi
   for l in "${ls[@]}"; do printf '%*s%s\e[0;37;40m\n' $pad '' "$l"; done
 }
+# Mini game e retrato da marca (desenhados no framebuffer pelo mesmo programa): na mídia
+# da ISO, na marca ou no sistema
+JOGO_BIN=""
+for j in "$MARCA/jogo" "$MEDIA/jogo" "$(dirname "$(readlink -f "$0")")/simba-jogo-telhados" /usr/share/simba-apps/gerar-iso/simba-jogo-telhados; do
+  if [ -x "$j" ]; then JOGO_BIN="$j"; break; fi
+done
 LOGO_LINHAS=0
 cabecalho() {  # nome (e o logo, com $2 = grande); $1 = subtítulo
   medir
   printf '\e[0;37;40m\e[2J\e[H\n'
   local logo=0
-  if [ "${2:-}" = grande ] && [ -f "$MARCA/logo.ans" ] && [ "$LINES_" -ge $(( $(wc -l < "$MARCA/logo.ans") + 14 )) ]; then
-    centro_bloco < "$MARCA/logo.ans"; logo=$(wc -l < "$MARCA/logo.ans")
+  local faixa=0
+  if [ "${2:-}" = grande ] && [ -n "$JOGO_BIN" ] && [ -z "$SIMULAR" ] && [ "$LINES_" -ge 26 ]; then
+    # espaço vazio para o retrato (o jogo o desenha por cima, em pixels de verdade)
+    faixa=$(( LINES_ / 5 )); logo=$faixa
+    printf '%*s' "$logo" '' | tr ' ' '\n'
   else
     logo=$(( LINES_ > 30 ? (LINES_ - 24) / 3 : 2 ))
     printf '%*s' "$logo" '' | tr ' ' '\n'
@@ -119,6 +128,7 @@ cabecalho() {  # nome (e o logo, com $2 = grande); $1 = subtítulo
   [ -n "${1:-}" ] && printf '\e[1;30m%s\e[0;37m\n' "$1" | centro
   printf '\n'
   LOGO_LINHAS=$(( logo + 4 ))
+  [ "$faixa" -gt 0 ] && "$JOGO_BIN" --logo 1 "$faixa" 2>/dev/null || true
 }
 # recuo para os campos ficarem no meio da tela
 REC=0
@@ -297,7 +307,6 @@ tela_resumo() {
 # várias vezes por segundo), com as últimas linhas do log embaixo.
 PCT=0 TXT=
 PROG_FILE=/tmp/simba-progresso
-JOGO_BIN=""
 JOGO_PID=""
 
 progresso() {
@@ -320,17 +329,17 @@ progresso() {
 }
 iniciar_desenho() {
   printf '0 %s\n' "$(t "Iniciando…" "Starting…")" > "$PROG_FILE"
-  # Acha o binário do mini game (na mídia da ISO, na marca ou relativo ao script)
-  for j in "$MARCA/jogo" "$MEDIA/jogo" "$(dirname "$(readlink -f "$0")")/simba-jogo-telhados" /usr/share/simba-apps/gerar-iso/simba-jogo-telhados; do
-    if [ -x "$j" ]; then JOGO_BIN="$j"; break; fi
-  done
-  if [ -n "$JOGO_BIN" ]; then
-    "$JOGO_BIN" "$PROG_FILE" & JOGO_PID=$!
-  else
-    cabecalho "" grande
-  fi
   exec 4>&1
   printf '\e[?25l'
+  if [ -n "$JOGO_BIN" ] && [ -z "$SIMULAR" ]; then
+    # o jogo desenha na tela gráfica; se não houver framebuffer ele sai (código 3) e o
+    # progresso volta a ser desenhado em texto (progresso() confere se ele está vivo)
+    SYS_LANG="$SYS_LANG" NOME="$NOME_SISTEMA" "$JOGO_BIN" "$PROG_FILE" < /dev/tty 2>> "$LOG" & JOGO_PID=$!
+    sleep 0.3
+    kill -0 "$JOGO_PID" 2>/dev/null && return 0
+    JOGO_PID=""
+  fi
+  cabecalho "" grande
 }
 parar_desenho() {
   if [ -n "$JOGO_PID" ]; then
@@ -338,7 +347,9 @@ parar_desenho() {
     wait "$JOGO_PID" 2>/dev/null || true
     JOGO_PID=""
   fi
-  printf '\e[?25h\e[0m'
+  # garante o console em modo texto mesmo se o jogo tiver caído
+  [ -n "$JOGO_BIN" ] && "$JOGO_BIN" --restaurar < /dev/tty 2>/dev/null || true
+  printf '\e[?25h\e[0m\e[2J\e[H'
 }
 
 # executa com a saída no log

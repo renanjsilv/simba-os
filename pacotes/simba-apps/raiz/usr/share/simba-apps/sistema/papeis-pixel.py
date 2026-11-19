@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Papéis de parede em pixel art do Simba OS (gato cinza com preto).
+"""Papéis de parede em pixel art do Simba OS (o único gato é o retrato da marca, em pixel-retrato).
 
 Desenha em 640x360 (paletas curtas, pontilhado ordenado nos degradês) e amplia
 6x sem suavizar → 3840x2160. Só Python + ImageMagick.
@@ -218,7 +218,6 @@ if quer("pixel-cidade"):
         t.rect(lx, 264, 3, 36, "#08090c")
     t.rect(62, 280, 50, 2, "#08090c")
     t.rect(86, 190, 1, 16, "#08090c"); t.px(86, 189, "#7a3b3b")
-    gato(t, 430, 300, 1.55, "#3a3c40", "#1d1e21", "#8c8f95", "#2a2b2e", lado=1)
     t.salvar("pixel-cidade")
 
 # ───────────────────────────────────────────── 2. serras na névoa
@@ -235,7 +234,7 @@ if quer("pixel-montanhas"):
         serra(t, alt, cor, borda)
         if i < len(camadas) - 1:
             t.nevoa(base - 26, base + 30, "#3a4452" if i < 2 else "#2a323d", 0.5 - i * 0.08, None)
-    # pedra e gato no primeiro plano
+    # pedra no primeiro plano
     for y in range(300, 341):
         for x in range(470, 610):
             if ((x - 540) / 72) ** 2 + ((y - 344) / 42) ** 2 <= 1:
@@ -244,7 +243,6 @@ if quer("pixel-montanhas"):
         for y in range(296, 344):
             if ((x - 540) / 72) ** 2 + ((y - 344) / 42) ** 2 <= 1:
                 t.px(x, y, "#1a1e25"); break
-    gato(t, 528, 303, 1.4, "#383b40", "#1b1c20", "#7f8792", "#26282c", lado=-1, cauda=1)
     t.rect(0, 340, W, 20, "#07080a")
     t.salvar("pixel-montanhas")
 
@@ -300,7 +298,6 @@ if quer("pixel-chuva"):
     # caneca no parapeito
     t.rect(430, Y1 - 12, 10, 12, "#2a2c31"); t.rect(440, Y1 - 9, 3, 6, "#2a2c31"); t.rect(441, Y1 - 8, 1, 4, "#08080a")
     t.rect(430, Y1 - 12, 10, 1, "#4a4d54")
-    gato(t, 262, Y1, 2.1, "#34363a", "#18191c", "#7d838d", "#232427", lado=1, cauda=-1)
     t.salvar("pixel-chuva")
 
 # ───────────────────────────────────────────── 4. floresta na névoa (claro)
@@ -333,7 +330,6 @@ if quer("pixel-floresta"):
     # tronco caído
     t.rect(70, 304, 110, 12, "#2a2a28"); t.rect(70, 304, 110, 1, "#4a4a46")
     t.disco(70, 310, 6, "#33332f"); t.disco(70, 310, 3, "#24241f")
-    gato(t, 128, 304, 1.3, "#5a5a57", "#2c2c2a", "#a6a6a1", "#3c3c39", lado=1)
     t.salvar("pixel-floresta")
 
 # ───────────────────────────────────────────── 5. retrato em pixel (marca)

@@ -1,31 +1,17 @@
 #!/bin/bash
 # Gera o pacote de identidade visual de uma ISO distribuível.
 #   gerar-pacote "<nome>" <estilo> <pasta-de-saída>
-# Estilos (desenhos em opcoes/, feitos a partir da foto do gato):
-#   tinta (padrão) · retrato · gravura · selo   → fundo escuro
-#   tinta-claro · lapis · caricatura            → fundo claro
-#   caricatura-escura                           → fundo escuro
-#   pixel (padrão do Simba OS)                  → fundo escuro, retrato em pixel art
-#                                                 (/usr/share/simba-apps/marca-pixel)
+# Estilo: pixel (o retrato da marca em pixel art, /usr/share/simba-apps/marca-pixel).
 # Saída: logo.png, logo-nome.png (tela de inicialização), papel-de-parede.png,
 #        icone.png (botão Iniciar), marca.env
 set -euo pipefail
-OP="$(cd "$(dirname "$0")" && pwd)/opcoes"
 HOME_DONO=$(cd "$(dirname "$0")/../../../.." && pwd)   # ~/.local/share/gerar-iso/marca → ~
-nome=${1:?nome} estilo=${2:-tinta} out=${3:?saída}
+nome=${1:?nome} estilo=${2:-pixel} out=${3:?saída}
 mkdir -p "$out"
-case $estilo in
-  tinta)       cab=C-cabeca.png claro=0 ;;
-  retrato)     cab=cabeca.png   claro=0 ;;
-  gravura)     cab=gravura.png  claro=0 ;;
-  selo)        cab=selo.png     claro=0 ;;
-  tinta-claro) cab=F-cabeca.png claro=1 ;;
-  lapis)       cab=lapis.png    claro=1 ;;
-  caricatura)  cab=carc-claro.png  claro=1 ;;
-  caricatura-escura) cab=carc-escuro.png claro=0 ;;
-  pixel)       cab=/usr/share/simba-apps/marca-pixel/retrato-1152.png claro=0 ;;
-  *) echo "estilo desconhecido: $estilo" >&2; exit 2 ;;
-esac
+# Só existe um desenho do Simba: o retrato em pixel art (marca-pixel). Estilos antigos
+# (tinta, gravura, caricatura…) viram "pixel".
+[ "$estilo" = pixel ] || { echo "aviso: estilo '$estilo' foi removido; usando pixel" >&2; estilo=pixel; }
+cab=/usr/share/simba-apps/marca-pixel/retrato-1152.png claro=0
 if [ "$claro" = 1 ]; then tinta='#111111' fundo='#f4f4f2' fundo2='#d9d9d6'; else tinta='#ffffff' fundo='#000000' fundo2='#000000'; fi
 NOME_MAIUSC=$(printf '%s' "$nome" | tr '[:lower:]' '[:upper:]')
 NOME_XML=$(printf '%s' "$NOME_MAIUSC" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
@@ -43,7 +29,6 @@ if [ "$estilo" = pixel ] && [ "$NOME_MAIUSC" = "SIMBA OS" ]; then
     -strip "$out/papel-de-parede.png"
   cp "$PIX/icone-256.png" "$out/icone.png"
 else
-case $cab in /*) ;; *) cab="$OP/$cab" ;; esac
 magick "$cab" -trim +repage -resize 1024x1024 "PNG32:$out/logo.png"
 magick -background none pango:"<span foreground='$tinta' font_desc='Adwaita Sans Heavy 70' letter_spacing='22000'>$NOME_XML</span>" \
   -trim +repage "$out/nome.png"

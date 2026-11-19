@@ -52,10 +52,20 @@ install -m644 /usr/share/simba-apps/simba-simbolo.svg "$out/temas-boot/simba-sim
 cp -r "$PIX" "$out/temas-boot/marca-pixel"
 
 # mini game do instalador (corre em paralelo com o progresso no pendrive)
+# O binário só existe no pacote instalado (compilado no PKGBUILD); montando a partir do
+# repositório (iso/construir) compila aqui mesmo. Sem jogo a ISO NÃO sai: o mesmo programa
+# desenha o logo nas telas do instalador (antes ele faltava em silêncio na ISO por receita).
 DIR_GERAR="$(cd "$(dirname "$0")/.." && pwd)"
-if [ -f "$DIR_GERAR/simba-jogo-telhados" ]; then
-  install -m755 "$DIR_GERAR/simba-jogo-telhados" "$out/jogo"
+jogo=""
+if [ -f "$DIR_GERAR/jogo/simba-jogo.c" ] && command -v gcc >/dev/null; then
+  gcc -O2 -static -o "$out/jogo" "$DIR_GERAR/jogo/simba-jogo.c" && jogo="$out/jogo"
 fi
+if [ -z "$jogo" ]; then
+  for j in "$DIR_GERAR/simba-jogo-telhados" /usr/share/simba-apps/gerar-iso/simba-jogo-telhados; do
+    [ -x "$j" ] && { install -m755 "$j" "$out/jogo"; jogo="$out/jogo"; break; }
+  done
+fi
+[ -n "$jogo" ] || { echo "gerar-pacote: mini game não encontrado nem compilado (precisa de gcc ou do simba-apps)" >&2; exit 1; }
 rm -f "$out/cab.tmp.png"
 cat > "$out/marca.env" <<ENV
 NOME='${nome//\'/}'

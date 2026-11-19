@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+"""Ícone de bandeja da sincronização do Simba OS (OneDrive style).
+Usa AyatanaAppIndicator3 para se integrar à bandeja nativa do Simba OS.
+"""
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('AyatanaAppIndicator3', '0.1')
+from gi.repository import Gtk, AyatanaAppIndicator3, GLib
+
+HOME = Path.home()
+CFG = HOME / ".config/conta/config.json"
+ESTADO = HOME / ".local/state/conta/estado.json"
+
+class SyncTray:
+    def __init__(self):
+        self.indicator = AyatanaAppIndicator3.Indicator.new(
+            "simba-sync-tray",
+            "simba-sync-ok-symbolic",
+            AyatanaAppIndicator3.IndicatorCategory.APPLICATION_STATUS
+        )
+        self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.PASSIVE)
+        self.menu = Gtk.Menu()
+        self.indicator.set_menu(self.menu)
+        
+        self.dados_status = {}
+        self.construir_menu()
+        
+        # Monitoramento em thread separada com GLib.idle_add para UI
+        GLib.timeout_add_seconds(3, self.atualizar)
+        self.atualizar()
+
+    def ler_status(self):
+        try:
+            r = subprocess.run(["conta", "status"], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                return json.loads(r.stdout)
+        except Exception:
+            pass
+        return {}
+
+    def atualizar(self):
+        def worker():
+            st = self.ler_status()
+            GLib.idle_add(self.aplicar_status, st)
+        threading.Thread(target=worker, daemon=True).start()
+        return True
+
+    def aplicar_status(self, st):
+        if not st or not st.get("conectado"):
+            self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.PASSIVE)
+            return
+
+        self.dados_status = st
+        self.indicator.set_status(AyatanaAppIndicator3.IndicatorStatus.ACTIVE)
+
+        # Escolhe ícone pelo estado
+        if st.get("conflito") or st.get("precisa_decidir"):
+            icone = "simba-sync-alert-symbolic"
+            txt_status = "● " + (st.get("erro") or "Precisa de você")
+        elif st.get("pausado"):
+            icone = "simba-sync-paused-symbolic"
+            txt_status = "● Pausado"
+        elif st.get("rodando") or st.get("sincronizando"):
+            icone = "simba-sync-syncing-symbolic"
+            prog = st.get("progresso") or "Sincronizando…"
+            txt_status = "● " + prog
+        elif st.get("resultado") == "erro":
+            icone = "simba-sync-offline-symbolic"
+            txt_status = "● " + (st.get("erro") or "Sem conexão")
+        else:
+            icone = "simba-sync-ok-symbolic"
+            txt_status = "● Tudo em dia"
+
+        self.indicator.set_icon_full(icone, "Sincronização do Simba")
+        self.item_conta.set_label(f"Sincronização · {st.get('email', '')}")
+        self.item_status.set_label(txt_status)
+        
+        if st.get("pausado"):
+            self.item_pausar.set_label("Retomar sincronização")
+        else:
+            self.item_pausar.set_label("Pausar sincronização")
+
+    def construir_menu(self):
+        for c in self.menu.get_children():
+            self.menu.remove(c)
+
+        self.item_conta = Gtk.MenuItem(label="Sincronização")
+        self.item_conta.set_sensitive(False)
+        self.menu.append(self.item_conta)
+
+        self.item_status = Gtk.MenuItem(label="Verificando…")
+        self.item_status.set_sensitive(False)
+        self.menu.append(self.item_status)
+
+        self.menu.append(Gtk.SeparatorMenuItem())
+
+        it_abrir = Gtk.MenuItem(label="Abrir pasta no computador")
+        it_abrir.connect("activate", self.abrir_pasta)
+        self.menu.append(it_abrir)
+
+        it_drive = Gtk.MenuItem(label="Ver no Google Drive")
+        it_drive.connect("activate", self.abrir_drive)
+        self.menu.append(it_drive)
+
+        self.menu.append(Gtk.SeparatorMenuItem())
+
+        self.item_pausar = Gtk.MenuItem(label="Pausar sincronização")
+        self.item_pausar.connect("activate", self.alternar_pausa)
+        self.menu.append(self.item_pausar)
+
+        it_cfg = Gtk.MenuItem(label="Configurações de Contas…")
+        it_cfg.connect("activate", self.abrir_config)
+        self.menu.append(it_cfg)
+
+        self.menu.show_all()
+
+    def abrir_pasta(self, _w):
+        doc = subprocess.run(["xdg-user-dir", "DOCUMENTS"], capture_output=True, text=True).stdout.strip()
+        alvo = doc if os.path.isdir(doc) else str(HOME)
+        subprocess.Popen(["xdg-open", alvo])
+
+    def abrir_drive(self, _w):
+        subprocess.Popen(["xdg-open", "https://drive.google.com"])
+
+    def alternar_pausa(self, _w):
+        if self.dados_status.get("pausado"):
+            subprocess.run(["conta", "retomar"])
+        else:
+            subprocess.run(["conta", "pausar", "24"])
+        self.atualizar()
+
+    def abrir_config(self, _w):
+        subprocess.Popen(["configuracoes", "contas"])
+
+def main():
+    SyncTray()
+    Gtk.main()
+
+if __name__ == "__main__":
+    main()

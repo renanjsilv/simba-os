@@ -236,14 +236,14 @@ Pagina {
   Cartao {
     visible: pg.precisaEscolher
     Repeater {
-      model: pg.precisaEscolher ? ["config", "imagens", "historico", "documentos", "pacotes", "fundo"] : []
+      model: pg.precisaEscolher ? ["config", "imagens", "historico", "documentos", "pacotes"] : []
       delegate: Linha {
         id: op
         required property string modelData
         glifo: ({ config: Icones.folderCog, imagens: Icones.folderOpen, historico: Icones.clockOutline,
                   documentos: Icones.folderText, pacotes: Icones.apps, fundo: Icones.wallpaper })[modelData]
         titulo: op.modelData === "fundo" ? I18n.t("Papel de parede igual em todos os computadores") : pg.s.rotulos[op.modelData]
-        descricao: ({ config: I18n.t("~/.config, scripts, apps e temas próprios, estado do sistema"),
+        descricao: ({ config: I18n.t("Papel de parede, temas, barra, atalhos e aplicativos"),
                       imagens: I18n.t("Imagens e papéis de parede"),
                       historico: I18n.t("Histórico e favoritos do Brave, histórico do terminal e arquivos recentes"),
                       documentos: I18n.t("Documentos e atalhos da área de trabalho"),
@@ -262,15 +262,14 @@ Pagina {
       Botao { texto: I18n.t("Começar a sincronizar"); tipo: "primario"; habilitado: !pg.ocupado; onClicado: pg.confirmarEscolha() }
     }
   }
-  // Conta com backup de outra máquina: decidir antes de enviar qualquer coisa.
+  // Conta com outro computador disponível na nuvem: opção não bloqueante
   Aviso {
     Layout.fillWidth: true
-    visible: !!(pg.s && pg.s.conectado && pg.s.precisa_decidir && !pg.precisaSenha)
-    tipo: "aviso"
-    texto: I18n.t("Esta conta já tem um backup") + (pg.s && pg.s.remoto_meta && pg.s.remoto_meta.maquina ? " de " + pg.s.remoto_meta.maquina : "") + I18n.t(". Restaure-o para trazer tudo para cá, ou substitua-o pelos arquivos deste computador.")
+    visible: !!(pg.s && pg.s.conectado && pg.s.remoto_meta && pg.s.remoto_meta.maquina && pg.s.remoto_meta.maquina !== pg.s.maquina_local && !pg.s.restaurado && !pg.precisaSenha && !pg.precisaEscolher)
+    tipo: "info"
+    texto: I18n.t("O backup de ") + (pg.s && pg.s.remoto_meta ? pg.s.remoto_meta.maquina : "") + I18n.t(" está disponível no Drive. Deseja trazer os arquivos e configurações para este computador?")
     acoes: [
-      Botao { texto: I18n.t("Restaurar"); tipo: "primario"; habilitado: !pg.ocupado; onClicado: pg.restaurar() },
-      Botao { texto: I18n.t("Substituir"); tipo: "perigo"; habilitado: !pg.ocupado; onClicado: pg.sincronizar(true) }
+      Botao { texto: I18n.t("Trazer para cá"); tipo: "primario"; habilitado: !pg.ocupado; onClicado: pg.restaurar() }
     ]
   }
   // Conflito de versão concorrente entre computadores
@@ -398,7 +397,7 @@ Pagina {
         glifo: ({ config: Icones.folderCog, imagens: Icones.folderOpen, historico: Icones.clockOutline,
                   documentos: Icones.folderText, pacotes: Icones.apps, segredos: Icones.lock })[modelData]
         titulo: pg.s.rotulos[modelData]
-        descricao: ({ config: I18n.t("~/.config, scripts, apps e temas próprios, estado do sistema"),
+        descricao: ({ config: I18n.t("Papel de parede, temas, barra, atalhos e aplicativos"),
                       imagens: I18n.t("Imagens e papéis de parede"),
                       historico: I18n.t("Histórico e favoritos do Brave, histórico do terminal e arquivos recentes"),
                       documentos: I18n.t("Documentos e atalhos da área de trabalho"),

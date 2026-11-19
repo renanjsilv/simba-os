@@ -844,9 +844,8 @@ def cmd_entrar(a):
             c["cripto"] = True
         salvar_config(c)
         salvar_estado(entrando=False, remoto_meta=meta, link_login="")
-        if not pode_enviar():
-            salvar_estado(precisa_decidir=True,
-                          erro=_t("Esta conta já tem um backup de %1. Restaure-o ou substitua-o.", meta.get('maquina', 'outra máquina')))
+        if meta and not pode_enviar():
+            salvar_estado(remoto_meta=meta)
         BOAS_VINDAS.unlink(missing_ok=True)
         if not c.get("escolha_feita"):
             # Nada é enviado nem ligado até a pessoa escolher o que sincronizar.
@@ -984,8 +983,11 @@ def publicar_ferramenta():
 
 
 def pode_enviar():
-    """Uma máquina que nunca enviou nem restaurou não pode espelhar a pasta
-    pessoal (talvez vazia) por cima do backup existente de outra máquina."""
+    """Permite sincronização contínua. Se o usuário já confirmou a escolha das pastas
+    ou se já sincronizou antes, o envio é liberado sem bloquear a máquina."""
+    c = config()
+    if c.get("escolha_feita"):
+        return True
     e = estado()
     if e.get("ultima") or e.get("restaurado") or e.get("ultima_remota_aplicada"):
         return True
@@ -1437,11 +1439,11 @@ def cmd_sincronizar(a):
     aplicar_brave_se_pendente()
 
     if not a.substituir and not pode_enviar():
-        msg = _t("Já existe um backup nesta conta. Restaure-o primeiro (ou escolha substituí-lo).")
-        salvar_estado(resultado="erro", erro=msg, precisa_decidir=True)
-        if not a.silencioso:
-            avisar(_t("Backup não enviado"), msg, True)
-        print(msg, file=sys.stderr)
+        # Se ainda não escolheu, apenas aguarda a escolha
+        if not config().get("escolha_feita"):
+            return 0
+        msg = _t("Aguardando configuração de sincronização.")
+        salvar_estado(resultado="erro", erro=msg)
         return 4
     with Trava():
         c = config()

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Simba Sync Tray
+Comment=Ícone de bandeja da sincronização com o Google Drive
+Exec=/usr/bin/simba-sync-tray
+Terminal=false
+Categories=Utility;
+X-GNOME-Autostart-enabled=true

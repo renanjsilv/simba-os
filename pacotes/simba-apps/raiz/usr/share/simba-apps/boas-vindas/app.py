@@ -531,7 +531,7 @@ class Janela(Adw.ApplicationWindow):
             grade.attach(cb, i % 3, i // 3, 1, 1)
         self.escolha_caixa.append(grade)
         linha = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER, margin_top=6)
-        linha.append(Gtk.Label(label=_t("Usar o mesmo papel de parede nos seus outros computadores?")))
+        linha.append(Gtk.Label(label=_t("Configurações e aparência (papel de parede, tema e apps)")))
         self.escolha_fundo = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
         linha.append(self.escolha_fundo)
         self.escolha_caixa.append(linha)

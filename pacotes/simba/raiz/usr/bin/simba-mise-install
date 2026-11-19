@@ -25,6 +25,15 @@ case "$command" in
     ;;
 esac
 
+# Já vem instalado no sistema (pacote, ex.: /usr/bin/opencode da ISO): nada de atalho do mise.
+# O atalho em ~/.local/bin vem antes de /usr/bin no PATH da sessão e, na 1ª inicialização,
+# trocava o programa instalado por um download do mise ("não instalado" no Draco/Agentes).
+if real=$(PATH=/usr/local/bin:/usr/bin:/bin command -v "$command" 2>/dev/null) && [ -n "$real" ]; then
+  w="$HOME/.local/bin/$command"
+  [ -f "$w" ] && grep -q 'exec mise x' "$w" 2>/dev/null && rm -f "$w"
+  exit 0
+fi
+
 mkdir -p "$HOME/.local/bin"
 
 # The heredoc below is unquoted, so whatever these hold is written into the

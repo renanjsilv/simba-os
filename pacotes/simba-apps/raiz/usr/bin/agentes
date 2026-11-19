@@ -158,7 +158,7 @@ def ler_config(verificar=True):
     # execução — era o que atrasava o terminal e a página de Configurações.
     if not existe or not c:
         c["ordem"] = list(instalados)
-        c["inativos"] = [a for a in instalados if verificar and conectado(a) is not True]
+        c["inativos"] = [a for a in instalados if verificar and conectado(a) is not True and not _gratis(a)]
     else:
         c.setdefault("ordem", list(instalados))
         c.setdefault("inativos", [])
@@ -299,10 +299,18 @@ def marcar_esgotado(a):
     f.write_text(json.dumps(marcas))
 
 
+def _gratis(a):
+    """Agente que funciona sem conta (OpenCode: modelos grátis), igual ao app Agentes de IA."""
+    try:
+        return bool(_M and _M.AGENTES.get(a, {}).get("gratis"))
+    except Exception:  # noqa: BLE001
+        return a == "opencode"
+
+
 def candidatos(c, pular=(), verificar=True):
     return [a for a in c["ordem"] if a in AGENTES and a not in c["inativos"] and a not in pular
-            and shutil.which(AGENTES[a]["cmd"][0])
-            and (not verificar or conectado(a) is not False)]
+            and _achar(a)
+            and (not verificar or _gratis(a) or conectado(a) is not False)]
 
 
 def hora(iso):

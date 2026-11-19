@@ -226,7 +226,7 @@ static const char *T(const char *pt, const char *en) { return ingles ? en : pt; 
 /* ------------------------------------------------------------------ jogo */
 #define MAX_OBS 6
 #define MAX_PEIXE 6
-typedef struct { float x; int tipo, ativo; } Obs;   /* tipo 0 chaminé, 1 antena */
+typedef struct { float x; int tipo, ativo, y; } Obs; /* 0 chaminé, 1 antena, 2 buraco, 3 pombo */
 typedef struct { float x; int y, ativo; } Peixe;
 
 static int u;                  /* tamanho do pixel da arte (px reais) */
@@ -238,6 +238,8 @@ static int chao;               /* y do telhado (unidades, dentro do painel) */
 
 static float gy, gvy;          /* altura do Simba acima do telhado (unidades) */
 static int pulando, tropeco, peixes, recorde, quadro, parado_desde;
+static int vidas = 3, fim, fim_desde, demo = 1;   /* demo: piloto automático até alguém jogar */
+static float distancia;
 static float rolagem;
 static Obs obs[MAX_OBS];
 static Peixe peixe[MAX_PEIXE];
@@ -267,7 +269,19 @@ static void calcular_layout(void) {
 }
 
 static void novo_obstaculo(float x) {
-    for (int i = 0; i < MAX_OBS; i++) if (!obs[i].ativo) { obs[i] = (Obs){x, aleat(2), 1}; return; }
+    /* os mais difíceis aparecem depois de um começo tranquilo */
+    int n = distancia < 250 ? 3 : 4;
+    for (int i = 0; i < MAX_OBS; i++) if (!obs[i].ativo) {
+        int t = aleat(n);
+        obs[i] = (Obs){x, t, 1, t == 3 ? chao - ALTURA - 8 - aleat(4) : 0};
+        return;
+    }
+}
+static int largura_obs(int t) { return t == 0 ? 10 : t == 1 ? 6 : t == 2 ? 16 : 9; }
+static void recomecar(void) {
+    memset(obs, 0, sizeof obs); memset(peixe, 0, sizeof peixe);
+    vidas = 3; peixes = 0; distancia = 0; fim = 0; tropeco = 0; gy = gvy = 0; pulando = 0;
+    novo_obstaculo(GW + 20);
 }
 static void novo_peixe(float x) {
     for (int i = 0; i < MAX_PEIXE; i++)
@@ -275,15 +289,25 @@ static void novo_peixe(float x) {
 }
 
 static int pular_pedido;
+static void perder_vida(void) {
+    if (tropeco || demo) return;        /* a demonstração nunca perde */
+    tropeco = 45;                       /* 1,5 s piscando, sem perder outra */
+    if (--vidas <= 0) { fim = 1; fim_desde = quadro; if (peixes > recorde) recorde = peixes; }
+}
 static void atualizar(void) {
     quadro++;
-    float vel = 1.6f;
-    rolagem += vel;
-    /* pulo: automático se ninguém jogar há 6 s */
-    int auto_jogo = quadro - parado_desde > 30 * 6;
-    if (auto_jogo && !pulando)
+    if (fim) {
+        /* fim de jogo: Espaço recomeça; parado 15 s, volta a demonstração */
+        if (pular_pedido) { pular_pedido = 0; recomecar(); }
+        else if (quadro - fim_desde > 30 * 15) { recomecar(); demo = 1; }
+        return;
+    }
+    float vel = 1.6f + (distancia > 3000 ? 1.4f : distancia / 3000 * 1.4f);
+    rolagem += vel; distancia += vel / 4;
+    if (demo && !pulando)               /* piloto automático: pula chaminé, antena e buraco */
         for (int i = 0; i < MAX_OBS; i++)
-            if (obs[i].ativo && obs[i].x > SX && obs[i].x < SX + GATO_W + 10) pular_pedido = 1;
+            if (obs[i].ativo && obs[i].tipo != 3 && obs[i].x > SX && obs[i].x < SX + GATO_W + 6 + vel * 4)
+                pular_pedido = 1;
     if (pular_pedido && !pulando) { pulando = 1; gvy = 4.1f; }
     pular_pedido = 0;
     if (pulando) {
@@ -291,21 +315,26 @@ static void atualizar(void) {
         if (gy <= 0) { gy = 0; gvy = 0; pulando = 0; }
     }
     if (tropeco) tropeco--;
-    /* obstáculos e peixes */
     float ultimo = 0;
+    int pe0 = SX + 6, pe1 = SX + GATO_W - 6;              /* patas, de trás a da frente */
     for (int i = 0; i < MAX_OBS; i++) if (obs[i].ativo) {
-        obs[i].x -= vel;
-        if (obs[i].x < -12) obs[i].ativo = 0;
-        if (obs[i].x > ultimo) ultimo = obs[i].x;
-        int ow = obs[i].tipo ? 5 : 9, oh = obs[i].tipo ? 20 : 15;
-        /* colisão: base do retrato (com folga nas bordas) contra o obstáculo */
-        if (!tropeco && obs[i].x < SX + GATO_W - 4 && obs[i].x + ow > SX + 5 && gy < oh - 2) {
-            tropeco = 30; peixes = peixes > 2 ? peixes - 2 : 0;
+        Obs *o = &obs[i];
+        o->x -= o->tipo == 3 ? vel * 1.4f : vel;
+        int ow = largura_obs(o->tipo);
+        if (o->x < -ow - 4) o->ativo = 0;
+        if (o->x > ultimo) ultimo = o->x;
+        if (o->tipo == 2) {             /* buraco: cai se as patas estão todas sobre ele */
+            if (!pulando && o->x < pe0 && o->x + ow > pe1) perder_vida();
+        } else if (o->tipo == 3) {      /* pombo: só pega quem está no ar */
+            int topo = chao - ALTURA - (int)gy;
+            if (o->x < SX + GATO_W - 6 && o->x + ow > SX + 8 && o->y + 5 > topo && o->y < topo + ALTURA - 4) perder_vida();
+        } else {
+            int oh = o->tipo ? 22 : 17;
+            if (o->x < SX + GATO_W - 6 && o->x + ow > SX + 6 && gy < oh - 2) perder_vida();
         }
     }
-    /* um obstáculo por vez na tela, com folga para o pulo (o voo cobre ~50 unidades) */
     static float vao = 120;
-    if (ultimo < GW + 4 - vao) { novo_obstaculo(GW + 4); vao = 100 + aleat(90); }
+    if (ultimo < GW + 4 - vao) { novo_obstaculo(GW + 4); vao = (62 + aleat(60)) * (1 + (vel - 1.6f) / 3); }
     if (quadro % 70 == 0) novo_peixe(GW + 4);
     for (int i = 0; i < MAX_PEIXE; i++) if (peixe[i].ativo) {
         peixe[i].x -= vel;
@@ -329,19 +358,35 @@ static void desenhar_peixe(float x, int y) {
 
 static void desenhar_obstaculo(const Obs *o) {
     int b = chao;
-    if (o->tipo == 0) {          /* chaminé de tijolos */
-        ret_c(UX(o->x), UY(b - 15), 9 * u, 3 * u, RGB(16, 16, 16));
-        ret_c(UX(o->x + 1), UY(b - 14), 7 * u, u, RGB(200, 200, 202));
-        ret_c(UX(o->x + 1), UY(b - 12), 7 * u, 12 * u, RGB(16, 16, 16));
-        for (int j = 0; j < 11; j++)
-            for (int i = 0; i < 5; i++)
-                ret_c(UX(o->x + 2 + i), UY(b - 11 + j), u, u, ((i + (j % 2) * 2) % 4 == 0) ? RGB(70, 70, 72) : RGB(120, 120, 122));
-    } else {                     /* antena */
-        ret_c(UX(o->x + 2), UY(b - 18), u, 18 * u, RGB(16, 16, 16));
-        ret_c(UX(o->x), UY(b - 20), u, 2 * u, RGB(16, 16, 16));
-        ret_c(UX(o->x + 4), UY(b - 20), u, 2 * u, RGB(16, 16, 16));
-        ret_c(UX(o->x + 1), UY(b - 18), 3 * u, u, RGB(16, 16, 16));
-        ret_c(UX(o->x + 1), UY(b - 1), 3 * u, u, RGB(16, 16, 16));
+    if (o->tipo == 0) {          /* chaminé de tijolos (com fumaça) */
+        ret_c(UX(o->x), UY(b - 17), 10 * u, 3 * u, RGB(16, 16, 16));
+        ret_c(UX(o->x + 1), UY(b - 16), 8 * u, u, RGB(200, 200, 202));
+        ret_c(UX(o->x + 1), UY(b - 14), 8 * u, 14 * u, RGB(16, 16, 16));
+        for (int j = 0; j < 13; j++)
+            for (int i = 0; i < 6; i++)
+                ret_c(UX(o->x + 2 + i), UY(b - 13 + j), u, u, ((i + (j % 2) * 2) % 4 == 0) ? RGB(70, 70, 72) : RGB(130, 130, 132));
+        int f = (quadro / 6) % 3;
+        ret_c(UX(o->x + 3 + f), UY(b - 20 - f), 2 * u, 2 * u, RGB(90, 90, 94));
+        ret_c(UX(o->x + 5 - f), UY(b - 24 - f), 2 * u, 2 * u, RGB(70, 70, 74));
+    } else if (o->tipo == 1) {   /* antena alta, com luz piscando no topo */
+        ret_c(UX(o->x + 2), UY(b - 22), 2 * u, 22 * u, RGB(16, 16, 16));
+        ret_c(UX(o->x), UY(b - 20), 6 * u, u, RGB(16, 16, 16));
+        ret_c(UX(o->x), UY(b - 15), 6 * u, u, RGB(16, 16, 16));
+        ret_c(UX(o->x + 1), UY(b - 2), 4 * u, 2 * u, RGB(16, 16, 16));
+        if ((quadro / 10) % 2) ret_c(UX(o->x + 2), UY(b - 24), 2 * u, 2 * u, RGB(245, 245, 245));
+    } else if (o->tipo == 2) {   /* buraco no telhado */
+        ret_c(UX(o->x), UY(b), 16 * u, (GH - b) * u, RGB(8, 8, 9));
+        ret_c(UX(o->x - 1), UY(b), u, (GH - b) * u, RGB(16, 16, 16));
+        ret_c(UX(o->x + 16), UY(b), u, (GH - b) * u, RGB(16, 16, 16));
+    } else {                     /* pombo voando (asas batendo) */
+        static const char *P1[] = { "...KK....", ".KKGGK..K", "KGGGGGKKW", ".KGGGGGK.", "..KK.K..." };
+        static const char *P2[] = { "K..KK....", "KK.GGK..K", ".KGGGGKKW", ".KGGGGGK.", "..KK.K..." };
+        const char **pp = (quadro / 5) % 2 ? P1 : P2;
+        for (int j = 0; j < 5; j++)
+            for (int i = 0; i < 9; i++) {
+                uint32_t c = cor_arte(pp[j][i]);
+                if (c != 0xFFFFFFFF) ret_c(UX(o->x + 8 - i), UY(o->y + j), u, u, c);
+            }
     }
 }
 
@@ -450,8 +495,30 @@ static void desenhar_tudo(void) {
     /* placar dentro do painel */
     if (!so_progresso) {
         char s[96];
-        snprintf(s, sizeof s, "%s %d   %s %d", T("Peixes", "Fish"), peixes, T("Recorde", "Best"), recorde);
+        snprintf(s, sizeof s, "%s %d   %s %d   %d m", T("Peixes", "Fish"), peixes, T("Recorde", "Best"), recorde,
+                 (int)distancia);
         texto(f, PX + 3 * u, PY + 3 * u, s, C_TEXTO);
+        static const char *COR[] = { ".KK.KK.", "KWWKWWK", "KWWWWWK", ".KWWWK.", "..KWK..", "...K..." };
+        int hu = u > 3 ? u * 2 / 3 : u;
+        for (int v = 0; v < 3; v++)
+            for (int j = 0; j < 6; j++)
+                for (int i = 0; i < 7; i++) {
+                    char c = COR[j][i];
+                    if (c == '.') continue;
+                    uint32_t cor = c == 'K' ? RGB(16, 16, 16) : (v < vidas ? RGB(235, 235, 235) : RGB(70, 70, 72));
+                    ret(PX + PW - (3 - v) * 9 * hu - 2 * u + i * hu, PY + 3 * u + j * hu, hu, hu, cor);
+                }
+        if (demo && !fim && (quadro / 20) % 2)
+            texto_centro(f, PX + PW / 2, PY + 3 * u + f->h + u, T("demonstração · aperte Espaço para jogar", "demo · press Space to play"), C_TEXTO2);
+        if (fim) {
+            int bw = PW * 2 / 3, bh = ft->h * 2 + f->h * 2 + 6 * u, bx = PX + (PW - bw) / 2, by = PY + (PH - bh) / 2;
+            ret(bx - u, by - u, bw + 2 * u, bh + 2 * u, RGB(150, 150, 152));
+            ret(bx, by, bw, bh, RGB(20, 20, 22));
+            texto_centro(ft, PX + PW / 2, by + 2 * u, T("Fim de jogo!", "Game over!"), C_TEXTO);
+            char r[96]; snprintf(r, sizeof r, T("%d peixes · %d m", "%d fish · %d m"), peixes, (int)distancia);
+            texto_centro(f, PX + PW / 2, by + 3 * u + ft->h + u, r, C_TEXTO2);
+            texto_centro(f, PX + PW / 2, by + 4 * u + ft->h + f->h + u, T("Espaço para jogar de novo", "Space to play again"), C_TEXTO);
+        }
     }
     /* rodapé: título, barra, etapa, dicas */
     int y = PY + PH + 6 * u;
@@ -495,9 +562,11 @@ static void ler_teclas(void) {
         if (n <= 0) return;
         parado_desde = quadro;
         for (ssize_t i = 0; i < n; i++) {
-            if (c[i] == 27 && i + 2 < n && c[i + 1] == '[') { if (c[i + 2] == 'A') pular_pedido = 1; i += 2; }
+            if (c[i] == 27 && i + 2 < n && c[i + 1] == '[') { if (c[i + 2] == 'A') { pular_pedido = 1; if (demo) { demo = 0; recomecar(); } } i += 2; }
             else if (c[i] == 27) so_progresso = !so_progresso;
-            else if (c[i] == ' ' || c[i] == 'w' || c[i] == 'W' || c[i] == 'k') pular_pedido = 1;
+            else if (c[i] == ' ' || c[i] == 'w' || c[i] == 'W' || c[i] == 'k') {
+                if (demo) { demo = 0; recomecar(); } else pular_pedido = 1;
+            }
         }
     }
 }
@@ -565,7 +634,12 @@ static int captura(const char *saida, int p) {
     pct = p; snprintf(etapa, sizeof etapa, "%s", T("Copiando o sistema", "Copying the system"));
     snprintf(ultima_linha, sizeof ultima_linha, "unsquashfs: 2041/3310");
     peixes = 7; recorde = 12;
-    for (int i = 0; i < 150; i++) atualizar();
+    recomecar();
+    if (getenv("CAPTURA_DIST")) distancia = atoi(getenv("CAPTURA_DIST"));
+    int nq = getenv("CAPTURA_QUADROS") ? atoi(getenv("CAPTURA_QUADROS")) : 150;
+    for (int i = 0; i < nq; i++) atualizar();
+    if (getenv("CAPTURA_FIM")) { vidas = 0; fim = 1; demo = 0; }
+    else if (getenv("CAPTURA_JOGO")) { demo = 0; vidas = 2; }
     if (getenv("CAPTURA_ESC")) so_progresso = 1;
     desenhar_tudo();
     FILE *f = fopen(saida, "wb");
@@ -605,7 +679,7 @@ int main(int argc, char **argv) {
     }
     calcular_layout();
     recorde = 0;
-    novo_obstaculo(GW + 20);
+    recomecar();
 
     struct timespec t0; clock_gettime(CLOCK_MONOTONIC, &t0);
     long prox = 0;

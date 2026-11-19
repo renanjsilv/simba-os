@@ -232,10 +232,21 @@ def claude_login():
 
 
 def opencode_bin():
-    if os.path.exists(OPENCODE):
-        return OPENCODE
+    # o do sistema (pacote da ISO) primeiro; depois o do mise; por último o PATH, sem o atalho
+    # preguiçoso de ~/.local/bin (ele baixa pelo mise e falhava na 1ª inicialização)
+    for p in ("/usr/bin/opencode", OPENCODE):
+        if os.path.exists(p):
+            return p
     import shutil
-    return shutil.which("opencode") or ""
+    achado = shutil.which("opencode") or ""
+    if achado.startswith(os.path.join(HOME, ".local", "bin")):
+        try:
+            if "exec mise x" in open(achado, errors="replace").read(400):
+                return shutil.which("opencode", path=os.environ.get("PATH", "").replace(
+                    os.path.join(HOME, ".local", "bin"), "")) or achado
+        except OSError:
+            pass
+    return achado
 
 
 def free_models(refresh=False):

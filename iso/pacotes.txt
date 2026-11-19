@@ -44,3 +44,4 @@ wine-staging wine-mono wine-gecko umu-launcher gamemode mangohud icoutils
 
 # Simba
 simba simba-apps simba-draco simba-keyring opencode
+libayatana-appindicator

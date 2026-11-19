@@ -91,7 +91,8 @@ fi
 mapfile -t PACOTES < <(grep -vE '^\s*(#|$)' "$I/pacotes.txt" | tr -s ' \t' '\n' | grep .)
 info "${#PACOTES[@]} pacotes na receita"
 # -G: não copia o chaveiro desta máquina; o do sistema novo é criado logo abaixo
-pacstrap -C "$WORK/pacman.conf" -G "$RAIZ" "${PACOTES[@]}" || die "pacstrap falhou"
+# SNAP_PAC_SKIP=1 evita falha do gancho do snap-pac tentando tirar snapshot durante pacstrap
+SNAP_PAC_SKIP=1 pacstrap -C "$WORK/pacman.conf" -G "$RAIZ" "${PACOTES[@]}" || die "pacstrap falhou"
 for p in "${PACOTES[@]}"; do
   pacman --root "$RAIZ" -Q "$p" >/dev/null 2>&1 || die "pacote da receita não ficou instalado: $p"
 done

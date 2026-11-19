@@ -284,6 +284,7 @@ class Janela(Adw.ApplicationWindow):
         self.monitor_tema = Gio.File.new_for_path(os.path.join(ESTADO_TEMA, "theme.name")).monitor_file(
             Gio.FileMonitorFlags.NONE, None)
         self.monitor_tema.connect("changed", lambda *_: GLib.timeout_add(250, self.aplicar_tema))
+        self.connect("notify::is-active", self._janela_ativa)
         self.aplicar_tema()
         self.pagina_mudou(self.carrossel, 0)
         inicio = int(os.environ.get("BOAS_VINDAS_PAGINA", "0") or 0)  # para testes/capturas
@@ -302,7 +303,6 @@ class Janela(Adw.ApplicationWindow):
             self.get_renderer().render_texture(no, None).save_to_png(caminho)
         self.get_application().quit()
         return False
-        self.atualizar_conta()
 
     # ── estrutura de página ───────────────────────────────────────────
     def pagina(self, titulo, texto, ilustracao=None, extra=None, tamanho=200):
@@ -493,27 +493,48 @@ class Janela(Adw.ApplicationWindow):
         return pagina
 
     # Escolha do que sincronizar (aparece logo depois do 1º login; nada é enviado antes).
-    ESCOLHAS = [
-        ("config", "Configurações e aplicativos"),
-        ("imagens", "Papéis de parede e imagens"),
-        ("historico", "Histórico do navegador e do terminal"),
-        ("documentos", "Documentos e área de trabalho"),
-        ("pacotes", "Lista de programas instalados"),
-        ("fundo", "Papel de parede igual nos outros computadores"),
+    # Só duas perguntas: QUAIS PASTAS vão para o Drive e se o papel de parede fica igual nos
+    # outros computadores. Configurações, histórico, chaves etc. ficam de fora (Contas, depois).
+    PASTAS = [  # (diretório XDG, rótulo, marcada por padrão)
+        ("DOCUMENTS", "Documentos", True),
+        ("PICTURES", "Imagens", True),
+        ("DESKTOP", "Área de trabalho", True),
+        ("MUSIC", "Músicas", False),
+        ("VIDEOS", "Vídeos", False),
+        ("DOWNLOAD", "Downloads", False),
     ]
 
+    def _pastas_usuario(self):
+        casa = os.path.expanduser("~")
+        vistas, achadas = set(), []
+        for xdg, rotulo, padrao in self.PASTAS:
+            try:
+                d = subprocess.run(["xdg-user-dir", xdg], capture_output=True, text=True, timeout=3).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                d = ""
+            if not d or d.rstrip("/") == casa or d in vistas or not os.path.isdir(d):
+                continue
+            vistas.add(d)
+            achadas.append((os.path.relpath(d, casa), rotulo, padrao))
+        return achadas
+
     def _montar_escolha(self):
-        self.escolha_caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, visible=False)
-        rotulo = Gtk.Label(label=_t("O que você quer sincronizar?"))
+        self.escolha_caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, visible=False)
+        rotulo = Gtk.Label(label=_t("Quais pastas você quer guardar no Drive?"))
         rotulo.add_css_class("heading")
         self.escolha_caixa.append(rotulo)
         grade = Gtk.Grid(column_spacing=24, row_spacing=4, halign=Gtk.Align.CENTER)
-        self.escolha_opcoes = {}
-        for i, (chave, texto) in enumerate(self.ESCOLHAS):
-            cb = Gtk.CheckButton(label=_t(texto), active=True)
-            self.escolha_opcoes[chave] = cb
-            grade.attach(cb, i % 2, i // 2, 1, 1)
+        self.escolha_pastas = {}
+        for i, (rel, texto, padrao) in enumerate(self._pastas_usuario()):
+            cb = Gtk.CheckButton(label=_t(texto), active=padrao)
+            self.escolha_pastas[rel] = cb
+            grade.attach(cb, i % 3, i // 3, 1, 1)
         self.escolha_caixa.append(grade)
+        linha = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER, margin_top=6)
+        linha.append(Gtk.Label(label=_t("Usar o mesmo papel de parede nos seus outros computadores?")))
+        self.escolha_fundo = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
+        linha.append(self.escolha_fundo)
+        self.escolha_caixa.append(linha)
         self.escolha_botao = self.botao(_t("Começar a sincronizar"), self.confirmar_escolha, True)
         self.escolha_caixa.append(self.escolha_botao)
         return self.escolha_caixa
@@ -526,12 +547,12 @@ class Janela(Adw.ApplicationWindow):
         self.conta_botao.set_visible(not mostrar)
 
     def confirmar_escolha(self):
-        cats = [k for k, _ in self.ESCOLHAS if k != "fundo" and self.escolha_opcoes[k].get_active()]
-        fundo = "liga" if self.escolha_opcoes["fundo"].get_active() else "desliga"
+        pastas = [rel for rel, cb in self.escolha_pastas.items() if cb.get_active()]
+        fundo = "liga" if self.escolha_fundo.get_active() else "desliga"
         self.escolha_botao.set_sensitive(False)
 
         def escolher():
-            return subprocess.run(["conta", "escolher", "--categorias", ",".join(cats), "--fundo", fundo],
+            return subprocess.run(["conta", "escolher", "--pastas", ",".join(pastas), "--fundo", fundo],
                                   capture_output=True, timeout=60).returncode
 
         def pronto(rc):
@@ -541,7 +562,7 @@ class Janela(Adw.ApplicationWindow):
                 return
             self._sincronizou_inicial = True   # `conta escolher` já ligou e sincronizou
             self._mostrar_escolha(False)
-            self.toast(_t("Sincronização iniciada") if cats else _t("Escolha salva"))
+            self.toast(_t("Sincronização iniciada") if pastas else _t("Escolha salva"))
             self.atualizar_conta()
         em_segundo_plano(escolher, pronto)
 
@@ -815,13 +836,25 @@ class Janela(Adw.ApplicationWindow):
         self.conta_estado.set_label(_t("Termine o login na janela do navegador…"))
         self.conta_estado.set_visible(True)
         # acompanha o login até terminar (até 2 minutos)
-        self.tentativas_conta = 40
-        GLib.timeout_add_seconds(3, self._vigiar_conta)
+        # o login (escolher conta, senha, verificação em 2 etapas) pode levar minutos: confere a
+        # cada 2 s por até 10 min (o mesmo prazo do `conta entrar`); ao voltar para a janela,
+        # confere na hora (ver _janela_ativa)
+        self.tentativas_conta = 300
+        if not getattr(self, "vigia_conta_id", 0):
+            self.vigia_conta_id = GLib.timeout_add(2000, self._vigiar_conta)
 
     def _vigiar_conta(self):
         self.tentativas_conta -= 1
         self.atualizar_conta()
-        return self.tentativas_conta > 0 and not getattr(self, "conectado", False)
+        continua = self.tentativas_conta > 0 and not getattr(self, "conectado", False)
+        if not continua:
+            self.vigia_conta_id = 0
+        return continua
+
+    def _janela_ativa(self, *_a):
+        # voltou do navegador para as boas-vindas: confere o login na hora
+        if self.is_active() and getattr(self, "tentativas_conta", 0) > 0 and not getattr(self, "conectado", False):
+            self.atualizar_conta()
 
     def atualizar_conta(self):
         if not shutil.which("conta"):

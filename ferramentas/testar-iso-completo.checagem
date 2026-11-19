@@ -12,6 +12,18 @@ GW=$(ip r | awk '/default/{print $3; exit}')
 GW=${GW:-192.168.122.1}
 j() { jq -Rs . <<<"$1"; }   # texto → string JSON
 
+# Espera o first-run do Simba concluir (ele habilita e inicia botoes-janela e simba-atualizar-avisar)
+for _ in $(seq 30); do
+  if [ -f "$HOME/.local/state/simba/done/first-run-user" ]; then break; fi
+  sleep 2
+done
+
+# Espera a camada do canto dos botões de janela subir (qs configuracoes carrega o componente em até ~10s)
+for _ in $(seq 15); do
+  if hyprctl layers -j 2>/dev/null | grep -q "botoes-janela-area"; then break; fi
+  sleep 1
+done
+
 camadas=$(hyprctl layers -j 2>/dev/null | jq -c '[.[].levels[][]?.namespace] | unique')
 boas=$(hyprctl clients -j 2>/dev/null | jq '[.[] | select(.class == "com.simba.BoasVindas")] | length > 0')
 

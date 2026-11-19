@@ -73,6 +73,7 @@ CATEGORIAS = {
     "documentos": _t("Documentos e área de trabalho"),
     "pacotes": _t("Lista de programas instalados"),
     "segredos": _t("Chaves SSH e chaves de API (só com criptografia)"),
+    "pastas": _t("Pastas escolhidas"),
 }
 
 # Caminhos relativos à pasta pessoal por categoria (pastas entram inteiras,
@@ -144,7 +145,8 @@ def config():
     c = ler_json(CFG, {})
     c.setdefault("auto", True)
     c.setdefault("cripto", False)
-    c.setdefault("categorias", {k: k != "segredos" for k in CATEGORIAS})
+    c.setdefault("categorias", {k: k not in ("segredos", "pastas") for k in CATEGORIAS})
+    c["categorias"].setdefault("pastas", False)
     c.setdefault("pastas_personalizadas", [])
     c.setdefault("pastas_excluidas", [])
     c.setdefault("sincronizar_fundo", True)
@@ -297,14 +299,16 @@ def _excluido(rel, extras=()):
 def listar_arquivos(c=None):
     """Lista (relativa à pasta pessoal) do que vai para o Drive + tamanho total."""
     c = c or config()
-    cats = [k for k, v in c["categorias"].items() if v and k in INCLUIR]
+    cats = [k for k, v in c["categorias"].items() if v and (k in INCLUIR or k == "pastas")]
     if "segredos" in cats and not c.get("cripto"):
         cats.remove("segredos")
     excl_extra = list(c.get("pastas_excluidas", []))
     vistos, lista, total = set(), [], 0
     for cat in cats:
         liberar = INCLUIR["segredos"] if cat == "segredos" else []
-        bases = list(INCLUIR[cat])
+        bases = list(INCLUIR.get(cat, []))
+        if cat == "pastas":   # só as pastas que a pessoa marcou (boas-vindas / Contas)
+            bases = [x for x in c.get("pastas_personalizadas", []) if x]
         if cat == "documentos":
             for p_extra in c.get("pastas_personalizadas", []):
                 if p_extra and p_extra not in bases:
@@ -631,6 +635,7 @@ def cmd_status(_a):
     lig = conectado()
     timer = subprocess.run(["systemctl", "--user", "is-enabled", "conta-sync.timer"], capture_output=True, text=True).stdout.strip()
     rodando = False
+    TRAVA.parent.mkdir(parents=True, exist_ok=True)
     try:
         with open(TRAVA, "w") as f:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1839,6 +1844,21 @@ def cmd_escolher(a):
             return 2
         for k in CATEGORIAS:
             c["categorias"][k] = k in escolhidas and (k != "segredos" or bool(c.get("cripto")))
+    if getattr(a, "pastas", None) is not None:
+        # escolha por pastas (boas-vindas): só elas; configurações, histórico etc. ficam de fora
+        pastas = []
+        for x in a.pastas.split(","):
+            x = x.strip()
+            if x.startswith(str(HOME)):
+                x = os.path.relpath(x, HOME)
+            x = x.strip("/")
+            if x and not x.startswith("..") and (HOME / x).is_dir() and x not in pastas:
+                pastas.append(x)
+        c["pastas_personalizadas"] = pastas
+        if a.categorias is None:
+            for k in CATEGORIAS:
+                c["categorias"][k] = False
+        c["categorias"]["pastas"] = bool(pastas)
     if a.fundo:
         c["sincronizar_fundo"] = a.fundo == "liga"
     c["escolha_feita"] = True
@@ -1924,6 +1944,7 @@ def main():
     sub.add_parser("tamanho").set_defaults(f=cmd_tamanho)
     p = sub.add_parser("escolher", help="o que sincronizar (escolha do 1º login)")
     p.add_argument("--categorias", help="ids separados por vírgula (vazio = nenhuma)")
+    p.add_argument("--pastas", help="pastas da pasta pessoal, separadas por vírgula (só elas vão)")
     p.add_argument("--fundo", choices=["liga", "desliga"])
     p.set_defaults(f=cmd_escolher)
     p = sub.add_parser("fundo", help="papel de parede imediato entre máquinas")

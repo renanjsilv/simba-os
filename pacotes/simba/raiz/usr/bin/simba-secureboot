@@ -66,6 +66,10 @@ atualizar() {
 
 registrar() {  # [arquivo-hash]
   [ -f "$CHAVES/db.der" ] || openssl x509 -in "$CHAVES/db.pem" -outform DER -out "$CHAVES/db.der"
+  # plano B: o certificado (público) na partição EFI, para "Enroll key from disk" no MokManager
+  install -m644 "$CHAVES/db.der" "$ESP/ENROLL_THIS_KEY_IN_MOKMANAGER.cer"
+  # a tela azul espera a pessoa (o padrão é 10 s; depois disso o pedido de registro se perde)
+  mokutil --timeout -1 >/dev/null 2>&1 || true
   if mokutil --test-key "$CHAVES/db.der" 2>/dev/null | grep -qi "already enrolled"; then return 0; fi
   if [ -n "${1:-}" ]; then
     mokutil --import "$CHAVES/db.der" --hash-file "$1"
@@ -87,6 +91,9 @@ preparar() {  # [arquivo-hash]
   install -m644 "$LIMINE_SRC" "$DIR/limine_x64.efi"
   SIMBA_SECUREBOOT_DENTRO=1 limine-install >/dev/null 2>&1 || true   # refaz a cópia de segurança do binário
   mkdir -p "$DIR"; install -m644 "$SHIM/shimx64.efi" "$DIR/shimx64.efi"
+  # kernel (UKI) gerado antes da chave existir não tem assinatura: gera de novo (o gancho do
+  # sbctl no mkinitcpio assina e o limine-entry-tool grava o hash novo na configuração)
+  SIMBA_SECUREBOOT_DENTRO=1 limine-mkinitcpio >/dev/null 2>&1 || true
   atualizar
   # só agenda o registro se o computador está com Secure Boot ligado (senão a tela azul seria à toa)
   if mokutil --sb-state 2>/dev/null | grep -qi enabled; then registrar "${1:-}"; fi
@@ -99,7 +106,7 @@ estado() {
     printf 'Registro no shim: %s\n' "$(mokutil --test-key "$CHAVES/db.der" 2>&1 | head -1)"
   fi
   printf 'Limine com .sbat: %s\n' "$(objdump -h "$DIR/limine_x64.efi" 2>/dev/null | grep -q ' \.sbat ' && echo sim || echo não)"
-  [ -f "$DIR/grubx64.efi" ] && sbverify --list "$DIR/grubx64.efi" 2>/dev/null | grep -m1 subject || true
+  sbctl verify 2>/dev/null | sed 's/^/  /' || true
 }
 
 case ${1:-estado} in

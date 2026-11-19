@@ -695,6 +695,14 @@ if arch-chroot "$T" sh -c 'command -v simba-secureboot && command -v sbctl && co
     arch-chroot "$T" mokutil --generate-hash="$PASS1" > "$T$hash" 2>> "$LOG" || hash=""
   fi
   x arch-chroot "$T" env SIMBA_ESP=/boot simba-secureboot preparar $hash || echo "aviso: secure boot" >> "$LOG"
+  # (também no instalador, para valer mesmo com um simba-secureboot mais antigo no sistema)
+  # kernel gerado antes da chave existir: gera de novo (sai assinado e com o hash certo) e sela
+  x arch-chroot "$T" limine-mkinitcpio || echo "aviso: limine-mkinitcpio (secure boot)" >> "$LOG"
+  x arch-chroot "$T" env SIMBA_ESP=/boot simba-secureboot atualizar || true
+  if [ "$SB_LIGADO" = 1 ]; then
+    for c in "$T"/var/lib/sbctl/keys/db/db.der; do [ -f "$c" ] && install -m644 "$c" "$T/boot/ENROLL_THIS_KEY_IN_MOKMANAGER.cer"; done
+    arch-chroot "$T" mokutil --timeout -1 >> "$LOG" 2>&1 || true
+  fi
   rm -f "$T/root/.simba-mok-hash"
   [ "$SB_LIGADO" = 1 ] && AVISO_SB=1
 fi
@@ -751,7 +759,7 @@ if [ "$MODO" = distribuivel ]; then
 fi
 if [ -n "${AVISO_SB:-}" ]; then
   printf '%*s\e[1;37m%s\e[0;37m\n' $REC '' "$(t "Secure Boot: na próxima inicialização aparece uma tela azul (uma vez só)." "Secure Boot: a blue screen appears at the next startup (only once).")"
-  printf '%*s\e[1;30m%s\e[0;37m\n\n' $REC '' "$(t "Escolha Enroll MOK → Continue → Yes, digite a senha da sua conta e escolha Reboot." "Choose Enroll MOK → Continue → Yes, type your account password and choose Reboot.")"
+  printf '%*s\e[1;30m%s\e[0;37m\n\n' $REC '' "$(t "Aperte uma tecla → Enroll MOK → Continue → Yes → senha da sua conta → Reboot." "Press a key → Enroll MOK → Continue → Yes → your account password → Reboot.")"
 fi
 if [ -n "$AVISO_HW" ]; then
   printf '%*s\e[33m%s\e[0;37m\n\n' $REC '' "$AVISO_HW"

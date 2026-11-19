@@ -351,6 +351,18 @@ else
   cp "$BASE_ISO" "$CACHE_LIVE/$CHAVE_LIVE.iso"
 fi
 
+# ---------------------------------------------------------------- Secure Boot
+# shim (Microsoft) → systemd-boot e kernel assinados com a chave do Simba OS. Sem a chave nesta
+# máquina a ISO sai como antes (liga só com o Secure Boot desligado).
+SB_DIR=${SIMBA_SB_DIR:-$(getent passwd "$OWNER" | cut -d: -f6)/.local/share/simba-secureboot}
+if [ -f "$SB_DIR/simba-os-mok.key" ]; then
+  msg "Preparando o pendrive para o Secure Boot (shim + chave do Simba OS)"
+  SIMBA_SB_DIR="$SB_DIR" "$SRC/secureboot-iso" "$BASE_ISO" "$WORK/base-sb.iso" >/dev/null
+  BASE_ISO="$WORK/base-sb.iso"
+else
+  info "sem a chave do Secure Boot ($SB_DIR): o pendrive liga só com o Secure Boot desligado"
+fi
+
 # ---------------------------------------------------------------- clone na ISO
 etapa embutir "Embutindo o clone na ISO"
 msg "Embutindo o clone na ISO"
@@ -364,6 +376,7 @@ xorriso -indev "$BASE_ISO" -outdev "$ISO" -volid "$VOLID" \
   -map "$WORK/marca" /clone/marca \
   -map "$SRC/instalar-clone" /clone/instalar-clone \
   -boot_image any replay
+rm -f "$WORK/base-sb.iso"
 chown "$OWNER:" "$ISO" 2>/dev/null || true
 
 msg "ISO pronta"

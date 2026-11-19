@@ -16,7 +16,8 @@ Guia passo a passo, do download ao primeiro uso. Leva uns 30 minutos.
 | Pendrive | 8 GB (será apagado) | — |
 | Internet | Não precisa para instalar | Precisa para atualizar e instalar apps |
 
-- **Secure Boot desligado.** O Simba OS ainda não é assinado para Secure Boot.
+- **Secure Boot pode ficar ligado.** Na primeira vez em cada computador aparece uma tela azul
+  para registrar a chave do Simba OS (veja o passo 4). Não é preciso desligar nada na BIOS.
 - Placas NVIDIA: o instalador detecta o modelo e escolhe o driver. Placas muito antigas
   (série GeForce 600/700 Kepler ou anteriores) não têm driver atual e usam o vídeo genérico.
 
@@ -68,11 +69,22 @@ Programas que guardam várias ISOs no mesmo pendrive (como o Ventoy) não foram 
    início. Varia por fabricante: **F12** (Dell, Lenovo), **F9** (HP), **F8** (Asus),
    **F11** (MSI, ASRock), **Esc** ou **F12** (Acer).
 2. Escolha o pendrive, a opção que começa com **UEFI**.
-3. Se o pendrive não aparecer, ou aparecer um aviso de segurança, entre na configuração do
-   computador (**F2** ou **Del** ao ligar), **desligue o Secure Boot** e confira se o modo de
-   boot está em **UEFI** (não "Legacy" nem "CSM").
+3. Se o pendrive não aparecer, entre na configuração do computador (**F2** ou **Del** ao ligar)
+   e confira se o modo de boot está em **UEFI** (não "Legacy" nem "CSM").
 
-O pendrive mostra o gato do Simba e abre o instalador sozinho.
+**Com Secure Boot ligado (só na primeira vez neste computador):** aparece uma tela azul
+"Verification failed". É o aviso de que o computador ainda não conhece a chave do Simba OS:
+
+1. **OK** → aperte qualquer tecla em "Press any key to perform MOK management".
+2. **Enroll key from disk** → **EFIBOOT** → **ENROLL_THIS_KEY_IN_MOKMANAGER.cer**.
+3. **Continue** → **Yes** → **Reboot**.
+
+Depois disso o pendrive liga direto, com o Secure Boot ligado. O sistema instalado tem uma
+chave própria: na primeira vez que ele ligar, a tela azul aparece de novo (**Enroll MOK** →
+**Continue** → **Yes**) e pede a **senha da sua conta**. É uma vez só.
+
+O pendrive mostra o gato do Simba e abre o instalador sozinho. Enquanto instala, dá para
+jogar o mini game do Simba nos telhados (Espaço pula; Esc esconde o jogo).
 
 ## 5. Instalar
 
@@ -119,8 +131,10 @@ O computador deu boot no modo antigo (Legacy/CSM). Escolha no menu de boot a op�
 pendrive que começa com **UEFI**, ou desligue o CSM na configuração do computador.
 
 **O pendrive não aparece no menu de boot**
-Desligue o **Secure Boot**. Se continuar, grave de novo (no Rufus, em modo DD) ou tente
-outra porta USB.
+Grave de novo (no Rufus, em modo DD) ou tente outra porta USB.
+
+**Tela azul "Verification failed" ou "Security Violation"**
+É o Secure Boot pedindo para registrar a chave do Simba OS: siga os passos do item 4.
 
 **"Nenhum disco com espaço suficiente"**
 O disco precisa de pelo menos 25 GB. O próprio pendrive nunca aparece na lista.

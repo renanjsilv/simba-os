@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = limine
+
+[Action]
+Description = Simba OS: seção SBAT no Limine (Secure Boot)...
+When = PostTransaction
+Exec = /usr/bin/simba-secureboot sbat

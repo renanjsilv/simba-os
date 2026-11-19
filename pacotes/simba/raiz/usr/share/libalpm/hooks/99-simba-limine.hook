@@ -6,4 +6,4 @@ Target = limine
 [Action]
 Description = Deploying Simba Limine after upgrade...
 When = PostTransaction
-Exec = /bin/sh -c "/usr/bin/cp /usr/share/limine/BOOTX64.EFI /boot/EFI/limine/limine_x64.efi"
+Exec = /bin/sh -c "/usr/bin/cp /usr/share/limine/BOOTX64.EFI /boot/EFI/limine/limine_x64.efi; /usr/bin/simba-secureboot atualizar"

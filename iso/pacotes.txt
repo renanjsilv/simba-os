@@ -5,7 +5,7 @@
 # base e boot
 base base-devel linux linux-firmware linux-headers intel-ucode amd-ucode sof-firmware
 btrfs-progs cryptsetup dosfstools exfatprogs ntfs-3g efibootmgr mkinitcpio
-limine limine-mkinitcpio-hook limine-snapper-sync snapper snap-pac plymouth zram-generator
+limine limine-mkinitcpio-hook limine-snapper-sync snapper snap-pac plymouth zram-generator sbctl mokutil
 sudo man-db less inetutils whois unzip
 
 # rede, som, energia, Bluetooth, impressão

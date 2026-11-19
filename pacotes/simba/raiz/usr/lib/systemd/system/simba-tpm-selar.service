@@ -1,0 +1,11 @@
+[Unit]
+Description=Simba OS: amarra o desbloqueio do disco pelo TPM ao Secure Boot (PCR 7)
+After=local-fs.target
+ConditionPathExists=/etc/crypttab
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/simba/simba-tpm-selar
+
+[Install]
+WantedBy=multi-user.target

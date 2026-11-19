@@ -1,0 +1,6 @@
+#!/bin/sh
+# Depois de o Limine mudar (kernel novo, instantâneo, atualização): sela a configuração de novo,
+# assina com a chave deste computador e atualiza a cópia que o shim carrega. Sem Secure Boot
+# preparado, não faz nada.
+[ -x /usr/bin/simba-secureboot ] && /usr/bin/simba-secureboot atualizar
+exit 0

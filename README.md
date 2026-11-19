@@ -142,7 +142,7 @@ conferir o download, gravar o pendrive, dar boot, as perguntas do instalador e p
 | Arquivo | `simba-os-0.1.9-x86_64.iso` |
 | Tamanho | 4,6 GB |
 | SHA-256 | `375f48fcf10e2477f2fa9ebe6b4aa808db074274a678e4c88358fe14d3262eef` |
-| Requisitos | x86_64, UEFI, Secure Boot desligado, disco de 25 GB ou mais (todo apagado) |
+| Requisitos | x86_64, UEFI (Secure Boot pode ficar ligado), disco de 25 GB ou mais (todo apagado) |
 
 ### Num Arch Linux já instalado
 

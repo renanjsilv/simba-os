@@ -1,0 +1,12 @@
+#!/bin/bash
+# simba-tpm-selar — 1ª inicialização com Secure Boot: o instalador gravou o desbloqueio do disco
+# pelo TPM sem PCR (as medições do pendrive e do sistema são diferentes). Agora, já ligando pela
+# cadeia definitiva, troca por um que só abre com o mesmo Secure Boot (PCR 7) e se desativa.
+set -u
+dev=$(awk '$1=="root"{print $2}' /etc/crypttab 2>/dev/null)
+case $dev in UUID=*) dev=/dev/disk/by-uuid/${dev#UUID=} ;; esac
+[ -b "$dev" ] || dev=$(cryptsetup status root 2>/dev/null | awk '/device:/{print $2}')
+if [ -b "$dev" ] && systemd-cryptenroll --unlock-tpm2-device=auto --tpm2-device=auto --tpm2-pcrs=7 \
+     --wipe-slot=tpm2 "$dev"; then
+  systemctl disable simba-tpm-selar.service
+fi

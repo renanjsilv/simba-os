@@ -681,7 +681,25 @@ if [ -f "$T/boot/limine.conf" ]; then
   sed -i '1i timeout: 0\nquiet: yes' "$T/boot/limine.conf"
 fi
 
-for l in '\EFI\limine\limine_x64.efi' '\EFI\limine\BOOTX64.EFI' '\EFI\BOOT\BOOTX64.EFI'; do
+# Secure Boot: shim (assinado pela Microsoft) → Limine assinado com a chave deste computador.
+# Fica pronto em toda instalação; se o computador está com Secure Boot ligado, o registro da
+# chave fica agendado: na 1ª inicialização a tela azul pede a SENHA DA CONTA uma vez.
+SB_LIGADO=0
+sbv=/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c
+[ -r "$sbv" ] && [ "$(od -An -t u1 -j4 -N1 "$sbv" | tr -d ' ')" = 1 ] && SB_LIGADO=1
+if arch-chroot "$T" sh -c 'command -v simba-secureboot && command -v sbctl && command -v mokutil' >/dev/null 2>&1; then
+  progresso 95 "$(t "Preparando o Secure Boot" "Setting up Secure Boot")"
+  hash=""
+  if [ "$SB_LIGADO" = 1 ] && [ -n "${PASS1:-}" ]; then
+    hash=/root/.simba-mok-hash
+    arch-chroot "$T" mokutil --generate-hash="$PASS1" > "$T$hash" 2>> "$LOG" || hash=""
+  fi
+  x arch-chroot "$T" env SIMBA_ESP=/boot simba-secureboot preparar $hash || echo "aviso: secure boot" >> "$LOG"
+  rm -f "$T/root/.simba-mok-hash"
+  [ "$SB_LIGADO" = 1 ] && AVISO_SB=1
+fi
+
+for l in '\EFI\limine\shimx64.efi' '\EFI\limine\limine_x64.efi' '\EFI\limine\BOOTX64.EFI' '\EFI\BOOT\BOOTX64.EFI'; do
   if [ -f "$T/boot${l//\\//}" ]; then
     x efibootmgr --create --disk "$DISK" --part 1 --label "$NOME_SISTEMA" --loader "$l" || true
     break
@@ -690,7 +708,14 @@ done
 
 if [ "$USE_TPM" = s ]; then
   progresso 98 "$(t "Vinculando ao chip de segurança" "Enrolling the security chip")"
-  PASSWORD=$PASS1 x systemd-cryptenroll --tpm2-device=auto "$LUKS" || echo "aviso: TPM" >> "$LOG"
+  if [ "$SB_LIGADO" = 1 ]; then
+    # Com Secure Boot as medições (PCR 7) do pendrive e do sistema instalado são diferentes:
+    # grava sem PCR e, na 1ª inicialização, simba-tpm-selar amarra ao PCR 7 já com os valores certos.
+    PASSWORD=$PASS1 x systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs= "$LUKS" || echo "aviso: TPM" >> "$LOG"
+    x arch-chroot "$T" systemctl enable simba-tpm-selar.service || true
+  else
+    PASSWORD=$PASS1 x systemd-cryptenroll --tpm2-device=auto "$LUKS" || echo "aviso: TPM" >> "$LOG"
+  fi
 fi
 unset PASS1 PASS2
 
@@ -723,6 +748,10 @@ pergunta "$(t "O $NOME_SISTEMA foi instalado" "$NOME_SISTEMA is installed")" \
   "$(t "Retire o pendrive. Ao ligar, entre com a sua senha." "Remove the USB drive. At startup, sign in with your password.")"
 if [ "$MODO" = distribuivel ]; then
   printf '%*s\e[1;30m%s\e[0;37m\n\n' $REC '' "$(t "Usuário: $NEW_USER" "User: $NEW_USER")"
+fi
+if [ -n "${AVISO_SB:-}" ]; then
+  printf '%*s\e[1;37m%s\e[0;37m\n' $REC '' "$(t "Secure Boot: na próxima inicialização aparece uma tela azul (uma vez só)." "Secure Boot: a blue screen appears at the next startup (only once).")"
+  printf '%*s\e[1;30m%s\e[0;37m\n\n' $REC '' "$(t "Escolha Enroll MOK → Continue → Yes, digite a senha da sua conta e escolha Reboot." "Choose Enroll MOK → Continue → Yes, type your account password and choose Reboot.")"
 fi
 if [ -n "$AVISO_HW" ]; then
   printf '%*s\e[33m%s\e[0;37m\n\n' $REC '' "$AVISO_HW"

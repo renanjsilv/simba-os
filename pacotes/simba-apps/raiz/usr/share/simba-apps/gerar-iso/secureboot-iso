@@ -1,0 +1,71 @@
+#!/bin/bash
+# secureboot-iso <iso-do-archiso> <saída.iso> — pendrive que liga com Secure Boot ATIVO.
+#
+# Cadeia: firmware (chaves da Microsoft) → shim (assinado pela Microsoft, do Fedora)
+#         → systemd-boot (assinado com a chave do Simba OS) → kernel (assinado com a mesma chave).
+# Na 1ª vez em cada computador o shim não conhece a chave do Simba OS e abre o MokManager
+# (tela azul): "Enroll key from disk" → ENROLL_THIS_KEY_IN_MOKMANAGER.cer → Yes → Reboot.
+# Depois disso liga direto, sempre com o Secure Boot ligado. Sem Secure Boot nada muda.
+#
+# Variáveis:
+#   SIMBA_SB_DIR    pasta com simba-os-mok.key/.crt/.cer (padrão ~dono/.local/share/simba-secureboot)
+#   SIMBA_SHIM_DIR  pasta com shimx64.efi e mmx64.efi assinados (padrão /usr/share/simba/shim)
+set -euo pipefail
+in=${1:?iso} out=${2:?saída}
+SB=${SIMBA_SB_DIR:-${SUDO_USER:+$(getent passwd "$SUDO_USER" | cut -d: -f6)}/.local/share/simba-secureboot}
+[ -d "$SB" ] || SB=$HOME/.local/share/simba-secureboot
+SHIM=${SIMBA_SHIM_DIR:-/usr/share/simba/shim}
+for f in "$SB/simba-os-mok.key" "$SB/simba-os-mok.crt" "$SB/simba-os-mok.cer" "$SHIM/shimx64.efi" "$SHIM/mmx64.efi"; do
+  [ -f "$f" ] || { echo "secureboot-iso: falta $f" >&2; exit 2; }
+done
+for c in xorriso sbsign mcopy mformat mdir; do command -v $c >/dev/null || { echo "secureboot-iso: falta $c" >&2; exit 2; }; done
+
+tmp=$(mktemp -d "${TMPDIR:-/var/tmp}/sb-iso.XXXXXX"); trap 'rm -rf "$tmp"' EXIT
+assinar() { sbsign --key "$SB/simba-os-mok.key" --cert "$SB/simba-os-mok.crt" --output "$2" "$1" >/dev/null; }
+
+# ---------------------------------------------------- partição EFI (anexada à ISO)
+rel=$(xorriso -indev "$in" -report_el_torito as_mkisofs 2>/dev/null)
+intervalo=$(printf '%s\n' "$rel" | sed -n "s/^-append_partition 2 0xef --interval:local_fs:\([0-9]*\)d-\([0-9]*\)d::.*/\1 \2/p")
+[ -n "$intervalo" ] || { echo "secureboot-iso: partição EFI não encontrada na ISO" >&2; exit 1; }
+read -r ini fim <<<"$intervalo"
+dd if="$in" of="$tmp/esp-antiga.img" bs=512 skip="$ini" count=$((fim - ini + 1)) status=none
+mkdir -p "$tmp/esp"
+mcopy -s -n -i "$tmp/esp-antiga.img" "::/*" "$tmp/esp/"
+# a partição antiga vem do tamanho exato; a nova cabe o shim, o MokManager e as assinaturas
+cp "$tmp/esp/EFI/BOOT/BOOTx64.EFI" "$tmp/systemd-boot.efi"
+assinar "$tmp/systemd-boot.efi" "$tmp/esp/EFI/BOOT/grubx64.efi"
+install -m644 "$SHIM/shimx64.efi" "$tmp/esp/EFI/BOOT/BOOTx64.EFI"
+install -m644 "$SHIM/mmx64.efi" "$tmp/esp/EFI/BOOT/mmx64.efi"
+install -m644 "$SB/simba-os-mok.cer" "$tmp/esp/ENROLL_THIS_KEY_IN_MOKMANAGER.cer"
+for k in "$tmp"/esp/*/boot/x86_64/vmlinuz-linux; do
+  [ -f "$k" ] && { assinar "$k" "$k.assinado"; mv "$k.assinado" "$k"; }
+done
+kb=$(( $(du -sk "$tmp/esp" | cut -f1) + 8192 ))
+mformat -C -F -i "$tmp/esp.img" -T $((kb * 2)) -h 64 -s 32 -v EFIBOOT ::
+mcopy -s -i "$tmp/esp.img" "$tmp"/esp/* ::/
+
+# ---------------------------------------------------- árvore da ISO (CD e BIOS usam esta cópia)
+kernel_iso=$(cd "$tmp/esp" && ls -d */boot/x86_64/vmlinuz-linux 2>/dev/null | head -1)
+mapas=(-map "$tmp/esp/EFI/BOOT/BOOTx64.EFI" /EFI/BOOT/BOOTx64.EFI
+       -map "$tmp/esp/EFI/BOOT/grubx64.efi" /EFI/BOOT/grubx64.efi
+       -map "$tmp/esp/EFI/BOOT/mmx64.efi" /EFI/BOOT/mmx64.efi
+       -map "$SB/simba-os-mok.cer" /ENROLL_THIS_KEY_IN_MOKMANAGER.cer)
+[ -n "$kernel_iso" ] && mapas+=(-map "$tmp/esp/$kernel_iso" "/$kernel_iso")
+
+# ---------------------------------------------------- nova ISO (mesmas opções do archiso)
+vol=$(printf '%s\n' "$rel" | sed -n "s/^-V '\(.*\)'$/\1/p")
+data=$(printf '%s\n' "$rel" | sed -n "s/^--modification-date='\(.*\)'$/\1/p")
+rm -f "$out"
+xorriso -indev "$in" -outdev "$out" "${mapas[@]}" -boot_image any discard \
+  -volid "$vol" -compliance iso_9660_level=3 \
+  -as mkisofs \
+    --modification-date="$data" \
+    -isohybrid-mbr "--interval:local_fs:0s-15s:zero_mbrpt,zero_gpt:$in" \
+    -partition_cyl_align off -partition_offset 16 --mbr-force-bootable \
+    -append_partition 2 0xef "$tmp/esp.img" \
+    -iso_mbr_part_type 0x00 \
+    -c /boot/syslinux/boot.cat -b /boot/syslinux/isolinux.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -isohybrid-gpt-basdat \
+    -eltorito-alt-boot -e --interval:appended_partition_2:all:: -no-emul-boot \
+  2>&1 | grep -E "^xorriso : (FAILURE|SORRY)" && exit 1
+echo "$out"

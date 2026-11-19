@@ -1,0 +1,112 @@
+#!/bin/bash
+# simba-secureboot — o Simba OS ligando com o Secure Boot ATIVO (sem desligar nada na BIOS).
+#
+# Cadeia: firmware (chaves da Microsoft) → shim (assinado pela Microsoft) → Limine (assinado com
+# a chave DESTE computador, com a configuração selada dentro dele) → kernel.
+# A chave é criada pelo sbctl em /var/lib/sbctl e registrada no shim (MOK) uma única vez: na
+# inicialização seguinte aparece a tela azul do MokManager pedindo a senha escolhida.
+#
+#   simba-secureboot preparar [arquivo-hash-da-senha]   instala a cadeia (o instalador usa)
+#   simba-secureboot atualizar                          refaz seção .sbat, selo e assinaturas
+#   simba-secureboot registrar                          pede a senha e agenda o registro da chave
+#   simba-secureboot estado                             mostra se está tudo certo
+# Os ganchos do pacman e do Limine chamam `atualizar` sozinhos.
+set -euo pipefail
+ESP=${SIMBA_ESP:-/boot}
+SHIM=/usr/share/simba/shim
+CHAVES=/var/lib/sbctl/keys/db
+LIMINE_SRC=/usr/share/limine/BOOTX64.EFI
+DIR="$ESP/EFI/limine"
+ANEXAR=/usr/lib/simba/pe-anexar-secao
+
+[ "$(id -u)" = 0 ] || exec pkexec "$0" "$@"
+msg() { printf '%s\n' "$*" >&2; }
+
+preparado() { [ -f "$CHAVES/db.key" ] && [ -f "$DIR/shimx64.efi" ]; }
+
+# Seção .sbat no Limine (o shim recusa binários sem ela). No arquivo do pacote, antes de copiar.
+sbat() {
+  local f=${1:-$LIMINE_SRC} v
+  [ -f "$f" ] || return 0
+  objdump -h "$f" 2>/dev/null | grep -q ' \.sbat ' && return 0
+  v=$(pacman -Q limine 2>/dev/null | cut -d' ' -f2); v=${v:-1}
+  printf 'sbat,1,SBAT Version,sbat,1,https://github.com/rhboot/shim/blob/main/SBAT.md\nlimine,1,Limine,limine,%s,https://limine-bootloader.org\nlimine.simba,1,Simba OS,limine,%s,https://github.com/renanjsilv/simba-os\n' "$v" "$v" > /tmp/simba-sbat.csv
+  "$ANEXAR" "$f" "$f.sbat" .sbat /tmp/simba-sbat.csv && mv "$f.sbat" "$f"
+  rm -f /tmp/simba-sbat.csv
+}
+
+# ESP: shim + MokManager ao lado do Limine (o shim carrega "grubx64.efi" da própria pasta)
+copiar_cadeia() {
+  local d
+  for d in "$DIR" "$ESP/EFI/BOOT"; do
+    mkdir -p "$d"
+    install -m644 "$SHIM/shimx64.efi" "$d/shimx64.efi"
+    install -m644 "$SHIM/mmx64.efi" "$d/mmx64.efi"
+    install -m644 "$DIR/limine_x64.efi" "$d/grubx64.efi"
+  done
+  # inicialização reserva (sem entrada na NVRAM): o firmware procura EFI/BOOT/BOOTX64.EFI
+  install -m644 "$SHIM/shimx64.efi" "$ESP/EFI/BOOT/BOOTX64.EFI"
+  sync -f "$DIR/grubx64.efi" 2>/dev/null || true
+}
+
+atualizar() {
+  preparado || return 0
+  sbat
+  # Limine sem a seção (atualização copiou o binário cru): reimplanta a partir do pacote
+  if ! objdump -h "$DIR/limine_x64.efi" 2>/dev/null | grep -q ' \.sbat '; then
+    SIMBA_SECUREBOOT_DENTRO=1 limine-install >/dev/null 2>&1 || install -m644 "$LIMINE_SRC" "$DIR/limine_x64.efi"
+  fi
+  # sela a configuração no binário e assina (limine-enroll-config chama o sbctl)
+  limine-enroll-config >/dev/null 2>&1 || {
+    msg "simba-secureboot: limine-enroll-config falhou; assinando sem selar"
+    sbctl sign -s "$DIR/limine_x64.efi" >/dev/null
+  }
+  copiar_cadeia
+}
+
+registrar() {  # [arquivo-hash]
+  [ -f "$CHAVES/db.der" ] || openssl x509 -in "$CHAVES/db.pem" -outform DER -out "$CHAVES/db.der"
+  if mokutil --test-key "$CHAVES/db.der" 2>/dev/null | grep -qi "already enrolled"; then return 0; fi
+  if [ -n "${1:-}" ]; then
+    mokutil --import "$CHAVES/db.der" --hash-file "$1"
+  else
+    msg "Escolha uma senha curta: ela será pedida UMA vez, na tela azul da próxima inicialização."
+    mokutil --import "$CHAVES/db.der"
+  fi
+}
+
+preparar() {  # [arquivo-hash]
+  command -v sbctl >/dev/null && command -v mokutil >/dev/null || { msg "faltam sbctl/mokutil"; return 1; }
+  [ -f "$CHAVES/db.key" ] || sbctl create-keys >/dev/null
+  # o Limine sela a configuração em cada atualização (sem isso o selo ficaria velho)
+  touch /etc/default/limine
+  grep -q '^ENABLE_ENROLL_LIMINE_CONFIG=' /etc/default/limine \
+    && sed -i 's/^ENABLE_ENROLL_LIMINE_CONFIG=.*/ENABLE_ENROLL_LIMINE_CONFIG=yes/' /etc/default/limine \
+    || echo 'ENABLE_ENROLL_LIMINE_CONFIG=yes' >> /etc/default/limine
+  sbat
+  install -m644 "$LIMINE_SRC" "$DIR/limine_x64.efi"
+  SIMBA_SECUREBOOT_DENTRO=1 limine-install >/dev/null 2>&1 || true   # refaz a cópia de segurança do binário
+  mkdir -p "$DIR"; install -m644 "$SHIM/shimx64.efi" "$DIR/shimx64.efi"
+  atualizar
+  # só agenda o registro se o computador está com Secure Boot ligado (senão a tela azul seria à toa)
+  if mokutil --sb-state 2>/dev/null | grep -qi enabled; then registrar "${1:-}"; fi
+}
+
+estado() {
+  printf 'Secure Boot: %s\n' "$(mokutil --sb-state 2>/dev/null | head -1 || echo '?')"
+  printf 'Chave deste computador: %s\n' "$([ -f "$CHAVES/db.key" ] && echo criada || echo 'não criada')"
+  if [ -f "$CHAVES/db.der" ]; then
+    printf 'Registro no shim: %s\n' "$(mokutil --test-key "$CHAVES/db.der" 2>&1 | head -1)"
+  fi
+  printf 'Limine com .sbat: %s\n' "$(objdump -h "$DIR/limine_x64.efi" 2>/dev/null | grep -q ' \.sbat ' && echo sim || echo não)"
+  [ -f "$DIR/grubx64.efi" ] && sbverify --list "$DIR/grubx64.efi" 2>/dev/null | grep -m1 subject || true
+}
+
+case ${1:-estado} in
+  preparar) preparar "${2:-}" ;;
+  atualizar) [ -n "${SIMBA_SECUREBOOT_DENTRO:-}" ] || atualizar ;;
+  sbat) sbat ;;
+  registrar) registrar "${2:-}" ;;
+  estado) estado ;;
+  *) msg "uso: simba-secureboot preparar|atualizar|registrar|estado"; exit 2 ;;
+esac

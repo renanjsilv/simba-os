@@ -1,0 +1,4 @@
+shim 16.1 (Fedora, pacote shim-x64-16.1-10), assinado pela Microsoft Corporation UEFI CA 2011.
+Fonte: https://kojipkgs.fedoraproject.org/packages/shim/16.1/10/ — licença BSD (https://github.com/rhboot/shim).
+shimx64.efi: primeiro estágio do Secure Boot (confia nas chaves da MOK, como a do Simba OS).
+mmx64.efi:   MokManager (tela azul para registrar a chave do Simba OS na 1ª vez).

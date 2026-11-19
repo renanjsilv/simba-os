@@ -141,7 +141,7 @@ conferir o download, gravar o pendrive, dar boot, as perguntas do instalador e p
 |---|---|
 | Arquivo | `simba-os-0.2.0-x86_64.iso` |
 | Tamanho | 4,5 GB |
-| SHA-256 | `d5a8d09c626e3f6a9e9d0892dc7f95e4f2fafd74a64354768c11c131b3161e29` |
+| SHA-256 | `13011aa652640d58f2168da6a55aef6025f05b5c65a0279b6dfd5ef3b9da0f8f` |
 | Requisitos | x86_64, UEFI (Secure Boot pode ficar ligado), disco de 25 GB ou mais (todo apagado) |
 
 ### Num Arch Linux já instalado

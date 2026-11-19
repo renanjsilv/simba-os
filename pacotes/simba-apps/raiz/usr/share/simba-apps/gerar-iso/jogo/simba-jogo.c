@@ -3,7 +3,8 @@
  *
  * Desenha direto na tela gráfica (/dev/fb0), com o console em modo gráfico
  * (KD_GRAPHICS) enquanto roda: tamanhos proporcionais à resolução, pixels nítidos.
- * O único gato é o retrato da marca (marca-pixel/retrato.txt → arte.h).
+ * O gato do jogo é um tigrado de perfil (GATO); o retrato da marca (arte.h) aparece
+ * nas telas de texto (--logo) e com Esc.
  *
  *   simba-jogo <arquivo-de-progresso>      jogo + progresso ("PCT TEXTO" no arquivo)
  *   simba-jogo --logo <linha> <linhas>     só desenha o retrato numa faixa do console
@@ -33,6 +34,27 @@
 
 #include "arte.h"
 #include "fonte.h"
+
+/* O gato do jogo (tigrado, de perfil) — parte de cima; as patas são desenhadas à parte */
+#define GATO_W 36
+#define GATO_TOPO 15
+static const char *GATO[] = {
+  ".........................K.....K....",
+  "........................KLK...KLK...",
+  "........................KLGK.KGLK...",
+  ".KK.....................KGGGKGGGGK..",
+  "KDDK...................KGGDGGDGGGK..",
+  "KD.K...................KGGDGGDGGGGK.",
+  "KDK....................KGGGGGGKKGGK.",
+  ".KDK...................KGGGGGGKWKGGK",
+  "..KDK..................KGGGGGGGKGWWK",
+  "...KDKKKKKKKKKKKKKKKKKKGGGGGGGGWWWKK",
+  "....KGGDGGGDGGGDGGGDGGGGGGGGGGWWKWK.",
+  "....KGGDGGGDGGGDGGGDGGGGGGGGGGWWWK..",
+  "....KGGGGGGGGGGGGGGGGGGGGGGGGKKKK...",
+  "....KGGGGGGGGGGGGGGGGGGGGGGGGK......",
+  "....KGLLLLLLLLLLLLLLLLLLLLLGGK......"
+};
 
 /* ------------------------------------------------------------------ cores */
 #define RGB(r, g, b) ((uint32_t)(((r) << 16) | ((g) << 8) | (b)))
@@ -208,6 +230,8 @@ typedef struct { float x; int tipo, ativo; } Obs;   /* tipo 0 chaminé, 1 antena
 typedef struct { float x; int y, ativo; } Peixe;
 
 static int u;                  /* tamanho do pixel da arte (px reais) */
+#define SX 14                  /* x do gato (unidades, dentro do painel) */
+#define ALTURA (GATO_TOPO + 5) /* corpo + patas */
 static int PX, PY, PW, PH;     /* painel do jogo em px reais */
 static int GW, GH;             /* painel em unidades */
 static int chao;               /* y do telhado (unidades, dentro do painel) */
@@ -235,7 +259,11 @@ static void calcular_layout(void) {
     int rodape = (H >= 900 ? 24 + 32 + 24 * 4 : 16 + 24 + 16 * 4) + 20 * u / 4;
     int total = PH + 6 * u + rodape;
     PY = (H - total) / 2; if (PY < 2 * u) PY = 2 * u;
-    chao = GH - 16;
+    /* o mundo do jogo em pixels 1,5× maiores que os da moldura (gato e cenário maiores) */
+    int uw = u * 3 / 2;
+    GW = PW / uw; GH = PH / uw; u = uw;
+    PX += (PW - GW * u) / 2; PW = GW * u; PH = GH * u;
+    chao = GH - 12;
 }
 
 static void novo_obstaculo(float x) {
@@ -255,7 +283,7 @@ static void atualizar(void) {
     int auto_jogo = quadro - parado_desde > 30 * 6;
     if (auto_jogo && !pulando)
         for (int i = 0; i < MAX_OBS; i++)
-            if (obs[i].ativo && obs[i].x > 12 && obs[i].x < 12 + RETRATO_W + 14) pular_pedido = 1;
+            if (obs[i].ativo && obs[i].x > SX && obs[i].x < SX + GATO_W + 10) pular_pedido = 1;
     if (pular_pedido && !pulando) { pulando = 1; gvy = 4.1f; }
     pular_pedido = 0;
     if (pulando) {
@@ -271,7 +299,7 @@ static void atualizar(void) {
         if (obs[i].x > ultimo) ultimo = obs[i].x;
         int ow = obs[i].tipo ? 5 : 9, oh = obs[i].tipo ? 20 : 15;
         /* colisão: base do retrato (com folga nas bordas) contra o obstáculo */
-        if (!tropeco && obs[i].x < 12 + RETRATO_W - 6 && obs[i].x + ow > 12 + 6 && gy < oh - 3) {
+        if (!tropeco && obs[i].x < SX + GATO_W - 4 && obs[i].x + ow > SX + 5 && gy < oh - 2) {
             tropeco = 30; peixes = peixes > 2 ? peixes - 2 : 0;
         }
     }
@@ -282,8 +310,8 @@ static void atualizar(void) {
     for (int i = 0; i < MAX_PEIXE; i++) if (peixe[i].ativo) {
         peixe[i].x -= vel;
         if (peixe[i].x < -10) peixe[i].ativo = 0;
-        int topo = chao - RETRATO_H - (int)gy;
-        if (peixe[i].x < 12 + RETRATO_W && peixe[i].x + 8 > 12 && peixe[i].y + 5 > topo && peixe[i].y < topo + RETRATO_H) {
+        int topo = chao - ALTURA - (int)gy;
+        if (peixe[i].x < SX + GATO_W && peixe[i].x + 8 > SX && peixe[i].y + 5 > topo && peixe[i].y < topo + ALTURA) {
             peixe[i].ativo = 0; peixes++;
             if (peixes > recorde) recorde = peixes;
         }
@@ -325,7 +353,7 @@ static void desenhar_cenario(void) {
     }
     /* estrelas (piscam devagar) */
     for (int k = 0; k < 40; k++) {
-        int sx = (k * 97 + 13) % GW, sy = (k * 53 + 7) % (chao - 30);
+        int sx = (k * 37 + k * k * 11 + 5) % GW, sy = 2 + (k * 53 + k * k * 3) % (chao - 30);
         if ((k + quadro / 20) % 7) ret_c(UX(sx), UY(sy), u, u, k % 3 ? RGB(80, 80, 84) : RGB(140, 140, 144));
     }
     /* lua */
@@ -365,6 +393,31 @@ static void desenhar_cenario(void) {
             ret_c(UX(i - off + (j % 2) * 4), UY(chao + 3 + j * 4), 4 * u, u, RGB(44, 44, 46));
 }
 
+/* bloco com contorno preto (unidades) */
+static void caixa(int x, int y, int w, int h, uint32_t cor) {
+    ret_c(UX(x), UY(y), w * u, h * u, RGB(16, 16, 16));
+    if (w > 2 && h > 2) ret_c(UX(x + 1), UY(y + 1), (w - 2) * u, (h - 2) * u, cor);
+}
+/* O gato correndo: as patas alternam (dois quadros); no pulo, esticadas. */
+static void gato(int gx, int gy_) {
+    for (int j = 0; j < GATO_TOPO; j++)
+        for (int i = 0; i < GATO_W; i++) {
+            uint32_t c = cor_arte(GATO[j][i]);
+            if (c != 0xFFFFFFFF) ret_c(UX(gx + i), UY(gy_ + j), u, u, c);
+        }
+    static const int PERNA[4] = {5, 10, 21, 26};
+    int fase = pulando ? 2 : (quadro / 4) % 2;
+    for (int k = 0; k < 4; k++) {
+        int dx = 0, alt = 5;
+        if (fase == 2) { dx = k < 2 ? -1 - (1 - k) : 1 + (k - 2); alt = 4; }
+        else if ((k % 2) == fase) { dx = 1; alt = 4; }
+        else dx = -1;
+        int x = gx + PERNA[k] + dx, y = gy_ + GATO_TOPO;
+        caixa(x, y - 1, 4, alt + 1, RGB(150, 150, 152));
+        ret_c(UX(x + 1), UY(y + alt - 2), 2 * u, u, RGB(200, 200, 202));
+    }
+}
+
 static void desenhar_jogo(void) {
     cx0 = PX; cy0 = PY; cx1 = PX + PW; cy1 = PY + PH;
     desenhar_cenario();
@@ -372,9 +425,9 @@ static void desenhar_jogo(void) {
     for (int i = 0; i < MAX_PEIXE; i++) if (peixe[i].ativo) desenhar_peixe(peixe[i].x, peixe[i].y);
     /* o Simba: o retrato da marca, quicando enquanto corre */
     int quique = pulando ? 0 : ((quadro / 5) % 2);
-    int topo = chao - RETRATO_H - (int)gy - quique;
-    if (!(tropeco && (quadro / 3) % 2)) retrato(UX(12), UY(topo), u);
-    if (!pulando && quadro % 6 < 3) ret_c(UX(8 - (quadro % 6)), UY(chao - 2), u, u, RGB(110, 110, 112));
+    int topo = chao - ALTURA - (int)gy - quique;
+    if (!(tropeco && (quadro / 3) % 2)) gato(SX, topo);
+    if (!pulando && quadro % 6 < 3) ret_c(UX(SX + 2 - (quadro % 6)), UY(chao - 2), u, u, RGB(110, 110, 112));
     cx0 = 0; cy0 = 0; cx1 = 1 << 30; cy1 = 1 << 30;
 }
 

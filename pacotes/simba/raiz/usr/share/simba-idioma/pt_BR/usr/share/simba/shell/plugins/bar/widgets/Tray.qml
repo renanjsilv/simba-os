@@ -143,10 +143,13 @@ BarWidget {
 
   // Symbolic icons ship a fixed fill (often near-white) that the host is meant
   // to recolor to its foreground; detect them by the freedesktop "-symbolic"
-  // name suffix so they can be tinted instead of rendered as-is.
+  // name so they can be tinted instead of rendered as-is. The tray hands us a
+  // resolved URL, which may carry a path and a .svg extension, so look at the
+  // file name instead of the end of the whole string.
   function iconIsSymbolic(icon) {
     var name = String(icon || "").split("?")[0]
-    return name.slice(-9) === "-symbolic"
+    var base = name.substring(name.lastIndexOf("/") + 1)
+    return base.indexOf("-symbolic") !== -1
   }
 
   function trayTooltip(item) {

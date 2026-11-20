@@ -121,6 +121,9 @@ class SyncTray:
         self.menu.append(it_cfg)
 
         self.menu.show_all()
+        # Permite clique simples ativar a abertura das configurações
+        if hasattr(self.indicator, "set_secondary_activate_target"):
+            self.indicator.set_secondary_activate_target(it_cfg)
 
     def abrir_pasta(self, _w):
         doc = subprocess.run(["xdg-user-dir", "DOCUMENTS"], capture_output=True, text=True).stdout.strip()

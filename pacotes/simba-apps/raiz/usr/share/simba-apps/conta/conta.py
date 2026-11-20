@@ -1395,7 +1395,7 @@ def cmd_sincronizar(a):
         if not a.silencioso:
             print(_t("Escolha primeiro o que sincronizar em Configurações › Contas."), file=sys.stderr)
         return 0
-    if not any(v for k, v in config()["categorias"].items() if k in INCLUIR or k == "pacotes"):
+    if not any(v for k, v in config()["categorias"].items() if k in INCLUIR or k == "pacotes" or k == "pastas"):
         if not a.silencioso:
             print(_t("Nenhum item escolhido para o backup."), file=sys.stderr)
         return 0
@@ -1875,7 +1875,7 @@ def cmd_escolher(a):
     acao = ["enable", "--now"] if c["sincronizar_fundo"] else ["disable", "--now"]
     subprocess.run(["systemctl", "--user", *acao, "conta-fundo.service"], capture_output=True, timeout=10)
     if algum and pode_enviar():
-        subprocess.Popen([str(FERRAMENTA), "sincronizar", "--silencioso"], start_new_session=True,
+        subprocess.Popen(["/usr/bin/conta", "sincronizar", "--silencioso"], start_new_session=True,
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return 0
 

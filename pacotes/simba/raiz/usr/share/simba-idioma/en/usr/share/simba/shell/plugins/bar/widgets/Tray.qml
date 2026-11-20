@@ -146,7 +146,8 @@ BarWidget {
   // name suffix so they can be tinted instead of rendered as-is.
   function iconIsSymbolic(icon) {
     var name = String(icon || "").split("?")[0]
-    return name.slice(-9) === "-symbolic"
+    var base = name.substring(name.lastIndexOf("/") + 1)
+    return base.indexOf("-symbolic") !== -1
   }
 
   function trayTooltip(item) {

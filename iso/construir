@@ -111,6 +111,9 @@ msg "Usuário modelo ($USUARIO)"
 arch-chroot "$RAIZ" useradd -m -G wheel -s /bin/bash -c "Simba" "$USUARIO"
 arch-chroot "$RAIZ" passwd -l "$USUARIO" >/dev/null
 install -m 440 /dev/stdin "$RAIZ/etc/sudoers.d/10-wheel" <<<'%wheel ALL=(ALL:ALL) ALL'
+install -m 440 /dev/stdin "$RAIZ/etc/sudoers.d/simba-cache" <<<'Defaults timestamp_timeout=30
+Defaults timestamp_type=global'
+
 
 # ---------------------------------------------------------------- 4. Simba
 msg "Configuração do Simba (simba-apply-system, sem hardware)"

@@ -1914,6 +1914,10 @@ class App(Adw.Application):
             self.hold()
             GLib.timeout_add_seconds(20, lambda: (self.release(), False)[1])
             return
+        janelas = [w for w in self.get_windows() if isinstance(w, Janela)]
+        if janelas:
+            janelas[-1].present()
+            return
         self.nova_janela(None)
 
     def _aquecer(self):

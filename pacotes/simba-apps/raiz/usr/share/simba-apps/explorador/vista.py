@@ -40,7 +40,7 @@ class Vista(Gtk.Overlay):
         self.janela = janela
         self.gfile = gfile
         self.mostrar_local = mostrar_local
-        cfg = janela.cfg
+        cfg = getattr(janela, "cfg", None) or u.ler_config()
         self.ocultos = cfg["ocultos"]
         self.texto = ""
         chave = gfile.get_uri() if gfile else ""
@@ -161,7 +161,8 @@ class Vista(Gtk.Overlay):
                                      css_classes=["arquivos"],
                                      factory=self._fabrica(self._item_bloco if v == "blocos" else self._item_grade,
                                                            self._ligar_bloco if v == "blocos" else self._ligar_grade))
-        self.view.set_single_click_activate(self.janela.cfg.get("cliqueUnico", False))
+        cfg = getattr(self.janela, "cfg", None) or u.ler_config()
+        self.view.set_single_click_activate(cfg.get("cliqueUnico", False))
         self.view.connect("activate", self._ativado)
         self.rolagem.set_child(self.view)
         if antiga is not None:
@@ -181,7 +182,7 @@ class Vista(Gtk.Overlay):
         """Visão e ordem por pasta, como o Windows."""
         if not self.gfile:
             return
-        cfg = self.janela.cfg
+        cfg = getattr(self.janela, "cfg", None) or u.ler_config()
         d = cfg.setdefault("visaoPorPasta", {})
         d[self.gfile.get_uri()] = {"visao": self.visao, "ordem": self.ordem, "desc": self.desc}
         if len(d) > 400:
@@ -240,18 +241,24 @@ class Vista(Gtk.Overlay):
     def _item_grade(self, li):
         tam, larg = GRADE[self.visao]
         caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, width_request=larg)
-        quadro = Gtk.Box(halign=Gtk.Align.CENTER, height_request=tam, width_request=tam)
+        quadro = Gtk.Overlay(halign=Gtk.Align.CENTER)
+        quadro_box = Gtk.Box(halign=Gtk.Align.CENTER, height_request=tam, width_request=tam)
         img = Gtk.Image(halign=Gtk.Align.CENTER, valign=Gtk.Align.END, hexpand=True)
         pic = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, can_shrink=True, width_request=tam, height_request=tam,
                           visible=False)
-        quadro.append(img)
-        quadro.append(pic)
+        quadro_box.append(img)
+        quadro_box.append(pic)
+        quadro.set_child(quadro_box)
+        emblema = Gtk.Image(pixel_size=max(14, int(tam * 0.22)), halign=Gtk.Align.START, valign=Gtk.Align.END,
+                            margin_start=2, margin_bottom=2, visible=False)
+        emblema.add_css_class("emblema-status")
+        quadro.add_overlay(emblema)
         rot = Gtk.Label(wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR, lines=2, ellipsize=Pango.EllipsizeMode.END,
                         justify=Gtk.Justification.CENTER, max_width_chars=1, css_classes=["nome-arquivo"],
                         width_request=larg - 8)
         caixa.append(quadro)
         caixa.append(rot)
-        caixa._img, caixa._pic, caixa._rot = img, pic, rot
+        caixa._img, caixa._pic, caixa._rot, caixa._emblema = img, pic, rot, emblema
         self._arrastavel(caixa)
         self._alvo_soltar(caixa)
         li.set_child(caixa)
@@ -264,21 +271,41 @@ class Vista(Gtk.Overlay):
         caixa._rot.set_label(self._nome(info))
         caixa.set_tooltip_text(self._dica(info))
         self._estilo(caixa, info)
+        gfile = u.arquivo_de(info)
+        caminho = gfile.get_path() if gfile else None
+        st = u.status_arquivo(caminho, info) if caminho else None
+        if st and hasattr(caixa, "_emblema"):
+            tipo_st, icone, dica = st
+            caixa._emblema.set_from_icon_name(icone)
+            caixa._emblema.set_tooltip_text(dica)
+            caixa._emblema.set_visible(True)
+            for c in ("status-ok", "status-syncing", "status-cloud", "status-paused", "status-error"):
+                caixa._emblema.remove_css_class(c)
+            caixa._emblema.add_css_class(f"status-{tipo_st}")
+        elif hasattr(caixa, "_emblema"):
+            caixa._emblema.set_visible(False)
 
     def _item_bloco(self, li):
         caixa = Gtk.Box(spacing=10, width_request=270, margin_top=2, margin_bottom=2)
+        quadro = Gtk.Overlay()
+        quadro_box = Gtk.Box(width_request=48, height_request=48)
         img = Gtk.Image(pixel_size=48)
         pic = Gtk.Picture(content_fit=Gtk.ContentFit.CONTAIN, width_request=48, height_request=48, visible=False)
+        quadro_box.append(img)
+        quadro_box.append(pic)
+        quadro.set_child(quadro_box)
+        emblema = Gtk.Image(pixel_size=14, halign=Gtk.Align.START, valign=Gtk.Align.END, visible=False)
+        emblema.add_css_class("emblema-status")
+        quadro.add_overlay(emblema)
         txt = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, spacing=1)
         rot = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, max_width_chars=26)
         tipo = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, css_classes=["legenda"], max_width_chars=28)
         tam = Gtk.Label(xalign=0, css_classes=["legenda"])
         for w in (rot, tipo, tam):
             txt.append(w)
-        caixa.append(img)
-        caixa.append(pic)
+        caixa.append(quadro)
         caixa.append(txt)
-        caixa._img, caixa._pic, caixa._rot, caixa._tipo, caixa._tam = img, pic, rot, tipo, tam
+        caixa._img, caixa._pic, caixa._rot, caixa._tipo, caixa._tam, caixa._emblema = img, pic, rot, tipo, tam, emblema
         self._arrastavel(caixa)
         self._alvo_soltar(caixa)
         li.set_child(caixa)
@@ -292,14 +319,32 @@ class Vista(Gtk.Overlay):
         caixa._tam.set_label("" if u.eh_pasta(info) else u.tamanho(info.get_size()))
         caixa.set_tooltip_text(self._dica(info))
         self._estilo(caixa, info)
+        gfile = u.arquivo_de(info)
+        caminho = gfile.get_path() if gfile else None
+        st = u.status_arquivo(caminho, info) if caminho else None
+        if st and hasattr(caixa, "_emblema"):
+            tipo_st, icone, dica = st
+            caixa._emblema.set_from_icon_name(icone)
+            caixa._emblema.set_tooltip_text(dica)
+            caixa._emblema.set_visible(True)
+            for c in ("status-ok", "status-syncing", "status-cloud", "status-paused", "status-error"):
+                caixa._emblema.remove_css_class(c)
+            caixa._emblema.add_css_class(f"status-{tipo_st}")
+        elif hasattr(caixa, "_emblema"):
+            caixa._emblema.set_visible(False)
 
     def _item_lista(self, li):
         caixa = Gtk.Box(spacing=10)
+        quadro = Gtk.Overlay()
         img = Gtk.Image(pixel_size=20)
+        emblema = Gtk.Image(pixel_size=11, halign=Gtk.Align.START, valign=Gtk.Align.END, visible=False)
+        emblema.add_css_class("emblema-status")
+        quadro.set_child(img)
+        quadro.add_overlay(emblema)
         rot = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, hexpand=True)
-        caixa.append(img)
+        caixa.append(quadro)
         caixa.append(rot)
-        caixa._img, caixa._rot = img, rot
+        caixa._img, caixa._rot, caixa._emblema = img, rot, emblema
         self._arrastavel(caixa)
         self._alvo_soltar(caixa)
         li.set_child(caixa)
@@ -315,14 +360,27 @@ class Vista(Gtk.Overlay):
         caixa._rot.set_label(self._nome(info))
         caixa.set_tooltip_text(self._dica(info))
         self._estilo(caixa, info)
+        caminho = gfile.get_path() if gfile else None
+        st = u.status_arquivo(caminho, info) if caminho else None
+        if st and hasattr(caixa, "_emblema"):
+            tipo_st, icone, dica = st
+            caixa._emblema.set_from_icon_name(icone)
+            caixa._emblema.set_tooltip_text(dica)
+            caixa._emblema.set_visible(True)
+            for c in ("status-ok", "status-syncing", "status-cloud", "status-paused", "status-error"):
+                caixa._emblema.remove_css_class(c)
+            caixa._emblema.add_css_class(f"status-{tipo_st}")
+        elif hasattr(caixa, "_emblema"):
+            caixa._emblema.set_visible(False)
 
     def _columnview(self):
         cv = Gtk.ColumnView(model=self.selecao, css_classes=["arquivos"], enable_rubberband=True,
                             show_column_separators=False, reorderable=True)
-        colunas = [("nome", _t("Nome"), True), ("data", _t("Data de modificação"), False), ("tipo", _t("Tipo"), False),
+        colunas = [("nome", _t("Nome"), True), ("status", _t("Status"), False),
+                   ("data", _t("Data de modificação"), False), ("tipo", _t("Tipo"), False),
                    ("tamanho", _t("Tamanho"), False)]
         if self.mostrar_local:
-            colunas.insert(1, ("local", _t("Local"), False))
+            colunas.insert(2, ("local", _t("Local"), False))
         if self.gfile and self.gfile.get_uri_scheme() == "trash":
             colunas = [("nome", _t("Nome"), True), ("origem", _t("Local original"), False), ("excluido", _t("Data da exclusão"), False),
                        ("tamanho", _t("Tamanho"), False)]
@@ -335,7 +393,7 @@ class Vista(Gtk.Overlay):
             if chave in ORDENS:
                 col.set_sorter(Gtk.CustomSorter.new(lambda a, b, *_: 0))
             if not expande:
-                col.set_fixed_width({"data": 170, "tipo": 190, "tamanho": 100, "local": 260,
+                col.set_fixed_width({"status": 56, "data": 170, "tipo": 190, "tamanho": 100, "local": 260,
                                      "origem": 260, "excluido": 170}.get(chave, 140))
             cv.append_column(col)
             self._colunas[chave] = col
@@ -367,6 +425,10 @@ class Vista(Gtk.Overlay):
             self._arrastavel(caixa)
             self._alvo_soltar(caixa)
             li.set_child(caixa)
+        elif chave == "status":
+            img = Gtk.Image(pixel_size=16, halign=Gtk.Align.CENTER)
+            img.add_css_class("status-badge")
+            li.set_child(img)
         else:
             rot = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END, css_classes=["secundario"])
             if chave == "tamanho":
@@ -385,6 +447,20 @@ class Vista(Gtk.Overlay):
             w._rot.set_label(self._nome(info))
             w.set_tooltip_text(self._dica(info))
             self._estilo(w, info)
+        elif chave == "status":
+            gfile = u.arquivo_de(info)
+            caminho = gfile.get_path() if gfile else None
+            st = u.status_arquivo(caminho, info) if caminho else None
+            if st:
+                tipo_st, icone, dica = st
+                w.set_from_icon_name(icone)
+                w.set_tooltip_text(dica)
+                w.set_visible(True)
+                for c in ("status-ok", "status-syncing", "status-cloud", "status-paused", "status-error"):
+                    w.remove_css_class(c)
+                w.add_css_class(f"status-{tipo_st}")
+            else:
+                w.set_visible(False)
         elif chave == "data":
             w.set_label(u.data(info.get_modification_date_time()))
         elif chave == "tipo":
@@ -404,7 +480,8 @@ class Vista(Gtk.Overlay):
 
     def _nome(self, info):
         n = info.get_display_name() or info.get_name() or ""
-        if not self.janela.cfg.get("extensoes", True) and not u.eh_pasta(info) and "." in n[1:]:
+        cfg = getattr(self.janela, "cfg", None) or u.ler_config()
+        if not cfg.get("extensoes", True) and not u.eh_pasta(info) and "." in n[1:]:
             n = n.rsplit(".", 1)[0]
         return n
 

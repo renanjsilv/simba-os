@@ -119,6 +119,13 @@ Scope {
     printErrors: false
     onFileChanged: relistar.restart()
   }
+  // Monitorar alterações de estado da conta/sincronização
+  FileView {
+    path: Quickshell.env("HOME") + "/.local/state/conta/estado.json"
+    watchChanges: true
+    printErrors: false
+    onFileChanged: relistar.restart()
+  }
   // Backstop for changes the watcher can miss (e.g. a renamed mount).
   Timer { interval: 15000; running: true; repeat: true; onTriggered: a.listar() }
 

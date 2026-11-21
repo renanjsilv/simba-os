@@ -55,6 +55,7 @@ BOAS_VINDAS = HOME / ".local/state/conta/boas-vindas"
 # ~/.local/share/conta entra nela; quem instala decide pelas Configurações).
 SEM_BOAS_VINDAS = HOME / ".local/share/conta/sem-boas-vindas"
 FOTO = HOME / ".local/state/conta/foto.jpg"
+COTA = HOME / ".local/state/conta/cota.json"
 FACE = HOME / ".face"
 CACHE = HOME / ".cache/conta"
 EXTRA = CACHE / "extra"
@@ -67,13 +68,16 @@ NOME_CRIPTO = "conta-cripto"
 PASTA = "Simba Conta"
 
 CATEGORIAS = {
-    "config": _t("Configurações e aplicativos"),
-    "imagens": _t("Papéis de parede e imagens"),
-    "historico": _t("Histórico do navegador e do terminal"),
-    "documentos": _t("Documentos e área de trabalho"),
-    "pacotes": _t("Lista de programas instalados"),
+    "config": _t("Aparência"),
+    "brave": _t("Brave"),
+    "terminal": _t("Terminal e atalhos"),
+    "draco": _t("Draco e Agentes de IA"),
+    "pacotes": _t("Programas instalados"),
     "segredos": _t("Chaves SSH e chaves de API (só com criptografia)"),
-    "pastas": _t("Pastas escolhidas"),
+    "documentos": _t("Documentos"),
+    "imagens": _t("Imagens"),
+    "pastas": _t("Pastas sincronizadas"),
+    "historico": _t("Histórico do navegador e do terminal"),
 }
 
 # Caminhos relativos à pasta pessoal por categoria (pastas entram inteiras,
@@ -85,7 +89,15 @@ INCLUIR = {
         ".local/share/gerenciador-tarefas", ".local/share/temas-boot", ".local/share/transcrever",
         ".local/share/conta", ".local/share/gerar-iso", ".local/share/anydesk-bridge",
         ".local/share/simba-idioma", ".local/share/nautilus-python", ".local/share/aether",
-        ".local/share/draco", ".bashrc", ".bash_profile", ".XCompose", ".gitconfig",
+        ".XCompose", ".gitconfig",
+    ],
+    "terminal": [
+        ".config/kitty", ".config/foot", ".config/alacritty", ".config/ghostty",
+        ".config/nvim", ".bashrc", ".bash_profile", ".bash_history",
+        ".local/share/fish", ".zshrc", ".zsh_history",
+    ],
+    "draco": [
+        ".config/draco", ".local/share/draco",
     ],
     "imagens": [_t("Pictures"), _t("Wallpapers")],
     "historico": [".bash_history", ".local/share/recently-used.xbel", ".local/share/fish/fish_history",
@@ -145,8 +157,15 @@ def config():
     c = ler_json(CFG, {})
     c.setdefault("auto", True)
     c.setdefault("cripto", False)
-    c.setdefault("categorias", {k: k not in ("segredos", "pastas") for k in CATEGORIAS})
-    c["categorias"].setdefault("pastas", False)
+    c.setdefault("categorias", {})
+    for k in CATEGORIAS:
+        if k not in c["categorias"]:
+            if k in ("segredos", "pastas"):
+                c["categorias"][k] = False
+            elif k in ("brave", "terminal", "draco"):
+                c["categorias"][k] = c["categorias"].get("config", True)
+            else:
+                c["categorias"][k] = True
     c.setdefault("pastas_personalizadas", [])
     c.setdefault("pastas_excluidas", [])
     c.setdefault("sincronizar_fundo", True)
@@ -376,13 +395,21 @@ def preparar_extras(c, lista=()):
     gravar_json(EXTRA / "modos.json", modos)
     cats = c["categorias"]
     if cats.get("pacotes"):
+        modo = c.get("pacotes_modo", "todos")
+        selecionados = set(c.get("pacotes_selecionados", []))
         for nome, args in (("pacman.txt", ["pacman", "-Qqen"]), ("aur.txt", ["pacman", "-Qqem"])):
             out = subprocess.run(args, capture_output=True, text=True).stdout
-            (EXTRA / "pacotes" / nome).write_text(out)
+            linhas = [l.strip() for l in out.splitlines() if l.strip()]
+            if modo == "escolher" and selecionados:
+                linhas = [l for l in linhas if l in selecionados]
+            (EXTRA / "pacotes" / nome).write_text("\n".join(linhas) + "\n" if linhas else "")
         if shutil.which("flatpak"):
             out = subprocess.run(["flatpak", "list", "--app", "--columns=application"], capture_output=True, text=True).stdout
-            (EXTRA / "pacotes" / "flatpak.txt").write_text(out)
-    if cats.get("historico") and BRAVE.is_dir():
+            linhas = [l.strip() for l in out.splitlines() if l.strip()]
+            if modo == "escolher" and selecionados:
+                linhas = [l for l in linhas if l in selecionados]
+            (EXTRA / "pacotes" / "flatpak.txt").write_text("\n".join(linhas) + "\n" if linhas else "")
+    if (cats.get("brave") or cats.get("historico")) and BRAVE.is_dir():
         dest = EXTRA / "brave"
         dest.mkdir()
         for a in BRAVE_ARQS:
@@ -609,13 +636,16 @@ def cmd_pasta(a):
             print(_t("caminho obrigatório"), file=sys.stderr)
             return 1
         p = a.caminho.strip()
-        if p.startswith(str(HOME)):
-            p = os.path.relpath(p, HOME)
-        p = p.strip("/")
-        if p in c["pastas_personalizadas"]:
-            c["pastas_personalizadas"].remove(p)
+        alvo_rel = os.path.relpath(p, HOME) if p.startswith(str(HOME)) else p
+        alvo_rel = alvo_rel.strip("/")
+        removido = None
+        for item in list(c["pastas_personalizadas"]):
+            if item in (p, alvo_rel, Path(p).name):
+                c["pastas_personalizadas"].remove(item)
+                removido = item
+        if removido:
             salvar_config(c)
-            print(_t("Pasta removida: %1", p))
+            print(_t("Pasta removida: %1", removido))
         elif p and p not in c.get("pastas_excluidas", []):
             c["pastas_excluidas"].append(p)
             salvar_config(c)
@@ -658,6 +688,174 @@ def cmd_status(_a):
 
     pausado, ate = esta_pausado()
 
+    # Pacotes instalados no sistema
+    qtd_pacotes = 0
+    try:
+        r = subprocess.run(["pacman", "-Qqe"], capture_output=True, text=True, timeout=2)
+        qtd_pacotes = len([l for l in r.stdout.splitlines() if l.strip()])
+    except Exception:
+        pass
+
+    # Informações das pastas sincronizadas
+    pastas_padrao = [
+        {"id": "documentos", "nome": _t("Documentos"), "alvos": [HOME / "Documents", HOME / "Documentos"]},
+        {"id": "imagens", "nome": _t("Imagens"), "alvos": [HOME / "Pictures", HOME / "Imagens"]},
+        {"id": "desktop", "nome": _t("Área de trabalho"), "alvos": [HOME / "Área de trabalho", HOME / "Desktop"]},
+    ]
+    pastas_info = []
+    caminhos_vistos = set()
+    for p_item in pastas_padrao:
+        alvo = next((p for p in p_item["alvos"] if p.exists()), None)
+        caminho_str = str(alvo) if alvo else str(p_item["alvos"][0])
+        caminhos_vistos.add(caminho_str)
+        caminhos_vistos.add(p_item["id"])
+        caminhos_vistos.add(p_item["nome"])
+        tot, cnt = 0, 0
+        if alvo:
+            for root, dirs, files in os.walk(alvo):
+                for f in files:
+                    try:
+                        tot += (Path(root) / f).stat().st_size
+                        cnt += 1
+                    except OSError:
+                        pass
+        pastas_info.append({
+            "id": p_item["id"],
+            "nome": p_item["nome"],
+            "caminho": caminho_str,
+            "existe": bool(alvo),
+            "arquivos": cnt,
+            "tamanho": tot,
+            "padrao": True,
+        })
+
+    for p_str in c.get("pastas_personalizadas", []):
+        if p_str in caminhos_vistos or p_str in ("Documents", "Documentos", "Pictures", "Imagens", "Desktop", "Área de trabalho"):
+            continue
+        alvo = HOME / p_str if not os.path.isabs(p_str) else Path(p_str)
+        caminho_str = str(alvo)
+        if caminho_str in caminhos_vistos:
+            continue
+        caminhos_vistos.add(caminho_str)
+        tot, cnt = 0, 0
+        if alvo.exists():
+            for root, dirs, files in os.walk(alvo):
+                for f in files:
+                    try:
+                        tot += (Path(root) / f).stat().st_size
+                        cnt += 1
+                    except OSError:
+                        pass
+        pastas_info.append({
+            "id": p_str,
+            "nome": alvo.name or p_str,
+            "caminho": caminho_str,
+            "existe": alvo.exists(),
+            "arquivos": cnt,
+            "tamanho": tot,
+            "padrao": False,
+        })
+
+    # Arquivos recentes para o painel estilo OneDrive
+    recentes = []
+    pastas_alvo = [HOME / "Documents", HOME / "Documentos", HOME / "Pictures", HOME / "Imagens", HOME / "Desktop", HOME / "Área de trabalho"]
+    for p_str in c.get("pastas_personalizadas", []):
+        alvo = HOME / p_str if not os.path.isabs(p_str) else Path(p_str)
+        if alvo.is_dir() and alvo not in pastas_alvo:
+            pastas_alvo.append(alvo)
+
+    candidatos = []
+    agora_ts = time.time()
+    for pasta_dir in pastas_alvo:
+        if not pasta_dir.is_dir():
+            continue
+        nome_pasta = pasta_dir.name
+        try:
+            for root, dirs, files in os.walk(pasta_dir):
+                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("Cache", "cache", "build")]
+                for f in files:
+                    if f.startswith("."):
+                        continue
+                    fp = Path(root) / f
+                    try:
+                        st = fp.stat()
+                        candidatos.append((st.st_mtime, f, nome_pasta, st.st_size, str(fp)))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+    candidatos.sort(key=lambda x: x[0], reverse=True)
+    for idx, (mtime, nome_arq, pasta_nome, tamanho, caminho_completo) in enumerate(candidatos[:35]):
+        dt_seg = max(0, int(agora_ts - mtime))
+        is_uploading = (rodando or e.get("sincronizando")) and (idx == 0 or dt_seg < 120)
+
+        if is_uploading:
+            status_item = "sincronizando"
+            pct = 65
+            if e.get("progresso"):
+                m_pct = re.search(r"(\d+)%", e.get("progresso", ""))
+                if m_pct:
+                    pct = int(m_pct.group(1))
+            progresso_pct = pct
+            tempo_txt = _t("Enviando… (%1%)", pct)
+        elif pausado:
+            status_item = "pausado"
+            progresso_pct = 0
+            tempo_txt = _t("Pausado")
+        elif e.get("resultado") == "erro" and dt_seg < 300:
+            status_item = "erro"
+            progresso_pct = 0
+            tempo_txt = _t("Erro")
+        elif dt_seg < 60:
+            status_item = "ok"
+            progresso_pct = 100
+            tempo_txt = _t("Enviado agora")
+        elif dt_seg < 3600:
+            status_item = "ok"
+            progresso_pct = 100
+            tempo_txt = _t("Salvo há %1 min", dt_seg // 60)
+        elif dt_seg < 86400:
+            status_item = "ok"
+            progresso_pct = 100
+            tempo_txt = _t("Salvo há %1 h", dt_seg // 3600)
+        else:
+            status_item = "ok"
+            progresso_pct = 100
+            tempo_txt = _t("Salvo há %1 dias", dt_seg // 86400)
+
+        recentes.append({
+            "nome": nome_arq,
+            "pasta": pasta_nome,
+            "tamanho": tamanho,
+            "caminho": caminho_completo,
+            "mtime": mtime,
+            "estado": tempo_txt,
+            "status": status_item,
+            "progresso_pct": progresso_pct
+        })
+
+    if e.get("ultima"):
+        recentes.append({
+            "nome": _t("Papel de parede e tema"),
+            "pasta": _t("Configurações"),
+            "tamanho": 0,
+            "caminho": str(HOME / ".config"),
+            "mtime": agora_ts,
+            "estado": _t("Salvo há 10 min"),
+            "status": "ok",
+            "progresso_pct": 100
+        })
+
+    cota = obter_cota_drive() if lig else {}
+    cota_total = int(cota.get("total") or 0)
+    cota_usado = int(cota.get("used") or 0)
+    cota_livre = int(cota.get("free") or 0)
+
+    pac_modo = c.get("pacotes_modo", "todos")
+    pac_sel = c.get("pacotes_selecionados", [])
+    qtd_pacotes_sel = len(pac_sel) if pac_modo == "escolher" and pac_sel else qtd_pacotes
+
     print(json.dumps({
         "rclone": bool(rclone_bin()),
         "conectado": lig,
@@ -683,6 +881,14 @@ def cmd_status(_a):
         "conflito": e.get("conflito"),
         "pastas_personalizadas": c.get("pastas_personalizadas", []),
         "pastas_excluidas": c.get("pastas_excluidas", []),
+        "pastas_info": pastas_info,
+        "recentes": recentes,
+        "cota_total": cota_total,
+        "cota_usado": cota_usado,
+        "cota_livre": cota_livre,
+        "pacotes_modo": pac_modo,
+        "qtd_pacotes": qtd_pacotes,
+        "qtd_pacotes_selecionados": qtd_pacotes_sel,
         "brave_pendente": (HOME / ".local/share/conta/brave-pendente").is_dir(),
         "dispositivos": lista_dispositivos,
         "entrando": e.get("entrando", False),
@@ -728,6 +934,183 @@ def descobrir_usuario():
         return {"email": u.get("emailAddress", ""), "nome": u.get("displayName", ""), "foto": u.get("photoLink", "")}
     except Exception:
         return {}
+
+
+def obter_cota_drive(forcado=False):
+    """Consulta cota real do Google Drive via rclone about com cache de 15 minutos."""
+    agora = time.time()
+    if not forcado and COTA.exists():
+        try:
+            d = json.loads(COTA.read_text())
+            if agora - d.get("timestamp", 0) < 900 and d.get("total"):
+                return d
+        except Exception:
+            pass
+    if not conectado() or not rclone_bin():
+        return {}
+    try:
+        r = rc("about", f"{NOME_REMOTO}:", "--json", timeout=12)
+        d = json.loads(r.stdout)
+        d["timestamp"] = agora
+        COTA.parent.mkdir(parents=True, exist_ok=True)
+        COTA.write_text(json.dumps(d))
+        return d
+    except Exception:
+        if COTA.exists():
+            try:
+                return json.loads(COTA.read_text())
+            except Exception:
+                pass
+    return {}
+
+
+def listar_pacotes_detalhes(c=None):
+    """Lista todos os pacotes/programas instalados com nomes amigáveis e descrições."""
+    if c is None:
+        c = config()
+    cache_arq = CACHE / "pacotes-info.json"
+    agora = time.time()
+    itens = []
+    if cache_arq.exists():
+        try:
+            d = json.loads(cache_arq.read_text())
+            if agora - d.get("timestamp", 0) < 300:  # cache de 5 min
+                itens = d.get("itens", [])
+        except Exception:
+            pass
+
+    if not itens:
+        desktop_map = {}
+        for d_path in [Path("/usr/share/applications"), HOME / ".local/share/applications"]:
+            if d_path.is_dir():
+                for p in d_path.glob("*.desktop"):
+                    try:
+                        content = p.read_text(errors="ignore")
+                        nome_app, exec_app = "", ""
+                        for line in content.splitlines():
+                            if line.startswith("Name=") and not nome_app:
+                                nome_app = line[5:].strip()
+                            elif line.startswith("Exec=") and not exec_app:
+                                exec_app = line[5:].split()[0].split("/")[-1].strip()
+                        stem = p.stem.lower()
+                        if nome_app:
+                            desktop_map[stem] = nome_app
+                            if exec_app:
+                                desktop_map[exec_app.lower()] = nome_app
+                    except Exception:
+                        pass
+
+        aur_set = set(subprocess.run(["pacman", "-Qqem"], capture_output=True, text=True).stdout.split())
+        pacman_out = subprocess.run(["pacman", "-Qei"], capture_output=True, text=True).stdout
+
+        cur = {}
+        for line in pacman_out.splitlines():
+            if not line.strip():
+                if "Nome" in cur or "Name" in cur:
+                    pkg_id = cur.get("Nome") or cur.get("Name")
+                    desc = cur.get("Descrição") or cur.get("Description") or ""
+                    friendly = desktop_map.get(pkg_id.lower())
+                    if not friendly and pkg_id.endswith("-bin"):
+                        friendly = desktop_map.get(pkg_id[:-4].lower())
+                    if not friendly and pkg_id.endswith("-git"):
+                        friendly = desktop_map.get(pkg_id[:-4].lower())
+                    itens.append({
+                        "id": pkg_id,
+                        "nome": friendly or pkg_id,
+                        "desc": desc,
+                        "tipo": "aur" if pkg_id in aur_set else "pacman"
+                    })
+                cur = {}
+                continue
+            if ":" in line:
+                k, v = line.split(":", 1)
+                cur[k.strip()] = v.strip()
+
+        if "Nome" in cur or "Name" in cur:
+            pkg_id = cur.get("Nome") or cur.get("Name")
+            desc = cur.get("Descrição") or cur.get("Description") or ""
+            friendly = desktop_map.get(pkg_id.lower())
+            itens.append({
+                "id": pkg_id,
+                "nome": friendly or pkg_id,
+                "desc": desc,
+                "tipo": "aur" if pkg_id in aur_set else "pacman"
+            })
+
+        # Flatpaks instalados
+        if shutil.which("flatpak"):
+            try:
+                fp_out = subprocess.run(["flatpak", "list", "--app", "--columns=application,name,description"], capture_output=True, text=True).stdout
+                for l in fp_out.splitlines():
+                    parts = [p.strip() for p in l.split("\t") if p.strip()]
+                    if len(parts) >= 2 and parts[0] not in ("ID de aplicativo", "Application ID"):
+                        itens.append({
+                            "id": parts[0],
+                            "nome": parts[1],
+                            "desc": parts[2] if len(parts) > 2 else "",
+                            "tipo": "flatpak"
+                        })
+            except Exception:
+                pass
+
+        itens.sort(key=lambda x: x["nome"].lower())
+        cache_arq.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            cache_arq.write_text(json.dumps({"timestamp": agora, "itens": itens}))
+        except Exception:
+            pass
+
+    modo = c.get("pacotes_modo", "todos")
+    selecionados_set = set(c.get("pacotes_selecionados", []))
+
+    res = []
+    for it in itens:
+        sel = True if modo == "todos" or not selecionados_set else (it["id"] in selecionados_set)
+        res.append({
+            "id": it["id"],
+            "nome": it["nome"],
+            "desc": it["desc"],
+            "tipo": it["tipo"],
+            "selecionado": sel
+        })
+    return res, modo
+
+
+def cmd_pacotes_modo(a):
+    c = config()
+    c["pacotes_modo"] = a.modo
+    if a.modo == "escolher" and not c.get("pacotes_selecionados"):
+        itens, _ = listar_pacotes_detalhes(c)
+        c["pacotes_selecionados"] = [it["id"] for it in itens]
+    salvar_config(c)
+    print(json.dumps({"modo": c["pacotes_modo"], "qtd": len(c.get("pacotes_selecionados", []))}))
+    return 0
+
+
+def cmd_pacotes_selecionar(a):
+    c = config()
+    if a.modo:
+        c["pacotes_modo"] = a.modo
+    if getattr(a, "json_ids", None):
+        c["pacotes_selecionados"] = json.loads(a.json_ids)
+    elif getattr(a, "ids", None) is not None:
+        c["pacotes_selecionados"] = [x.strip() for x in a.ids.split(",") if x.strip()]
+    salvar_config(c)
+    print(json.dumps({"modo": c.get("pacotes_modo", "todos"), "qtd": len(c.get("pacotes_selecionados", []))}))
+    return 0
+
+
+def cmd_pacotes_listar(_a):
+    c = config()
+    itens, modo = listar_pacotes_detalhes(c)
+    qtd_sel = len([x for x in itens if x["selecionado"]]) if modo == "escolher" else len(itens)
+    print(json.dumps({
+        "modo": modo,
+        "total": len(itens),
+        "selecionados_qtd": qtd_sel,
+        "itens": itens
+    }, ensure_ascii=False))
+    return 0
 
 
 def face_nosso():
@@ -900,12 +1283,17 @@ def cmd_sair(_a):
     for n in (NOME_REMOTO, NOME_CRIPTO):
         rc("config", "delete", n, check=False)
     c = config()
-    for k in ("email", "nome"):
+    for k in ("email", "nome", "pacotes_modo", "pacotes_selecionados"):
         c.pop(k, None)
     c["cripto"] = False
     c["escolha_feita"] = False
     salvar_config(c)
     apagar_foto()
+    if COTA.exists():
+        try:
+            COTA.unlink()
+        except Exception:
+            pass
     subprocess.run(["systemctl", "--user", "disable", "--now", "conta-fundo.service"], capture_output=True)
     subprocess.run(["systemctl", "--user", "disable", "--now", "conta-sync.timer"], capture_output=True)
     salvar_estado(resultado="", erro="", remoto_meta={})
@@ -1968,6 +2356,15 @@ def main():
     p.add_argument("acao", choices=["mostrar", "marcar", "fechar", "liga", "desliga"],
                    help="liga/desliga: oferecer o login no 1º boot das instalações pela ISO")
     p.set_defaults(f=cmd_boas_vindas)
+    p = sub.add_parser("pacotes-modo", help="modo de backup dos programas (todos ou escolher)")
+    p.add_argument("modo", choices=["todos", "escolher"])
+    p.set_defaults(f=cmd_pacotes_modo)
+    p = sub.add_parser("pacotes-selecionar", help="define programas selecionados para backup")
+    p.add_argument("--modo", choices=["todos", "escolher"], default=None)
+    p.add_argument("--ids", default=None)
+    p.add_argument("--json-ids", default=None)
+    p.set_defaults(f=cmd_pacotes_selecionar)
+    sub.add_parser("pacotes-listar", help="lista programas instalados com estado de backup").set_defaults(f=cmd_pacotes_listar)
     a = ap.parse_args()
     return a.f(a) or 0
 

@@ -165,6 +165,51 @@ levelbar.uso trough { min-height: 6px; padding: 0; background: transparent; bord
 .vazio { opacity: 0.6; }
 .nuvem-cartao { background: @CARTAO@; border-radius: 10px; padding: 14px; border: 1px solid @LINHA@; }
 .nuvem-cartao:hover { background: @HOVER2@; }
+
+/* Ícones de status estilo OneDrive no Explorador */
+.status-badge {
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin: 0;
+}
+.status-badge.status-ok {
+  color: #34A853;
+}
+.status-badge.status-syncing {
+  color: #4285F4;
+}
+.status-badge.status-cloud {
+  color: #4285F4;
+}
+.status-badge.status-paused {
+  color: #FBBC05;
+}
+.status-badge.status-error {
+  color: #EA4335;
+}
+
+.emblema-status {
+  background: @CARTAO@;
+  border-radius: 9px;
+  padding: 1px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.45);
+}
+.emblema-status.status-ok {
+  color: #34A853;
+}
+.emblema-status.status-syncing {
+  color: #4285F4;
+}
+.emblema-status.status-cloud {
+  color: #4285F4;
+}
+.emblema-status.status-paused {
+  color: #FBBC05;
+}
+.emblema-status.status-error {
+  color: #EA4335;
+}
 """
 
 

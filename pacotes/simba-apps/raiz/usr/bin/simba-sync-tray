@@ -2,6 +2,7 @@
 """Ícone de bandeja da sincronização do Simba OS (OneDrive style).
 Usa AyatanaAppIndicator3 para se integrar à bandeja nativa do Simba OS.
 """
+import fcntl
 import json
 import os
 import subprocess
@@ -143,7 +144,17 @@ class SyncTray:
     def abrir_config(self, _w):
         subprocess.Popen(["configuracoes", "contas"])
 
+_lock_fd = None
+
 def main():
+    global _lock_fd
+    lock_file = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")) / "simba-sync-tray.lock"
+    try:
+        _lock_fd = open(lock_file, "w")
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        sys.exit(0)
+
     SyncTray()
     Gtk.main()
 

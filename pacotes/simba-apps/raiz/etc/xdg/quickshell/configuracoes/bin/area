@@ -113,6 +113,115 @@ def entrada_desktop(p):
     return {"nome": nome, "icone": e.get("Icon", ""), "tipo": e.get("Type", "Application")}
 
 
+# ── Status de sincronização estilo OneDrive ──────────────────────────────────
+_SYNC_CACHE = {"t": 0.0, "pastas": set(), "sincronizando": False, "pausado": False, "erro": False, "conectado": False}
+
+
+def info_sincronizacao():
+    agora = time.time()
+    if agora - _SYNC_CACHE["t"] > 2.0:
+        home = os.path.expanduser("~")
+        cfg_file = os.path.join(home, ".config/conta/config.json")
+        est_file = os.path.join(home, ".local/state/conta/estado.json")
+        pastas = set()
+        sincronizando = False
+        pausado = False
+        erro = False
+        conectado = False
+
+        if os.path.isfile(cfg_file):
+            try:
+                with open(cfg_file, "r", encoding="utf-8") as f:
+                    c = json.load(f)
+                if c.get("email"):
+                    conectado = True
+                    cats = c.get("categorias", {})
+                    if cats.get("documentos", True):
+                        pastas.add(os.path.join(home, "Documents"))
+                        pastas.add(os.path.join(home, "Documentos"))
+                    if cats.get("imagens", True):
+                        pastas.add(os.path.join(home, "Pictures"))
+                        pastas.add(os.path.join(home, "Imagens"))
+                    pastas.add(os.path.join(home, "Desktop"))
+                    pastas.add(os.path.join(home, "Área de trabalho"))
+                    for p in c.get("pastas_personalizadas", []):
+                        alvo = p if os.path.isabs(p) else os.path.join(home, p)
+                        pastas.add(alvo)
+            except Exception:
+                pass
+
+        if os.path.isfile(est_file):
+            try:
+                with open(est_file, "r", encoding="utf-8") as f:
+                    e = json.load(f)
+                sincronizando = bool(e.get("sincronizando"))
+                pausado = bool(e.get("pausado") or e.get("pausado_ate"))
+                erro = e.get("resultado") == "erro"
+            except Exception:
+                pass
+
+        _SYNC_CACHE.update({
+            "t": agora,
+            "pastas": pastas,
+            "sincronizando": sincronizando,
+            "pausado": pausado,
+            "erro": erro,
+            "conectado": conectado,
+        })
+    return _SYNC_CACHE
+
+
+def copia_em_cache(caminho, tamanho):
+    home = os.path.expanduser("~")
+    raiz = os.path.join(home, "Nuvem")
+    if not caminho.startswith(raiz + "/"):
+        return False
+    rel = caminho[len(raiz) + 1:]
+    try:
+        meta_path = os.path.join(home, ".cache/rclone/vfsMeta", rel)
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        rs = meta.get("Rs") or []
+        return len(rs) == 1 and rs[0].get("Pos") == 0 and rs[0].get("Size") == meta.get("Size") == tamanho
+    except Exception:
+        return False
+
+
+def status_arquivo(caminho, st=None, pasta=False):
+    if not caminho or caminho.startswith("trash:"):
+        return None
+
+    home = os.path.expanduser("~")
+    raiz_nuvem = os.path.join(home, "Nuvem")
+
+    # 1. Pastas e arquivos dentro de ~/Nuvem (rclone)
+    if caminho == raiz_nuvem or caminho.startswith(raiz_nuvem + "/"):
+        if pasta:
+            return {"tipo": "ok", "dica": _t("Disponível neste dispositivo")}
+        sz = st.st_size if st else 0
+        if copia_em_cache(caminho, sz):
+            return {"tipo": "ok", "dica": _t("Disponível neste dispositivo")}
+        return {"tipo": "cloud", "dica": _t("Disponível quando conectado")}
+
+    # 2. Pastas e arquivos sincronizados com Simba Conta
+    sync = info_sincronizacao()
+    if not sync["conectado"]:
+        return None
+
+    for p in sync["pastas"]:
+        if caminho == p or caminho.startswith(p + "/"):
+            if sync["pausado"]:
+                return {"tipo": "paused", "dica": _t("Sincronização pausada")}
+            if sync["erro"]:
+                return {"tipo": "error", "dica": _t("Erro de sincronização")}
+            if sync["sincronizando"]:
+                if st and (time.time() - st.st_mtime < 120):
+                    return {"tipo": "syncing", "dica": _t("Sincronizando…")}
+            return {"tipo": "ok", "dica": _t("Disponível neste dispositivo")}
+
+    return None
+
+
 def descrever(p, com_tamanho=True):
     st = os.lstat(p)
     pasta = os.path.isdir(p)
@@ -130,6 +239,7 @@ def descrever(p, com_tamanho=True):
         "rotulo": nome,
         "imagem": "",
         "atalho": False,
+        "statusSync": status_arquivo(p, st, pasta=pasta),
     }
     if pasta:
         esp = PASTAS_ESPECIAIS.get(nome.lower())
@@ -237,6 +347,7 @@ def item_lixeira():
         "tamanho": 0, "mtime": 0, "mime": "inode/directory", "rotulo": _t("Lixeira"), "imagem": "",
         "atalho": False, "especial": "lixeira", "cheia": cheia,
         "icones": (["user-trash-full"] if cheia else []) + ["user-trash"],
+        "statusSync": None,
     }
 
 

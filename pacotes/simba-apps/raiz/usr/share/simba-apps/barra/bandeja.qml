@@ -39,7 +39,118 @@ Item {
 
   // A barra cobre cada módulo com um MouseArea que arrasta o módulo inteiro;
   // subir o Loader deixa os ícones receberem o press (como em tarefas.qml).
-  Component.onCompleted: if (parent) parent.z = 60
+  Component.onCompleted: {
+    if (parent) parent.z = 60
+    root.atualizarSync()
+  }
+
+  // ── Sincronização estilo OneDrive ────────────────────────────────────
+  property var syncData: null
+
+  FileView {
+    id: fvConfig
+    path: Quickshell.env("HOME") + "/.config/conta/config.json"
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.atualizarSync()
+  }
+
+  FileView {
+    id: fvEstado
+    path: Quickshell.env("HOME") + "/.local/state/conta/estado.json"
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: root.atualizarSync()
+  }
+
+  readonly property var syncCfg: {
+    try { return JSON.parse(fvConfig.text()) || {} } catch (e) { return {} }
+  }
+  readonly property var syncEst: {
+    try { return JSON.parse(fvEstado.text()) || {} } catch (e) { return {} }
+  }
+
+  readonly property string syncEmail: (syncData && syncData.email) || syncCfg.email || ""
+  readonly property string syncNome: (syncData && syncData.nome) || syncCfg.nome || ""
+  readonly property bool syncConectado: !!(syncEmail || (syncData && syncData.conectado))
+  readonly property bool syncPrecisaDecidir: !!(syncData ? (syncData.conflito || syncData.precisa_decidir) : (syncEst.conflito || syncEst.precisa_decidir))
+  readonly property bool syncPausado: !!(syncData ? syncData.pausado : syncEst.pausado_ate)
+  readonly property bool syncRodando: !!(syncData ? (syncData.rodando || syncData.sincronizando) : syncEst.sincronizando)
+  readonly property bool syncErro: !!((syncData && syncData.resultado === "erro" && !syncPrecisaDecidir) || (syncEst.resultado === "erro" && !syncPrecisaDecidir))
+
+  readonly property string syncEstadoNome: {
+    if (!syncConectado) return I18n.t("Não conectado")
+    if (syncPrecisaDecidir) return I18n.t("Precisa de você")
+    if (syncPausado) return I18n.t("Pausado")
+    if (syncRodando) return I18n.t("Sincronizando…")
+    if (syncErro) return I18n.t("Sem conexão")
+    return I18n.t("Tudo em dia")
+  }
+
+  readonly property color syncCor: {
+    if (!syncConectado) return "#77777e"
+    if (syncPrecisaDecidir) return "#ea4335"
+    if (syncPausado) return "#fbbc05"
+    if (syncRodando) return "#4285f4"
+    if (syncErro) return "#ea4335"
+    return "#34a853"
+  }
+
+  readonly property string syncGlifo: {
+    if (!syncConectado) return "\u{F0708}"
+    if (syncPrecisaDecidir) return "\u{F0028}"
+    if (syncPausado) return "\u{F03E4}"
+    if (syncRodando) return "\u{F046A}"
+    if (syncErro) return "\u{F0156}"
+    return "\u{F012C}"
+  }
+
+  function extrairProgresso(str) {
+    if (!str) return 0
+    var m = String(str).match(/(\d+)%/)
+    if (m) return parseInt(m[1], 10)
+    return 0
+  }
+
+  function atualizarSync() {
+    procSyncStatus.running = false
+    procSyncStatus.running = true
+  }
+
+  Process {
+    id: procSyncStatus
+    command: [Quickshell.env("HOME") + "/.local/bin/conta", "status"]
+    stdout: StdioCollector { id: syncCollector }
+    onExited: function(code) {
+      if (code === 0 && syncCollector.text) {
+        try {
+          root.syncData = JSON.parse(syncCollector.text)
+        } catch (e) {}
+      }
+    }
+  }
+
+  Timer {
+    interval: 4000
+    repeat: true
+    running: painelSync.visible
+    onTriggered: root.atualizarSync()
+  }
+
+  // simba-shell simbasync alternarSync|abrirSync|fecharSync
+  IpcHandler {
+    target: "simbasync"
+    function alternarSync(): void {
+      if (painelSync.visible) painelSync.fechar()
+      else painelSync.abrir(seta)
+    }
+    function abrirSync(): void {
+      painelSync.abrir(seta)
+    }
+    function fecharSync(): void {
+      painelSync.fechar()
+    }
+  }
 
   // ── ícones do Simba arrastados pela barra até a seta ──────────────────
   // A barra decide "antes/depois" pela borda mais próxima, o que numa seta
@@ -122,9 +233,35 @@ Item {
   readonly property var appsNaSeta: todosApps.filter(function(it) { return root.appsOcultos.indexOf(root.chaveApp(it)) >= 0 })
 
   function cliqueApp(it, botao, ancora, m) {
-    if (botao === Qt.MiddleButton) it.secondaryActivate()
-    else if (botao === Qt.RightButton || it.onlyMenu) { if (it.hasMenu) menu.abrir(it, ancora); else it.activate() }
-    else it.activate()
+    var ehSync = it.id === "simba-sync-tray" || String(it.id).indexOf("sync-tray") >= 0
+    if (ehSync) {
+      if (painelSync.visible) {
+        painelSync.fechar()
+      } else {
+        if (menu.visible) menu.visible = false
+        var anc = ancora
+        if (popup.visible) {
+          anc = seta
+          popup.fechar()
+        }
+        painelSync.abrir(anc)
+      }
+      return
+    }
+
+    var ehMenu = it.onlyMenu
+    if (botao === Qt.MiddleButton) {
+      it.secondaryActivate()
+    } else if (botao === Qt.RightButton || ehMenu) {
+      if (it.hasMenu) {
+        if (menu.visible && menu.item === it) menu.visible = false
+        else menu.abrir(it, ancora)
+      } else {
+        it.activate()
+      }
+    } else {
+      it.activate()
+    }
   }
 
   // ── ícones do Simba ocultos ───────────────────────────────────────────
@@ -612,6 +749,647 @@ Item {
                 linhaMenu.modelData.triggered()
                 menu.visible = false
                 popup.fechar()
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── Painel estilo OneDrive para a Sincronização do Simba ────────────────
+  PanelWindow {
+    id: painelSync
+    color: "transparent"
+    visible: false
+    screen: root.bar && root.bar.screen ? root.bar.screen : (seta.QsWindow.window ? seta.QsWindow.window.screen : null)
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "simba-sync-painel"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
+    anchors { top: true; bottom: true; left: true; right: true }
+
+    readonly property int larg: 380
+    readonly property int alt: Math.min(560, colSync.implicitHeight + 36)
+
+    property real ancoraX: 0
+    property real ancoraY: 0
+    property real ancoraW: 0
+    property real ancoraH: 0
+
+    readonly property real caixaX: {
+      var x = root.vertical ? (root.posicao === "right" ? ancoraX - larg - 8 : ancoraX + ancoraW + 8)
+                            : ancoraX + ancoraW / 2 - larg / 2
+      return Math.max(8, Math.min(x, width - larg - 8))
+    }
+    readonly property real caixaY: {
+      var y = root.vertical ? Math.max(8, Math.min(ancoraY + ancoraH / 2 - alt / 2, height - alt - 8))
+                            : (root.posicao === "bottom" ? ancoraY - alt - 8 : ancoraY + ancoraH + 8)
+      return Math.max(8, Math.min(y, height - alt - 8))
+    }
+
+    function medir(anc) {
+      if (!anc) return
+      var w = anc.QsWindow.window
+      var p = anc.mapToItem(null, 0, 0)
+      var sw = w && w.screen ? w.screen.width : 0
+      var sh = w && w.screen ? w.screen.height : 0
+      ancoraX = p.x + (w && root.posicao === "right" ? sw - w.width : 0)
+      ancoraY = p.y + (w && root.posicao === "bottom" ? sh - w.height : 0)
+      ancoraW = anc.width
+      ancoraH = anc.height
+    }
+
+    function abrir(anc) {
+      medir(anc)
+      root.atualizarSync()
+      visible = true
+      teclasSync.forceActiveFocus()
+    }
+
+    function fechar() {
+      visible = false
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      acceptedButtons: Qt.AllButtons
+      onPressed: painelSync.fechar()
+    }
+
+    Item {
+      id: teclasSync
+      focus: true
+      Keys.onEscapePressed: painelSync.fechar()
+    }
+
+    Item {
+      x: painelSync.caixaX
+      y: painelSync.caixaY
+      width: painelSync.larg
+      height: painelSync.alt
+
+      MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.AllButtons
+        onClicked: {}
+        onWheel: function(wheel) {
+          if (listaRecentes.contentHeight > listaRecentes.height) {
+            listaRecentes.contentY = Math.max(0, Math.min(listaRecentes.contentHeight - listaRecentes.height, listaRecentes.contentY - wheel.angleDelta.y))
+          }
+          wheel.accepted = true
+        }
+      }
+
+      Rectangle {
+        id: caixaSync
+        anchors.fill: parent
+        anchors.margins: 4
+        radius: 12
+        color: "#262629"
+        border.width: 1
+        border.color: Qt.rgba(0, 0, 0, 0.5)
+
+        Rectangle {
+          anchors.fill: parent
+          anchors.margins: 1
+          radius: 11
+          color: "transparent"
+          border.width: 1
+          border.color: Qt.rgba(1, 1, 1, 0.08)
+        }
+
+        Column {
+          id: colSync
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.margins: 16
+          spacing: 12
+
+          // 1. Cabeçalho (Avatar + Título + Email)
+          Row {
+            width: parent.width
+            spacing: 10
+
+            Rectangle {
+              width: 32; height: 32; radius: 16
+              color: "#4a4a50"
+              clip: true
+              anchors.verticalCenter: parent.verticalCenter
+
+              Image {
+                id: imgAvatar
+                anchors.fill: parent
+                source: (root.syncData && root.syncData.foto) ? ("file://" + root.syncData.foto) : ("file://" + Quickshell.env("HOME") + "/.local/state/conta/foto.jpg")
+                fillMode: Image.PreserveAspectCrop
+                visible: status === Image.Ready
+              }
+
+              Text {
+                visible: !imgAvatar.visible
+                anchors.centerIn: parent
+                text: {
+                  if (root.syncNome) return root.syncNome.charAt(0).toUpperCase()
+                  if (root.syncEmail) return root.syncEmail.charAt(0).toUpperCase()
+                  return "S"
+                }
+                color: "#e8e8ea"
+                font.family: root.fonte
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+              }
+            }
+
+            Column {
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - 42
+              spacing: 1
+
+              Text {
+                text: I18n.t("Sincronização")
+                color: "#ededee"
+                font.family: root.fonte
+                font.pixelSize: 14
+                font.weight: Font.DemiBold
+              }
+
+              Text {
+                text: root.syncEmail || I18n.t("Não conectado")
+                color: "#77777e"
+                font.family: root.fonte
+                font.pixelSize: 12
+                elide: Text.ElideRight
+                width: parent.width
+              }
+            }
+          }
+
+          // 2. Card de Estado (com ícone colorido, status e barra de progresso)
+          Rectangle {
+            width: parent.width
+            height: colEstado.implicitHeight + 24
+            radius: 10
+            color: Qt.rgba(1, 1, 1, 0.04)
+
+            Column {
+              id: colEstado
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.margins: 12
+              spacing: 6
+
+              Row {
+                width: parent.width
+                spacing: 8
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.syncGlifo
+                  color: root.syncCor
+                  font.family: root.fonte
+                  font.pixelSize: 15
+
+                  RotationAnimation on rotation {
+                    running: root.syncRodando
+                    from: 0
+                    to: 360
+                    duration: 1600
+                    loops: Animation.Infinite
+                  }
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: root.syncEstadoNome
+                  color: root.syncCor
+                  font.family: root.fonte
+                  font.pixelSize: 14
+                  font.weight: Font.DemiBold
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: {
+                  if (!root.syncConectado) return I18n.t("Conecte sua conta para sincronizar arquivos")
+                  if (root.syncPrecisaDecidir) return (root.syncData && root.syncData.erro) || root.syncEst.erro || I18n.t("Há uma decisão a tomar")
+                  if (root.syncPausado) return I18n.t("Sincronização pausada · clique em Retomar para voltar")
+                  if (root.syncRodando) return (root.syncData && root.syncData.progresso) || root.syncEst.progresso || I18n.t("Enviando e recebendo alterações…")
+                  if (root.syncErro) return (root.syncData && root.syncData.erro) || root.syncEst.erro || I18n.t("Sem conexão com o Drive")
+                  return I18n.t("Arquivos sincronizados e protegidos")
+                }
+                color: "#77777e"
+                font.family: root.fonte
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+              }
+
+              Item {
+                width: parent.width
+                height: 6
+                visible: root.syncRodando || root.syncConectado
+
+                Rectangle {
+                  anchors.fill: parent
+                  radius: 3
+                  color: Qt.rgba(1, 1, 1, 0.08)
+
+                  Rectangle {
+                    height: parent.height
+                    radius: 3
+                    color: root.syncCor
+                    width: {
+                      if (root.syncRodando) {
+                        var progStr = (root.syncData && root.syncData.progresso) || root.syncEst.progresso || ""
+                        var p = root.extrairProgresso(progStr)
+                        return Math.max(12, parent.width * (p > 0 ? (p / 100) : 0.64))
+                      }
+                      return parent.width
+                    }
+                    Behavior on width { NumberAnimation { duration: 250 } }
+                  }
+                }
+              }
+            }
+          }
+
+          // 3. Seção "Recentes"
+          Row {
+            width: parent.width
+
+            Text {
+              text: I18n.t("Arquivos recentes")
+              color: "#a7a7ad"
+              font.family: root.fonte
+              font.pixelSize: 12
+              font.weight: Font.DemiBold
+              leftPadding: 2
+              anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Item {
+              width: Math.max(8, parent.width - 220)
+              height: 1
+            }
+
+            Text {
+              visible: root.syncData && root.syncData.recentes && root.syncData.recentes.length > 0
+              text: String(root.syncData.recentes.length) + " " + I18n.t("itens")
+              color: "#6e6e76"
+              font.family: root.fonte
+              font.pixelSize: 11
+              anchors.verticalCenter: parent.verticalCenter
+            }
+          }
+
+          Item {
+            id: containerRecentes
+            width: parent.width
+            height: Math.min(240, Math.max(90, (root.syncData && root.syncData.recentes ? root.syncData.recentes.length : 0) * 46))
+            clip: true
+
+            ListView {
+              id: listaRecentes
+              anchors.fill: parent
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+              interactive: contentHeight > height
+              model: (root.syncData && root.syncData.recentes && root.syncData.recentes.length > 0)
+                     ? root.syncData.recentes
+                     : []
+              spacing: 2
+
+              delegate: Item {
+                id: itemRecente
+                required property var modelData
+                required property int index
+
+                width: listaRecentes.width - (barraScroll.visible ? 8 : 0)
+                height: (modelData.status === "sincronizando") ? 52 : 44
+
+                Rectangle {
+                  anchors.fill: parent
+                  radius: 8
+                  color: areaRecente.containsMouse ? Qt.rgba(1, 1, 1, 0.06) : "transparent"
+                  Behavior on color { ColorAnimation { duration: 100 } }
+                }
+
+                Row {
+                  anchors.fill: parent
+                  anchors.leftMargin: 6
+                  anchors.rightMargin: 6
+                  spacing: 10
+
+                  // 1. Ícone de Status estilo OneDrive
+                  Item {
+                    id: caixaIconeStatus
+                    width: 24
+                    height: 24
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    Rectangle {
+                      anchors.centerIn: parent
+                      width: 22
+                      height: 22
+                      radius: 11
+                      color: {
+                        var st = itemRecente.modelData.status || "ok"
+                        if (st === "sincronizando") return "#4285F4"
+                        if (st === "erro") return "#EA4335"
+                        if (st === "pausado") return "#FBBC05"
+                        if (st === "nuvem") return "#1a73e8"
+                        return "#34A853" // ok / disponível offline
+                      }
+
+                      Text {
+                        anchors.centerIn: parent
+                        text: {
+                          var st = itemRecente.modelData.status || "ok"
+                          if (st === "sincronizando") return "\u{F046A}" // Setas circulares
+                          if (st === "erro") return "\u{F0156}" // X
+                          if (st === "pausado") return "\u{F03E4}" // Pausa
+                          if (st === "nuvem") return "\u{F0708}" // Nuvem
+                          return "\u{F012C}" // Check verde
+                        }
+                        color: (itemRecente.modelData.status === "pausado") ? "#1f1f1f" : "#ffffff"
+                        font.family: root.fonte
+                        font.pixelSize: 11
+
+                        RotationAnimation on rotation {
+                          running: itemRecente.modelData.status === "sincronizando"
+                          from: 0
+                          to: 360
+                          duration: 1600
+                          loops: Animation.Infinite
+                        }
+                      }
+                    }
+                  }
+
+                  // 2. Nome, Pasta e Barra de Progresso
+                  Column {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - caixaIconeStatus.width - tagRecente.implicitWidth - 24
+                    spacing: 2
+
+                    Text {
+                      width: parent.width
+                      text: itemRecente.modelData.nome || ""
+                      color: "#ededee"
+                      font.family: root.fonte
+                      font.pixelSize: 13
+                      font.weight: Font.Medium
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      width: parent.width
+                      text: {
+                        var p = itemRecente.modelData.pasta || ""
+                        if (itemRecente.modelData.status === "sincronizando") {
+                          return (p ? p + " · " : "") + I18n.t("Enviando alterações…")
+                        }
+                        return p
+                      }
+                      color: (itemRecente.modelData.status === "sincronizando") ? "#8fb4e8" : "#77777e"
+                      font.family: root.fonte
+                      font.pixelSize: 11
+                      elide: Text.ElideRight
+                    }
+
+                    // Barra de progresso para itens que estão fazendo upload
+                    Item {
+                      width: parent.width
+                      height: 3
+                      visible: itemRecente.modelData.status === "sincronizando"
+
+                      Rectangle {
+                        anchors.fill: parent
+                        radius: 1.5
+                        color: Qt.rgba(1, 1, 1, 0.1)
+
+                        Rectangle {
+                          height: parent.height
+                          radius: 1.5
+                          color: "#4285F4"
+                          width: Math.max(8, parent.width * Math.min(1.0, (itemRecente.modelData.progresso_pct || 65) / 100))
+                          Behavior on width { NumberAnimation { duration: 250 } }
+                        }
+                      }
+                    }
+                  }
+
+                  // 3. Rótulo de Estado
+                  Text {
+                    id: tagRecente
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: itemRecente.modelData.estado || ""
+                    color: {
+                      var st = itemRecente.modelData.status || "ok"
+                      if (st === "sincronizando") return "#4285F4"
+                      if (st === "erro") return "#EA4335"
+                      if (st === "pausado") return "#FBBC05"
+                      return "#77777e"
+                    }
+                    font.family: root.fonte
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignRight
+                  }
+                }
+
+                MouseArea {
+                  id: areaRecente
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    if (itemRecente.modelData.caminho) {
+                      Quickshell.execDetached(["xdg-open", itemRecente.modelData.caminho])
+                      painelSync.fechar()
+                    }
+                  }
+                  onWheel: function(wheel) {
+                    if (listaRecentes.contentHeight > listaRecentes.height) {
+                      listaRecentes.contentY = Math.max(0, Math.min(listaRecentes.contentHeight - listaRecentes.height, listaRecentes.contentY - wheel.angleDelta.y))
+                    }
+                    wheel.accepted = true
+                  }
+                }
+              }
+            }
+
+            // Scrollbar vertical suave
+            Rectangle {
+              id: barraScroll
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.bottom: parent.bottom
+              anchors.rightMargin: 1
+              width: 3
+              radius: 1.5
+              color: "transparent"
+              visible: listaRecentes.contentHeight > listaRecentes.height
+
+              Rectangle {
+                width: 3
+                radius: 1.5
+                color: Qt.rgba(1, 1, 1, 0.28)
+                y: Math.max(0, Math.min(barraScroll.height - height, listaRecentes.visibleArea.yPosition * barraScroll.height))
+                height: Math.max(20, listaRecentes.visibleArea.heightRatio * barraScroll.height)
+              }
+            }
+
+            Text {
+              visible: !root.syncData || !root.syncData.recentes || root.syncData.recentes.length === 0
+              anchors.centerIn: parent
+              text: I18n.t("Nenhum arquivo recente")
+              color: "#77777e"
+              font.family: root.fonte
+              font.pixelSize: 12
+            }
+          }
+
+          // 4. Botões de Ação ("Abrir pasta" e "Ver no Drive")
+          Row {
+            width: parent.width
+            spacing: 8
+
+            Rectangle {
+              width: (parent.width - 8) / 2
+              height: 34
+              radius: 8
+              color: areaBtnPasta.pressed ? Qt.rgba(1, 1, 1, 0.05) : (areaBtnPasta.containsMouse ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.08))
+              Behavior on color { ColorAnimation { duration: 100 } }
+
+              Text {
+                anchors.centerIn: parent
+                text: I18n.t("Abrir pasta")
+                color: "#ededee"
+                font.family: root.fonte
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+              }
+
+              MouseArea {
+                id: areaBtnPasta
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  var docPath = Quickshell.env("HOME") + "/Documents"
+                  Quickshell.execDetached(["xdg-open", docPath])
+                  painelSync.fechar()
+                }
+              }
+            }
+
+            Rectangle {
+              width: (parent.width - 8) / 2
+              height: 34
+              radius: 8
+              color: areaBtnDrive.pressed ? Qt.rgba(1, 1, 1, 0.05) : (areaBtnDrive.containsMouse ? Qt.rgba(1, 1, 1, 0.14) : Qt.rgba(1, 1, 1, 0.08))
+              Behavior on color { ColorAnimation { duration: 100 } }
+
+              Text {
+                anchors.centerIn: parent
+                text: I18n.t("Ver no Drive")
+                color: "#ededee"
+                font.family: root.fonte
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+              }
+
+              MouseArea {
+                id: areaBtnDrive
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  Quickshell.execDetached(["xdg-open", "https://drive.google.com/drive/search?q=%22Simba%20Conta%22"])
+                  painelSync.fechar()
+                }
+              }
+            }
+          }
+
+          // 5. Rodapé ("Pausar" / "Retomar" e "Configurações")
+          Item {
+            width: parent.width
+            height: 36
+
+            Rectangle {
+              anchors.top: parent.top
+              anchors.left: parent.left
+              anchors.right: parent.right
+              height: 1
+              color: Qt.rgba(1, 1, 1, 0.07)
+            }
+
+            Rectangle {
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.verticalCenterOffset: 2
+              height: 28
+              width: txtPausar.implicitWidth + 14
+              radius: 6
+              color: areaBtnPausar.containsMouse ? Qt.rgba(1, 1, 1, 0.06) : "transparent"
+
+              Text {
+                id: txtPausar
+                anchors.centerIn: parent
+                text: root.syncPausado ? I18n.t("Retomar") : I18n.t("Pausar")
+                color: areaBtnPausar.containsMouse ? "#ededee" : "#a7a7ad"
+                font.family: root.fonte
+                font.pixelSize: 13
+                font.weight: Font.Medium
+              }
+
+              MouseArea {
+                id: areaBtnPausar
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  if (root.syncPausado) {
+                    Quickshell.execDetached(["conta", "retomar"])
+                  } else {
+                    Quickshell.execDetached(["conta", "pausar", "24"])
+                  }
+                  root.atualizarSync()
+                }
+              }
+            }
+
+            Rectangle {
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              anchors.verticalCenterOffset: 2
+              height: 28
+              width: txtCfg.implicitWidth + 14
+              radius: 6
+              color: areaBtnCfg.containsMouse ? Qt.rgba(1, 1, 1, 0.06) : "transparent"
+
+              Text {
+                id: txtCfg
+                anchors.centerIn: parent
+                text: I18n.t("Configurações")
+                color: areaBtnCfg.containsMouse ? "#ededee" : "#a7a7ad"
+                font.family: root.fonte
+                font.pixelSize: 13
+                font.weight: Font.Medium
+              }
+
+              MouseArea {
+                id: areaBtnCfg
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                  Quickshell.execDetached(["configuracoes", "contas"])
+                  painelSync.fechar()
+                }
               }
             }
           }

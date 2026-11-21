@@ -24,7 +24,8 @@ from simba_i18n import t as _t  # noqa: E402  (traduções: /usr/share/simba-app
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 APP_ID = "com.simba.BoasVindas"
 HOME = os.path.expanduser("~")
@@ -228,6 +229,225 @@ def textura_svg(svg, escala=2):
     return Gdk.Texture.new_from_bytes(GLib.Bytes.new(svg.encode()))
 
 
+def formatar_bytes(b):
+    if b is None or b <= 0:
+        return "0 B"
+    if b >= 1099511627776:
+        return f"{b / 1099511627776:.1f}".replace(".", ",") + " TB"
+    if b >= 1073741824:
+        return f"{b / 1073741824:.1f}".replace(".", ",") + " GB"
+    if b >= 1048576:
+        return f"{b / 1048576:.1f}".replace(".", ",") + " MB"
+    if b >= 1024:
+        return f"{b / 1024:.1f}".replace(".", ",") + " KB"
+    return f"{b} B"
+
+
+def stats_diretorio(caminho, max_arqs=10000):
+    if not os.path.isdir(caminho):
+        return 0, 0
+    total_tam = 0
+    total_arq = 0
+    try:
+        for raiz, _dirs, arqs in os.walk(caminho):
+            total_arq += len(arqs)
+            for a in arqs:
+                try:
+                    total_tam += os.path.getsize(os.path.join(raiz, a))
+                except OSError:
+                    pass
+            if total_arq >= max_arqs:
+                break
+    except Exception:
+        pass
+    return total_arq, total_tam
+
+
+class ModalPacotes(Adw.Window):
+    def __init__(self, parent, on_save_callback):
+        super().__init__(transient_for=parent, modal=True, title=_t("Escolher programas para backup"))
+        self.set_default_size(580, 540)
+        self.on_save_callback = on_save_callback
+        self.itens = []
+        self.itens_widgets = []
+        self.filtro_tipo = "todos"
+        self.filtro_texto = ""
+
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_title_widget(Gtk.Label(label=_t("Programas em backup"), css_classes=["heading"]))
+        btn_cancelar = Gtk.Button(label=_t("Cancelar"))
+        btn_cancelar.connect("clicked", lambda *_: self.close())
+        header.pack_start(btn_cancelar)
+
+        btn_salvar = Gtk.Button(label=_t("Salvar seleção"))
+        btn_salvar.add_css_class("suggested-action")
+        btn_salvar.connect("clicked", lambda *_: self.salvar())
+        header.pack_end(btn_salvar)
+        view.add_top_bar(header)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                       margin_start=16, margin_end=16, margin_top=12, margin_bottom=14)
+
+        self.search_entry = Gtk.SearchEntry(placeholder_text=_t("Pesquisar programas…"))
+        self.search_entry.connect("search-changed", self.ao_mudar_busca)
+        vbox.append(self.search_entry)
+
+        chips_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.btn_chips = {}
+        primeiro_chip = None
+        for f_id, f_nome in [("todos", _t("Todos")), ("pacman", _t("Nativo (Pacman)")), ("aur", "AUR"), ("flatpak", "Flatpak")]:
+            b = Gtk.ToggleButton(label=f_nome)
+            b.add_css_class("pill")
+            if primeiro_chip is None:
+                primeiro_chip = b
+                b.set_active(True)
+            else:
+                b.set_group(primeiro_chip)
+            b.connect("toggled", self.ao_mudar_filtro_chip, f_id)
+            self.btn_chips[f_id] = b
+            chips_box.append(b)
+        vbox.append(chips_box)
+
+        stats_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.lbl_stats = Gtk.Label(label=_t("Carregando programas…"), halign=Gtk.Align.START)
+        self.lbl_stats.add_css_class("dim-label")
+        stats_box.append(self.lbl_stats)
+
+        sp = Gtk.Box(hexpand=True)
+        stats_box.append(sp)
+
+        btn_todos = Gtk.Button(label=_t("Selecionar todos"))
+        btn_todos.add_css_class("flat")
+        btn_todos.connect("clicked", lambda *_: self.selecionar_tudo(True))
+        stats_box.append(btn_todos)
+
+        btn_nenhum = Gtk.Button(label=_t("Nenhum"))
+        btn_nenhum.add_css_class("flat")
+        btn_nenhum.connect("clicked", lambda *_: self.selecionar_tudo(False))
+        stats_box.append(btn_nenhum)
+        vbox.append(stats_box)
+
+        scrolled = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
+        scrolled.set_has_frame(True)
+        scrolled.add_css_class("card")
+        self.listbox = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        self.listbox.set_filter_func(self.filtro_listbox)
+        scrolled.set_child(self.listbox)
+        vbox.append(scrolled)
+
+        view.set_content(vbox)
+        self.set_content(view)
+
+        self.carregar_pacotes()
+
+    def ao_mudar_busca(self, entry):
+        self.filtro_texto = entry.get_text().strip().lower()
+        self.listbox.invalidate_filter()
+
+    def ao_mudar_filtro_chip(self, btn, f_id):
+        if btn.get_active():
+            self.filtro_tipo = f_id
+            self.listbox.invalidate_filter()
+
+    def filtro_listbox(self, row):
+        item = getattr(row, "_item", None)
+        if not item:
+            return True
+        if self.filtro_tipo != "todos":
+            if item.get("tipo", "pacman") != self.filtro_tipo:
+                return False
+        if self.filtro_texto:
+            txt = self.filtro_texto
+            nome = (item.get("nome") or item.get("id") or "").lower()
+            desc = (item.get("desc") or "").lower()
+            if txt not in nome and txt not in desc:
+                return False
+        return True
+
+    def selecionar_tudo(self, valor):
+        for r in self.itens_widgets:
+            if self.filtro_listbox(r):
+                r._cb.set_active(valor)
+        self.atualizar_contagem()
+
+    def atualizar_contagem(self):
+        total = len(self.itens_widgets)
+        marcados = sum(1 for r in self.itens_widgets if r._cb.get_active())
+        self.lbl_stats.set_label(f"{marcados} " + _t("de") + f" {total} " + _t("selecionados"))
+
+    def carregar_pacotes(self):
+        def ler():
+            r = subprocess.run(["conta", "pacotes-listar"], capture_output=True, text=True, timeout=15)
+            if r.returncode == 0 and r.stdout.strip():
+                return json.loads(r.stdout)
+            return None
+
+        def pronto(dados):
+            if not dados:
+                self.lbl_stats.set_label(_t("Não foi possível carregar a lista de programas."))
+                return
+            self.itens = dados.get("itens", [])
+            for item in self.itens:
+                row = Gtk.ListBoxRow()
+                card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12,
+                               margin_top=8, margin_bottom=8, margin_start=12, margin_end=12)
+                cb = Gtk.CheckButton(active=item.get("selecionado", True))
+                cb.set_valign(Gtk.Align.CENTER)
+                cb.set_can_target(False)
+
+                vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+                lbl_nome = Gtk.Label(label=item.get("nome") or item.get("id"), halign=Gtk.Align.START)
+                lbl_nome.add_css_class("cartao-titulo")
+                lbl_desc = Gtk.Label(label=item.get("desc", ""), halign=Gtk.Align.START)
+                lbl_desc.set_ellipsize(Pango.EllipsizeMode.END)
+                lbl_desc.set_max_width_chars(42)
+                lbl_desc.add_css_class("cartao-subtitulo")
+                vbox.append(lbl_nome)
+                vbox.append(lbl_desc)
+
+                tipo = item.get("tipo", "pacman")
+                badge = Gtk.Label(label="Nativo" if tipo == "pacman" else ("AUR" if tipo == "aur" else "Flatpak"))
+                badge.add_css_class("badge-tag")
+                badge.add_css_class(f"badge-{tipo}")
+                badge.set_valign(Gtk.Align.CENTER)
+
+                card.append(cb)
+                card.append(vbox)
+                card.append(badge)
+
+                click = Gtk.GestureClick()
+                def on_card_click(_g, _n, _x, _y, check=cb):
+                    check.set_active(not check.get_active())
+                click.connect("released", on_card_click)
+                card.add_controller(click)
+
+                cb.connect("toggled", lambda *_: self.atualizar_contagem())
+
+                row.set_child(card)
+                row._item = item
+                row._cb = cb
+                self.itens_widgets.append(row)
+                self.listbox.append(row)
+
+            self.atualizar_contagem()
+
+        em_segundo_plano(ler, pronto)
+
+    def salvar(self):
+        selecionados = [r._item["id"] for r in self.itens_widgets if r._cb.get_active()]
+        total = len(self.itens_widgets)
+        if len(selecionados) == total:
+            subprocess.run(["conta", "pacotes-modo", "todos"], capture_output=True, timeout=10)
+        else:
+            ids_str = ",".join(selecionados)
+            subprocess.run(["conta", "pacotes-selecionar", "--modo", "escolher", "--ids", ids_str],
+                           capture_output=True, timeout=10)
+        if self.on_save_callback:
+            self.on_save_callback(len(selecionados), total)
+        self.close()
+
+
 # ───────────────────────────────────────────────────────────── janela
 class Janela(Adw.ApplicationWindow):
     def __init__(self, app):
@@ -237,6 +457,9 @@ class Janela(Adw.ApplicationWindow):
         self.ilustracoes = []  # (Gtk.Picture, função svg)
         self.cartoes_tema = {}
         self.desktop_office = {}
+        self.qtd_pacotes = 217
+        self.cota_total_bytes = 5497558138880
+        self.cota_usado_bytes = 27940618868
         self.css = Gtk.CssProvider()
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), self.css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
@@ -477,93 +700,367 @@ class Janela(Adw.ApplicationWindow):
         return True
 
     def p_conta(self):
-        caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        self.p_conta_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0,
+                                   valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER,
+                                   hexpand=True, vexpand=True)
+
+        # ── 1. Caixa quando desconectado (login) ──
+        self.conta_desconectada_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0,
+                                              valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+        self.conta_desconectada_box.add_css_class("pagina")
+        self.conta_ilustracao = Gtk.Image()
+        self.ilustracoes.append((self.conta_ilustracao, svg_conta))
+        self.conta_ilustracao.set_pixel_size(200)
+        self.conta_ilustracao.set_halign(Gtk.Align.CENTER)
+        self.conta_ilustracao.set_margin_bottom(26)
+        self.conta_desconectada_box.append(self.conta_ilustracao)
+
+        t_desc = Gtk.Label(label=_t("Sua conta, em todo lugar"), wrap=True, justify=Gtk.Justification.CENTER)
+        t_desc.add_css_class("titulo")
+        self.conta_desconectada_box.append(t_desc)
+
+        d_desc = Gtk.Label(label=_t("Entre com sua conta Google e o Simba OS guarda no seu Drive as configurações, "
+                                     "o papel de parede e os documentos. Formatou ou trocou de computador? "
+                                     "É só entrar de novo e tudo volta."),
+                           wrap=True, justify=Gtk.Justification.CENTER, max_width_chars=58, margin_top=10)
+        d_desc.add_css_class("descricao")
+        self.conta_desconectada_box.append(d_desc)
+
+        caixa_btn = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, halign=Gtk.Align.CENTER, margin_top=26)
         self.conta_botao = self.botao(_t("Entrar com Google"), self.entrar_google, True, "avatar-default-symbolic")
         self.conta_estado = Gtk.Label(visible=False)
         self.conta_estado.add_css_class("estado")
-        caixa.append(self.conta_botao)
-        caixa.append(self.conta_estado)
-        caixa.append(self._montar_escolha())
-        self.conta_texto = (_t("Entre com sua conta Google e o Simba OS guarda no seu Drive as configurações, "
-                            "o papel de parede e os documentos. Formatou ou trocou de computador? "
-                            "É só entrar de novo e tudo volta.") + " " +
-                            _t("Depois do login você escolhe o que sincronizar."))
-        pagina = self.pagina(_t("Sua conta, em todo lugar"), self.conta_texto, svg_conta, caixa)
-        self.conta_ilustracao = pagina.get_first_child()
-        return pagina
+        caixa_btn.append(self.conta_botao)
+        caixa_btn.append(self.conta_estado)
 
-    # Escolha do que sincronizar (aparece logo depois do 1º login; nada é enviado antes).
-    # Só duas perguntas: QUAIS PASTAS vão para o Drive e se o papel de parede fica igual nos
-    # outros computadores. Configurações, histórico, chaves etc. ficam de fora (Contas, depois).
-    PASTAS = [  # (diretório XDG, rótulo, marcada por padrão)
-        ("DOCUMENTS", "Documentos", True),
-        ("PICTURES", "Imagens", True),
-        ("DESKTOP", "Área de trabalho", True),
-        ("MUSIC", "Músicas", False),
-        ("VIDEOS", "Vídeos", False),
-        ("DOWNLOAD", "Downloads", False),
-    ]
+        d_nota = Gtk.Label(label=_t("O Simba OS só acessa a pasta “Simba Conta” que ele mesmo cria no seu Drive."),
+                           wrap=True, justify=Gtk.Justification.CENTER, margin_top=8)
+        d_nota.add_css_class("estado")
+        caixa_btn.append(d_nota)
+        self.conta_desconectada_box.append(caixa_btn)
 
-    def _pastas_usuario(self):
+        # ── 2. Caixa quando conectado (seleção sincronizacao-v2) ──
+        self.conta_conectada_box = self._montar_escolha_conectado()
+
+        self.p_conta_box.append(self.conta_desconectada_box)
+        self.p_conta_box.append(self.conta_conectada_box)
+
+        # Inicialmente oculta a conectada até verificar status
+        self.conta_conectada_box.set_visible(False)
+
+        return self.p_conta_box
+
+    def _montar_escolha_conectado(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, width_request=640, halign=Gtk.Align.CENTER)
+
+        # Cabeçalho: Conectado como renan@gmail.com · Trocar conta
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8, margin_bottom=6)
+        dot = Gtk.Label(label="●")
+        dot.add_css_class("status-dot-ok")
+        self.lbl_conectado_email = Gtk.Label(label=_t("Conectado como"), halign=Gtk.Align.START)
+        self.lbl_conectado_email.add_css_class("estado")
+        header_box.append(dot)
+        header_box.append(self.lbl_conectado_email)
+
+        sp = Gtk.Box(hexpand=True)
+        header_box.append(sp)
+
+        btn_trocar = Gtk.Button(label=_t("Trocar conta"))
+        btn_trocar.add_css_class("link-botao")
+        btn_trocar.add_css_class("flat")
+        btn_trocar.connect("clicked", lambda *_: self.confirmar_sair_conta())
+        header_box.append(btn_trocar)
+        box.append(header_box)
+
+        # Título e subtítulo
+        tit = Gtk.Label(label=_t("O que vai para o Drive?"), halign=Gtk.Align.START)
+        tit.add_css_class("titulo-selecao")
+        box.append(tit)
+
+        sub = Gtk.Label(label=_t("Dá para mudar depois em Configurações › Contas."), halign=Gtk.Align.START, margin_bottom=14)
+        sub.add_css_class("descricao-selecao")
+        box.append(sub)
+
+        # Grade 2 colunas x 3 linhas
+        self.grade_pastas = Gtk.Grid(column_spacing=12, row_spacing=8, hexpand=True)
+        self.escolha_pastas = {}
+
+        # PASTAS: (xdg, rotulo, padrao, col, linha)
+        pastas_def = [
+            ("DOCUMENTS", "Documentos", True, 0, 0),
+            ("MUSIC", "Músicas", False, 1, 0),
+            ("PICTURES", "Imagens", True, 0, 1),
+            ("VIDEOS", "Vídeos", False, 1, 1),
+            ("DESKTOP", "Área de trabalho", True, 0, 2),
+            ("DOWNLOAD", "Downloads", False, 1, 2),
+        ]
         casa = os.path.expanduser("~")
-        vistas, achadas = set(), []
-        for xdg, rotulo, padrao in self.PASTAS:
+
+        for xdg, rotulo, padrao, col, lin in pastas_def:
             try:
                 d = subprocess.run(["xdg-user-dir", xdg], capture_output=True, text=True, timeout=3).stdout.strip()
             except (OSError, subprocess.SubprocessError):
                 d = ""
-            if not d or d.rstrip("/") == casa or d in vistas or not os.path.isdir(d):
-                continue
-            vistas.add(d)
-            achadas.append((os.path.relpath(d, casa), rotulo, padrao))
-        return achadas
+            if not d or not os.path.isdir(d):
+                d = os.path.join(casa, rotulo)
+            rel = os.path.relpath(d, casa)
+
+            card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            card.add_css_class("cartao-pasta")
+
+            cb = Gtk.CheckButton(active=padrao)
+            cb.set_valign(Gtk.Align.CENTER)
+            cb.set_can_target(False)
+
+            vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+            lbl_nome = Gtk.Label(label=_t(rotulo), halign=Gtk.Align.START)
+            lbl_nome.add_css_class("cartao-titulo")
+            lbl_det = Gtk.Label(label=_t("Calculando…"), halign=Gtk.Align.START)
+            lbl_det.add_css_class("cartao-subtitulo")
+            vbox.append(lbl_nome)
+            vbox.append(lbl_det)
+
+            card.append(cb)
+            card.append(vbox)
+
+            click = Gtk.GestureClick()
+            def on_card_click(_g, _n, _x, _y, check=cb):
+                check.set_active(not check.get_active())
+            click.connect("released", on_card_click)
+            card.add_controller(click)
+
+            def on_toggle(check, c=card):
+                if check.get_active():
+                    c.add_css_class("ativo")
+                else:
+                    c.remove_css_class("ativo")
+                self.atualizar_cota_estimada()
+
+            cb.connect("toggled", on_toggle)
+            if padrao:
+                card.add_css_class("ativo")
+
+            self.escolha_pastas[rel] = {
+                "cb": cb,
+                "card": card,
+                "lbl_detalhe": lbl_det,
+                "bytes": 0,
+                "arqs": 0,
+                "caminho": d,
+            }
+
+            self.grade_pastas.attach(card, col, lin, 1, 1)
+
+        box.append(self.grade_pastas)
+
+        # Cartão 1: Papel de parede sincronizado entre máquinas
+        self.card_fundo = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, margin_top=8)
+        self.card_fundo.add_css_class("cartao-pasta")
+        self.card_fundo.add_css_class("ativo")
+
+        vbox_fundo = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        lbl_fundo_tit = Gtk.Label(label=_t("Papel de parede sincronizado entre máquinas"), halign=Gtk.Align.START)
+        lbl_fundo_tit.add_css_class("cartao-titulo")
+        vbox_fundo.append(lbl_fundo_tit)
+
+        lbl_fundo_sub = Gtk.Label(label=_t("Ao trocar o papel de parede aqui, muda na hora nos seus outros computadores."), halign=Gtk.Align.START)
+        lbl_fundo_sub.add_css_class("cartao-subtitulo")
+        vbox_fundo.append(lbl_fundo_sub)
+
+        self.card_fundo.append(vbox_fundo)
+
+        self.escolha_fundo = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
+        self.escolha_fundo.connect("notify::active", lambda *_: self.ao_alternar_fundo())
+        self.card_fundo.append(self.escolha_fundo)
+        box.append(self.card_fundo)
+
+        # Cartão 2: Programas e aplicativos
+        self.card_pacotes = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, margin_top=8)
+        self.card_pacotes.add_css_class("cartao-pasta")
+        self.card_pacotes.add_css_class("ativo")
+
+        vbox_pacotes = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
+        lbl_pacotes_tit = Gtk.Label(label=_t("Programas instalados"), halign=Gtk.Align.START)
+        lbl_pacotes_tit.add_css_class("cartao-titulo")
+        vbox_pacotes.append(lbl_pacotes_tit)
+
+        box_pacotes_sub = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2, halign=Gtk.Align.START)
+        self.lbl_pacotes_desc = Gtk.Label(label=_t(f"{self.qtd_pacotes} programas instalados para backup · "), halign=Gtk.Align.START)
+        self.lbl_pacotes_desc.add_css_class("cartao-subtitulo")
+        box_pacotes_sub.append(self.lbl_pacotes_desc)
+
+        self.btn_escolher_pacotes = Gtk.Button(label=_t("Escolher…"))
+        self.btn_escolher_pacotes.add_css_class("link-botao")
+        self.btn_escolher_pacotes.add_css_class("flat")
+        self.btn_escolher_pacotes.connect("clicked", lambda *_: self.abrir_modal_pacotes())
+        box_pacotes_sub.append(self.btn_escolher_pacotes)
+
+        vbox_pacotes.append(box_pacotes_sub)
+        self.card_pacotes.append(vbox_pacotes)
+
+        self.escolha_pacotes = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
+        self.escolha_pacotes.connect("notify::active", lambda *_: self.ao_alternar_pacotes())
+        self.card_pacotes.append(self.escolha_pacotes)
+        box.append(self.card_pacotes)
+
+        # Barra de cota
+        cota_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=14)
+        labels_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self.lbl_vai_usar = Gtk.Label(label=_t("Vai usar 0 MB no Drive"), halign=Gtk.Align.START)
+        self.lbl_vai_usar.add_css_class("cota-uso-texto")
+        labels_box.append(self.lbl_vai_usar)
+
+        sp_cota = Gtk.Box(hexpand=True)
+        labels_box.append(sp_cota)
+
+        self.lbl_cota_total = Gtk.Label(label=_t("de 5,0 TB"), halign=Gtk.Align.END)
+        self.lbl_cota_total.add_css_class("cota-total-texto")
+        labels_box.append(self.lbl_cota_total)
+        cota_box.append(labels_box)
+
+        self.barra_cota = Gtk.ProgressBar(hexpand=True)
+        self.barra_cota.add_css_class("barra-cota")
+        self.barra_cota.set_fraction(0.015)
+        cota_box.append(self.barra_cota)
+        box.append(cota_box)
+
+        return box
 
     def _montar_escolha(self):
-        self.escolha_caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, visible=False)
-        rotulo = Gtk.Label(label=_t("Quais pastas você quer guardar no Drive?"))
-        rotulo.add_css_class("heading")
-        self.escolha_caixa.append(rotulo)
-        grade = Gtk.Grid(column_spacing=24, row_spacing=4, halign=Gtk.Align.CENTER)
-        self.escolha_pastas = {}
-        for i, (rel, texto, padrao) in enumerate(self._pastas_usuario()):
-            cb = Gtk.CheckButton(label=_t(texto), active=padrao)
-            self.escolha_pastas[rel] = cb
-            grade.attach(cb, i % 3, i // 3, 1, 1)
-        self.escolha_caixa.append(grade)
-        linha = Gtk.Box(spacing=12, halign=Gtk.Align.CENTER, margin_top=6)
-        linha.append(Gtk.Label(label=_t("Configurações e aparência (papel de parede, tema e apps)")))
-        self.escolha_fundo = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
-        linha.append(self.escolha_fundo)
-        self.escolha_caixa.append(linha)
-        self.escolha_botao = self.botao(_t("Começar a sincronizar"), self.confirmar_escolha, True)
-        self.escolha_caixa.append(self.escolha_botao)
-        return self.escolha_caixa
+        return Gtk.Box(visible=False)
 
     def _mostrar_escolha(self, mostrar):
-        self.escolha_caixa.set_visible(mostrar)
-        # sem a ilustração a lista cabe na janela (que não muda de tamanho)
-        if getattr(self, "conta_ilustracao", None) is not None:
-            self.conta_ilustracao.set_visible(not mostrar)
-        self.conta_botao.set_visible(not mostrar)
+        if getattr(self, "conta_conectada_box", None) is not None:
+            self.conta_conectada_box.set_visible(mostrar)
+        if getattr(self, "conta_desconectada_box", None) is not None:
+            self.conta_desconectada_box.set_visible(not mostrar)
+
+    def ao_alternar_fundo(self):
+        ativo = self.escolha_fundo.get_active()
+        if ativo:
+            self.card_fundo.add_css_class("ativo")
+        else:
+            self.card_fundo.remove_css_class("ativo")
+        self.atualizar_cota_estimada()
+
+    def ao_alternar_pacotes(self):
+        ativo = self.escolha_pacotes.get_active()
+        if ativo:
+            self.card_pacotes.add_css_class("ativo")
+            self.btn_escolher_pacotes.set_sensitive(True)
+        else:
+            self.card_pacotes.remove_css_class("ativo")
+            self.btn_escolher_pacotes.set_sensitive(False)
+        self.atualizar_cota_estimada()
+
+    def abrir_modal_pacotes(self):
+        modal = ModalPacotes(self, self.ao_salvar_pacotes)
+        modal.present()
+
+    def ao_salvar_pacotes(self, selecionados, total):
+        self.qtd_pacotes = selecionados
+        self.lbl_pacotes_desc.set_label(_t(f"{selecionados} programas instalados para backup · "))
+        self.atualizar_cota_estimada()
+        self.toast(_t(f"{selecionados} programas selecionados para backup"))
+
+    def confirmar_sair_conta(self):
+        dialog = Adw.AlertDialog(
+            heading=_t("Sair da conta Google?"),
+            body=_t("A sincronização será desativada neste computador. "
+                    "Os arquivos já sincronizados continuarão salvos no Google Drive.")
+        )
+        dialog.add_response("cancelar", _t("Cancelar"))
+        dialog.add_response("sair", _t("Sair da conta"))
+        dialog.set_response_appearance("sair", Adw.ResponseAppearance.DESTRUCTIVE)
+
+        def resposta(dlg, resp):
+            escolha = dlg.choose_finish(resp)
+            if escolha == "sair":
+                subprocess.run(["conta", "sair"], capture_output=True, timeout=30)
+                self.conectado = False
+                self.atualizar_conta()
+                self.toast(_t("Você saiu da conta."))
+
+        dialog.choose(self, None, resposta)
+
+    def atualizar_cota_estimada(self):
+        total_bytes = 0
+        for info in self.escolha_pastas.values():
+            if info["cb"].get_active():
+                total_bytes += info.get("bytes", 0)
+        if hasattr(self, "escolha_fundo") and self.escolha_fundo.get_active():
+            total_bytes += 10 * 1024 * 1024
+        if hasattr(self, "escolha_pacotes") and self.escolha_pacotes.get_active():
+            total_bytes += 70 * 1024 * 1024
+
+        tam_str = formatar_bytes(total_bytes)
+        if hasattr(self, "lbl_vai_usar"):
+            self.lbl_vai_usar.set_label(_t(f"Vai usar {tam_str} no Drive"))
+
+        cota_total = getattr(self, "cota_total_bytes", 5497558138880)
+        cota_usado = getattr(self, "cota_usado_bytes", 27940618868)
+        cota_total_str = formatar_bytes(cota_total)
+        if hasattr(self, "lbl_cota_total"):
+            self.lbl_cota_total.set_label(_t(f"de {cota_total_str}"))
+
+        frac = max(0.015, min(1.0, (cota_usado + total_bytes) / cota_total))
+        if hasattr(self, "barra_cota"):
+            self.barra_cota.set_fraction(frac)
+
+    def atualizar_pastas_info(self, pastas_remotas=None):
+        def calcular():
+            res = {}
+            for rel, info in self.escolha_pastas.items():
+                cam = info["caminho"]
+                arqs, tam = stats_diretorio(cam)
+                res[rel] = (arqs, tam)
+            return res
+
+        def pronto(res):
+            if not res:
+                return
+            for rel, (arqs, tam) in res.items():
+                if rel in self.escolha_pastas:
+                    info = self.escolha_pastas[rel]
+                    info["arqs"] = arqs
+                    info["bytes"] = tam
+                    if arqs == 0:
+                        txt = _t("0 arquivos · Vazio")
+                    elif arqs == 1:
+                        txt = f"{formatar_bytes(tam)} · 1 " + _t("arquivo")
+                    else:
+                        txt = f"{formatar_bytes(tam)} · {arqs} " + _t("arquivos")
+                    info["lbl_detalhe"].set_label(txt)
+            self.atualizar_cota_estimada()
+
+        em_segundo_plano(calcular, pronto)
 
     def confirmar_escolha(self):
-        pastas = [rel for rel, cb in self.escolha_pastas.items() if cb.get_active()]
+        pastas = [rel for rel, info in self.escolha_pastas.items() if info["cb"].get_active()]
         fundo = "liga" if self.escolha_fundo.get_active() else "desliga"
-        self.escolha_botao.set_sensitive(False)
+        pacotes = "liga" if self.escolha_pacotes.get_active() else "desliga"
+        self.proximo.set_sensitive(False)
 
         def escolher():
-            return subprocess.run(["conta", "escolher", "--pastas", ",".join(pastas), "--fundo", fundo],
-                                  capture_output=True, timeout=60).returncode
+            rc1 = subprocess.run(["conta", "escolher", "--pastas", ",".join(pastas), "--fundo", fundo],
+                                 capture_output=True, timeout=60).returncode
+            subprocess.run(["conta", "categoria", "pacotes", pacotes],
+                           capture_output=True, timeout=10)
+            subprocess.run(["conta", "fundo", fundo],
+                           capture_output=True, timeout=10)
+            return rc1
 
         def pronto(rc):
-            self.escolha_botao.set_sensitive(True)
+            self.proximo.set_sensitive(True)
             if rc != 0:
                 self.toast(_t("Não foi possível salvar a escolha."))
                 return
-            self._sincronizou_inicial = True   # `conta escolher` já ligou e sincronizou
-            self._mostrar_escolha(False)
-            self.toast(_t("Sincronização iniciada") if pastas else _t("Escolha salva"))
+            self._sincronizou_inicial = True
+            self.toast(_t("Sincronização iniciada") if pastas else _t("Configuração salva"))
+            rodar(["conta", "sincronizar", "--silencioso"])
             self.atualizar_conta()
+            self.ir(1)
+
         em_segundo_plano(escolher, pronto)
 
     def p_draco(self):
@@ -755,6 +1252,9 @@ class Janela(Adw.ApplicationWindow):
         # um clique rápido "voltava"); fora dela, a partir da página REAL. Antes o destino valia
         # sempre: se a animação parava no meio (a lista do Wi-Fi mudando o tamanho da página),
         # um clique não avançava e o seguinte pulava duas páginas.
+        if passo > 0 and getattr(self, "destino", 0) == 2 and getattr(self, "conectado", False) and not getattr(self, "_sincronizou_inicial", False):
+            self.confirmar_escolha()
+            return
         n = self.carrossel.get_n_pages()
         animando = time.monotonic() - getattr(self, "ultimo_ir", 0) < 0.5
         base = self.destino if animando and hasattr(self, "destino") else round(self.carrossel.get_position())
@@ -784,7 +1284,10 @@ class Janela(Adw.ApplicationWindow):
         ultima = indice >= n - 1
         self.voltar.set_sensitive(indice > 0)
         self.voltar.set_opacity(1 if indice > 0 else 0)
-        self.proximo.set_label(_t("Começar a usar") if ultima else (_t("Vamos lá") if indice == 0 else _t("Próximo")))
+        if indice == 2 and getattr(self, "conectado", False):
+            self.proximo.set_label(_t("Começar a sincronizar"))
+        else:
+            self.proximo.set_label(_t("Começar a usar") if ultima else (_t("Vamos lá") if indice == 0 else _t("Próximo")))
         self.pular.set_visible(not ultima)
         # 0 início · 1 Wi-Fi · 2 conta · 3 Draco · 4 Agentes · 5 aparência · 6 Loja · 7 Escritório
         # 8 atalhos · 9 pronto
@@ -862,7 +1365,7 @@ class Janela(Adw.ApplicationWindow):
 
         def ler():
             r = subprocess.run(["conta", "status"], capture_output=True, text=True, timeout=15)
-            return json.loads(r.stdout)
+            return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
 
         def pronto(st):
             if not st:
@@ -870,17 +1373,32 @@ class Janela(Adw.ApplicationWindow):
             self.conectado = bool(st.get("conectado"))
             if self.conectado:
                 quem = st.get("email") or st.get("nome") or _t("sua conta Google")
-                self.conta_estado.set_label(_t("✓  Conectado como %1", quem))
-                self.conta_estado.set_visible(True)
-                self.conta_botao.set_child(Adw.ButtonContent(label=_t("Gerenciar a conta"),
-                                                             icon_name="avatar-default-symbolic"))
-                self.conta_botao.remove_css_class("suggested-action")
-                if st.get("precisa_escolher"):
-                    # `conta escolher` liga o backup/papel conforme a escolha e já sincroniza
-                    self._mostrar_escolha(True)
-                    self.conta_estado.set_label(_t("✓  Conectado como %1", quem) + " — " +
-                                                _t("escolha abaixo o que sincronizar"))
-                elif not getattr(self, "_sincronizou_inicial", False):
+                if hasattr(self, "lbl_conectado_email"):
+                    self.lbl_conectado_email.set_markup(f"Conectado como <b>{quem}</b>")
+                self.cota_total_bytes = st.get("cota_total") or 5497558138880
+                self.cota_usado_bytes = st.get("cota_usado") or 0
+                self.qtd_pacotes = st.get("qtd_pacotes_selecionados", st.get("qtd_pacotes", 215))
+
+                if hasattr(self, "lbl_pacotes_desc"):
+                    self.lbl_pacotes_desc.set_label(_t(f"{self.qtd_pacotes} programas instalados para backup · "))
+
+                if hasattr(self, "escolha_fundo"):
+                    self.escolha_fundo.set_active(st.get("sincronizar_fundo", True))
+                if hasattr(self, "escolha_pacotes"):
+                    self.escolha_pacotes.set_active(st.get("categorias", {}).get("pacotes", True))
+
+                if hasattr(self, "conta_desconectada_box"):
+                    self.conta_desconectada_box.set_visible(False)
+                if hasattr(self, "conta_conectada_box"):
+                    self.conta_conectada_box.set_visible(True)
+
+                if getattr(self, "destino", 0) == 2:
+                    self.proximo.set_label(_t("Começar a sincronizar"))
+
+                self.atualizar_pastas_info(st.get("pastas_info", []))
+                self.atualizar_cota_estimada()
+
+                if not getattr(self, "_sincronizou_inicial", False) and not st.get("precisa_escolher"):
                     self._sincronizou_inicial = True
                     def sincronizar_inicial():
                         subprocess.run(["systemctl", "--user", "enable", "--now", "conta-fundo.service"],
@@ -889,13 +1407,19 @@ class Janela(Adw.ApplicationWindow):
                         subprocess.run(["conta", "fundo", "enviar"], capture_output=True, timeout=30)
                         subprocess.run(["conta", "sincronizar", "--silencioso"], capture_output=True, timeout=120)
                     em_segundo_plano(sincronizar_inicial, lambda _: None)
-            elif st.get("erro") and not st.get("entrando") and getattr(self, "tentativas_conta", 0):
-                # ex.: backup criptografado pede a senha — isso é feito em Contas
-                self.conta_estado.set_label(st["erro"])
-                self.conta_estado.set_visible(True)
-            elif st.get("boas_vindas"):
-                self.conta_estado.set_label(_t("Tem um backup no Drive? Entre para trazer tudo de volta."))
-                self.conta_estado.set_visible(True)
+            else:
+                if hasattr(self, "conta_desconectada_box"):
+                    self.conta_desconectada_box.set_visible(True)
+                if hasattr(self, "conta_conectada_box"):
+                    self.conta_conectada_box.set_visible(False)
+                if getattr(self, "destino", 0) == 2:
+                    self.proximo.set_label(_t("Próximo"))
+                if st.get("erro") and not st.get("entrando") and getattr(self, "tentativas_conta", 0):
+                    self.conta_estado.set_label(st["erro"])
+                    self.conta_estado.set_visible(True)
+                elif st.get("boas_vindas"):
+                    self.conta_estado.set_label(_t("Tem um backup no Drive? Entre para trazer tudo de volta."))
+                    self.conta_estado.set_visible(True)
 
         em_segundo_plano(ler, pronto)
 
@@ -989,6 +1513,48 @@ class Janela(Adw.ApplicationWindow):
           .link-acao {{ color: {texto2}; font-weight: 600; }}
           .link-acao:hover {{ color: {texto}; }}
           carouselindicatordots {{ color: {texto}; }}
+          .titulo-selecao {{ font-size: 24px; font-weight: 800; letter-spacing: -0.3px; }}
+          .descricao-selecao {{ font-size: 13.5px; color: {texto2}; }}
+          .status-dot-ok {{ color: #2ecc71; font-size: 11px; }}
+          .cartao-pasta {{
+            background-color: {superficie};
+            border: 1px solid {linha};
+            border-radius: 9px;
+            padding: 8px 12px;
+            min-height: 44px;
+            transition: all 120ms ease;
+          }}
+          .cartao-pasta:hover {{
+            background-color: {superficie2};
+            border-color: {mix(linha, realce, 0.4)};
+          }}
+          .cartao-pasta.ativo {{
+            border-color: {realce};
+            background-color: {mix(superficie, realce, 0.05)};
+          }}
+          .cartao-titulo {{ font-size: 13.5px; font-weight: 700; color: {texto}; }}
+          .cartao-subtitulo {{ font-size: 11.5px; color: {texto2}; }}
+          .cota-uso-texto {{ font-size: 13px; font-weight: 600; color: {texto}; }}
+          .cota-total-texto {{ font-size: 13px; color: {texto2}; }}
+          .barra-cota progress {{ background-color: {realce}; border-radius: 3px; min-height: 6px; }}
+          .barra-cota trough {{ background-color: {superficie2}; border-radius: 3px; min-height: 6px; }}
+          .link-botao {{
+            color: {realce};
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+          }}
+          .link-botao:hover {{ background-color: {mix(realce, fundo, 0.85)}; }}
+          .badge-tag {{
+            font-size: 10.5px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 10px;
+          }}
+          .badge-pacman {{ background-color: {mix(realce, fundo, 0.8)}; color: {realce}; }}
+          .badge-aur {{ background-color: {mix("#f5a623", fundo, 0.8)}; color: #f5a623; }}
+          .badge-flatpak {{ background-color: {mix("#26a69a", fundo, 0.8)}; color: #26a69a; }}
         """)
         self.mascote.set_from_file("/usr/share/simba-apps/marca-pixel/retrato-1152.png")  # retrato em pixel art (claro e escuro)
         for img, func in self.ilustracoes:

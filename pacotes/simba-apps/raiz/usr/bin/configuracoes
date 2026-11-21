@@ -24,7 +24,7 @@ mkdir -p "$RUN"
 pid_vivo() {
   local pid
   pid=$(cat "$RUN/pid" 2>/dev/null)
-  [[ -n $pid && $(cat "/proc/$pid/comm" 2>/dev/null) == qs ]] && grep -q 'configuracoes' "/proc/$pid/cmdline" 2>/dev/null
+  [[ -n $pid && $(cat "/proc/$pid/comm" 2>/dev/null) =~ ^(qs|quickshell)$ ]] && grep -q 'configuracoes' "/proc/$pid/cmdline" 2>/dev/null
 }
 
 pronto() { qs -c configuracoes ipc call configuracoes estado >/dev/null 2>&1; }

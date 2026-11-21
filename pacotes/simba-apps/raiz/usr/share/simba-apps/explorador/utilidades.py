@@ -235,6 +235,90 @@ def copia_em_cache(caminho_, tamanho_):
         return None
 
 
+# ── Status de sincronização estilo OneDrive ──────────────────────────────────
+_sync_cache = {"t": 0.0, "pastas": set(), "sincronizando": False, "pausado": False, "erro": False}
+
+
+def info_sincronizacao():
+    agora = time.monotonic()
+    if agora - _sync_cache["t"] > 2.0:
+        pastas = set()
+        sincronizando = False
+        pausado = False
+        erro = False
+
+        cfg_path = HOME / ".config/conta/config.json"
+        est_path = HOME / ".local/state/conta/estado.json"
+
+        if cfg_path.exists():
+            try:
+                c = json.loads(cfg_path.read_text())
+                cats = c.get("categorias", {})
+                if cats.get("documentos", True):
+                    pastas.add(str(HOME / "Documents"))
+                    pastas.add(str(HOME / "Documentos"))
+                if cats.get("imagens", True):
+                    pastas.add(str(HOME / "Pictures"))
+                    pastas.add(str(HOME / "Imagens"))
+                pastas.add(str(HOME / "Desktop"))
+                pastas.add(str(HOME / "Área de trabalho"))
+                for p in c.get("pastas_personalizadas", []):
+                    alvo = HOME / p if not os.path.isabs(p) else Path(p)
+                    pastas.add(str(alvo))
+            except Exception:
+                pass
+
+        if est_path.exists():
+            try:
+                e = json.loads(est_path.read_text())
+                sincronizando = bool(e.get("sincronizando"))
+                pausado = bool(e.get("pausado"))
+                erro = e.get("resultado") == "erro"
+            except Exception:
+                pass
+
+        _sync_cache["t"] = agora
+        _sync_cache["pastas"] = pastas
+        _sync_cache["sincronizando"] = sincronizando
+        _sync_cache["pausado"] = pausado
+        _sync_cache["erro"] = erro
+
+    return _sync_cache
+
+
+def status_arquivo(caminho_, info_=None):
+    """Retorna (tipo, icone, dica) ou None para arquivos sem status de nuvem.
+    Tipos: 'ok' (check verde), 'syncing' (setas circulares), 'cloud' (nuvem azul),
+           'paused' (âmbar), 'error' (vermelho)."""
+    if not caminho_:
+        return None
+
+    # 1. Pastas e arquivos dentro de Nuvem (rclone mounts: OneDrive, Google Drive, etc.)
+    if em_nuvem(caminho_):
+        if info_ and eh_pasta(info_):
+            return ("ok", "simba-sync-ok-symbolic", _t("Disponível neste dispositivo"))
+        sz = info_.get_size() if info_ else 0
+        if copia_em_cache(caminho_, sz):
+            return ("ok", "simba-sync-ok-symbolic", _t("Disponível neste dispositivo"))
+        return ("cloud", "simba-sync-offline-symbolic", _t("Disponível quando conectado"))
+
+    # 2. Pastas sincronizadas com Simba Conta (Google Drive)
+    info_sync = info_sincronizacao()
+    for p in info_sync["pastas"]:
+        if caminho_ == p or caminho_.startswith(p + "/"):
+            if info_sync["pausado"]:
+                return ("paused", "simba-sync-paused-symbolic", _t("Sincronização pausada"))
+            if info_sync["erro"]:
+                return ("error", "simba-sync-alert-symbolic", _t("Erro de sincronização"))
+            if info_sync["sincronizando"]:
+                mtime = info_.get_modification_date_time() if info_ else None
+                if mtime and (time.time() - mtime.to_unix() < 120):
+                    return ("syncing", "simba-sync-syncing-symbolic", _t("Sincronizando…"))
+            return ("ok", "simba-sync-ok-symbolic", _t("Disponível neste dispositivo"))
+
+    return None
+
+
 def _gerar(gfile, ct, mtime, grande, local=None):
     uri = gfile.get_uri()
     destino = _arquivo_mini(uri, grande)

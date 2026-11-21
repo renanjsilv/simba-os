@@ -838,6 +838,8 @@ BarWidget {
           mouse.accepted = true
         } else if (mouse.button === Qt.MiddleButton) {
           trayItemRoot.modelData.secondaryActivate()
+        } else if (trayItemRoot.modelData.id === "simba-sync-tray" || String(trayItemRoot.modelData.id).indexOf("sync-tray") >= 0) {
+          Quickshell.execDetached(["simba-shell", "simbasync", "alternarSync"])
         } else if (trayItemRoot.modelData.onlyMenu) {
           trayItemRoot.displayMenu(mouse)
         } else {

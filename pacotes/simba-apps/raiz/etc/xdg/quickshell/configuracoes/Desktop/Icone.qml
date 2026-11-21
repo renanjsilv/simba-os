@@ -127,6 +127,71 @@ Item {
       color: "white"
       Rectangle { anchors.fill: parent; z: -1; radius: 2; color: Qt.rgba(0, 0, 0, 0.55) }
     }
+
+    // Emblema de sincronização estilo OneDrive / Windows
+    Rectangle {
+      id: emblemaSync
+      visible: !!ic.item.statusSync
+      readonly property bool temLink: !!ic.item.link
+      anchors.left: temLink ? undefined : parent.left
+      anchors.right: temLink ? parent.right : undefined
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: -1
+      anchors.leftMargin: temLink ? 0 : -1
+      anchors.rightMargin: temLink ? -1 : 0
+
+      readonly property int tamBadge: Math.max(16, Math.min(22, Math.round(ic.cel.i * 0.35)))
+      width: tamBadge
+      height: tamBadge
+      radius: tamBadge / 2
+
+      readonly property string tipo: (ic.item.statusSync && ic.item.statusSync.tipo) || "ok"
+
+      color: {
+        if (tipo === "ok") return "#34a853"
+        if (tipo === "cloud") return "#4285f4"
+        if (tipo === "syncing") return "#4285f4"
+        if (tipo === "paused") return "#fbbc05"
+        if (tipo === "error") return "#ea4335"
+        return "#34a853"
+      }
+
+      border.width: 1.5
+      border.color: "#ffffff"
+
+      Rectangle {
+        anchors.fill: parent
+        anchors.margins: -1
+        radius: parent.radius + 1
+        z: -1
+        color: "transparent"
+        border.width: 1
+        border.color: Qt.rgba(0, 0, 0, 0.4)
+      }
+
+      Text {
+        anchors.centerIn: parent
+        font.family: Tema.fonte
+        font.pixelSize: Math.round(parent.width * 0.62)
+        color: "#ffffff"
+        text: {
+          if (emblemaSync.tipo === "ok") return Icones.check
+          if (emblemaSync.tipo === "cloud") return Icones.cloud
+          if (emblemaSync.tipo === "syncing") return Icones.sync
+          if (emblemaSync.tipo === "paused") return Icones.pause
+          if (emblemaSync.tipo === "error") return Icones.close
+          return Icones.check
+        }
+
+        RotationAnimation on rotation {
+          running: emblemaSync.tipo === "syncing"
+          from: 0
+          to: 360
+          duration: 1600
+          loops: Animation.Infinite
+        }
+      }
+    }
   }
 
   // Label: white with a dark halo (legible on any wallpaper, like Windows).

@@ -1183,6 +1183,7 @@ def cmd_status(_a):
         "foto": str(FOTO) if lig and FOTO.exists() else "",
         "pasta_local": str(PASTA_LOCAL) if lig and PASTA_LOCAL.is_dir() else "",
         "pastas_sincronizadas": pastas_sincronizadas(c) if lig else [],
+        "reconectar": bool(lig and not rapido and usa_client_id_compartilhado()),
     }, ensure_ascii=False))
 
 
@@ -1549,6 +1550,34 @@ def fechar_login():
         pass
 
 
+# Credenciais OAuth do próprio Simba OS no Google Cloud (app "Desktop", só drive.file). O
+# client_id compartilhado do rclone está sendo desativado pelo Google em 2026: sem um próprio,
+# o login e a sincronização param. O segredo de um app de computador não é secreto (vai em
+# todo app instalado); o que protege a conta de cada pessoa é o login dela.
+# Formato: {"client_id": "...apps.googleusercontent.com", "client_secret": "..."}
+CREDENCIAIS = [HOME / ".config/conta/google-oauth.json", Path("/usr/share/simba-apps/conta/google-oauth.json")]
+
+
+def credenciais_google():
+    for f in CREDENCIAIS:
+        d = ler_json(f, {})
+        if d.get("client_id") and d.get("client_secret"):
+            return [f"client_id={d['client_id']}", f"client_secret={d['client_secret']}"]
+    return []
+
+
+def usa_client_id_compartilhado():
+    """Conectado com o client_id do rclone (vazio no remoto) e o Simba já tem o próprio."""
+    if not credenciais_google() or os.environ.get("CONTA_REMOTO"):
+        return False
+    try:
+        dump = json.loads(rc("config", "dump", check=False).stdout or "{}")
+    except ValueError:
+        return False
+    remoto = dump.get(NOME_REMOTO) or {}
+    return bool(remoto) and not remoto.get("client_id")
+
+
 def login_drive():
     """rclone espera a autorização; quem abre a página é o abrir_login (o rclone chamaria o
     xdg-open, que abre uma aba comum). O link também fica no estado (botão na interface)."""
@@ -1565,7 +1594,8 @@ def login_drive():
     log.unlink(missing_ok=True)
     with open(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
         p = subprocess.Popen([rclone_bin(), "config", "create", NOME_REMOTO, "drive", "scope=drive.file",
-                              "config_is_local=true"], stdout=f, stderr=subprocess.STDOUT, text=True, env=env)
+                              *credenciais_google(), "config_is_local=true"],
+                             stdout=f, stderr=subprocess.STDOUT, text=True, env=env)
     fim = time.time() + 600
     aberto = False
     while p.poll() is None and time.time() < fim:

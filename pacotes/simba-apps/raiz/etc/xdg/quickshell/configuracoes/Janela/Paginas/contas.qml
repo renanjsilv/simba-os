@@ -513,7 +513,7 @@ Pagina {
         }
         Item { Layout.fillWidth: true }
         Texto {
-          text: I18n.t("nos dois sentidos")
+          text: I18n.t("iguais em todos os computadores")
           color: Tema.texto3
           font.pixelSize: 12
         }
@@ -1038,7 +1038,7 @@ Pagina {
       chave: "contaAuto"
       glifo: Icones.sync
       titulo: I18n.t("Sincronização dinâmica e backup automático")
-      descricao: I18n.t("A cada 20 minutos sincroniza alterações entre suas máquinas e salva o backup.")
+      descricao: I18n.t("A cada 5 minutos as pastas ficam iguais em todos os seus computadores e as configurações vão para o backup.")
       Interruptor {
         ligado: !!(pg.s && pg.s.auto)
         onAlternado: function(x) { Sistema.rodar(["conta", "auto", x ? "liga" : "desliga"], function() { pg.atualizar() }) }

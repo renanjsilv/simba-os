@@ -2948,5 +2948,10 @@
   "Não foi possível salvar a escolha. Tente de novo.": "Couldn't save your choice. Please try again.",
   "Sincronizando — acompanhe pela nuvem na barra de tarefas": "Syncing — follow it from the cloud icon on the taskbar",
   "A senha está incorreta. Tente novamente.": "The password is incorrect. Try again.",
-  "Simba OS (padrão)": "Simba OS (default)"
+  "Simba OS (padrão)": "Simba OS (default)",
+  "iguais em todos os computadores": "same on all computers",
+  "A cada 5 minutos as pastas ficam iguais em todos os seus computadores e as configurações vão para o backup.": "Every 5 minutes your folders are made the same on all your computers and your settings are backed up.",
+  "Sincronizando %1": "Syncing %1",
+  "pastas: %1": "folders: %1",
+  "muitos arquivos apagados de uma vez em %1 — nada foi apagado; confira e sincronize de novo": "too many files deleted at once in %1 — nothing was deleted; check and sync again"
 }

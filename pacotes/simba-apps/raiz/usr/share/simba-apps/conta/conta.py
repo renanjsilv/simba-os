@@ -323,7 +323,8 @@ def _excluido(rel, extras=()):
 def listar_arquivos(c=None):
     """Lista (relativa à pasta pessoal) do que vai para o Drive + tamanho total."""
     c = c or config()
-    cats = [k for k, v in c["categorias"].items() if v and (k in INCLUIR or k == "pastas")]
+    # documentos/imagens/pastas: sincronizadas nos dois sentidos (sincronizar_pastas), fora daqui
+    cats = [k for k, v in c["categorias"].items() if v and k in INCLUIR and k not in ("documentos", "imagens")]
     if "segredos" in cats and not c.get("cripto"):
         cats.remove("segredos")
     excl_extra = list(c.get("pastas_excluidas", []))
@@ -662,6 +663,7 @@ def cmd_pasta(a):
             "excluidas": c.get("pastas_excluidas", [])
         }, ensure_ascii=False))
         return 0
+    marcar_pastas_alteradas()
     if conectado():
         atualizar_pasta_local()
     return 0
@@ -725,6 +727,202 @@ def remover_pasta_local():
         PASTA_LOCAL.rmdir()        # só se ficou vazia: arquivos da pessoa nunca saem
     except OSError:
         pass
+
+
+# ── pastas sincronizadas entre as máquinas (bidirecional) ────────────────────
+# As pastas escolhidas (Documentos, Imagens, Área de trabalho, extras) ficam IGUAIS em todas
+# as máquinas da conta: `rclone bisync` entre cada pasta e dados/pastas/<nome> no Drive.
+# Na 1ª vez de cada máquina o conteúdo dela é MESCLADO com o da nuvem (nada se perde); depois
+# o que se cria, muda ou apaga numa máquina vai para as outras. Conflito (o mesmo arquivo
+# mudado nas duas): fica a versão mais nova e a outra vira "nome.conflito1.ext" ao lado.
+# O que é apagado ou substituído no Drive vai para lixeira/<data> (30 dias).
+# Antes todas as pastas iam num espelho de mão única (dados/home): a última máquina a
+# sincronizar apagava do Drive o que só existia na outra — eram backups individuais.
+# A lista de pastas também é da conta (pastas.json no Drive): marcar/desmarcar uma pasta numa
+# máquina vale para todas.
+XDG_PASTAS = [("DOCUMENTS", "Documentos"), ("PICTURES", "Imagens"), ("DESKTOP", "Área de trabalho"),
+              ("MUSIC", "Músicas"), ("VIDEOS", "Vídeos"), ("DOWNLOAD", "Downloads")]
+BISYNC_DIR = HOME / ".local/state/conta/bisync"
+PASTAS_REMOTAS = "pastas.json"
+
+
+def _xdg_dir(xdg):
+    try:
+        d = subprocess.run(["xdg-user-dir", xdg], capture_output=True, text=True, timeout=3).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        d = ""
+    if d and os.path.abspath(d) != str(HOME):
+        return Path(d)
+    padrao = {"DOCUMENTS": "Documentos", "PICTURES": "Imagens", "DESKTOP": "Área de trabalho",
+              "MUSIC": "Músicas", "VIDEOS": "Vídeos", "DOWNLOAD": "Downloads"}
+    return HOME / padrao[xdg]
+
+
+def _pasta_logica(rel):
+    """rel (relativo à pasta pessoal) → {"nome", "xdg"?, "rel"}: as pastas padrão têm um nome
+    só na nuvem ("Documentos"), seja qual for o nome local (Documents/Documentos)."""
+    alvo = (HOME / rel).resolve()
+    for xdg, nome in XDG_PASTAS:
+        try:
+            if _xdg_dir(xdg).resolve() == alvo:
+                return {"nome": nome, "xdg": xdg, "rel": rel}
+        except OSError:
+            pass
+    return {"nome": Path(rel).name, "rel": rel}
+
+
+def _caminho_local(p):
+    return _xdg_dir(p["xdg"]) if p.get("xdg") else HOME / p["rel"]
+
+
+def pastas_locais_logicas(c=None):
+    c = c or config()
+    vistos, saida = set(), []
+    for rel in pastas_sincronizadas(c):
+        p = _pasta_logica(rel)
+        if p["nome"] and p["nome"] not in vistos:
+            vistos.add(p["nome"])
+            saida.append(p)
+    return saida
+
+
+def _ler_pastas_remotas():
+    try:
+        r = rc("cat", f"{remoto_base()}/{PASTAS_REMOTAS}", check=False, timeout=60)
+        d = json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
+        return d.get("pastas") if isinstance(d, dict) else None
+    except (ValueError, subprocess.SubprocessError, OSError):
+        return None
+
+
+def _gravar_pastas_remotas(pastas):
+    info = {"pastas": pastas, "maquina": nome_maquina(),
+            "data": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
+    rc("rcat", f"{remoto_base()}/{PASTAS_REMOTAS}", entrada=json.dumps(info, ensure_ascii=False, indent=1), timeout=60)
+
+
+def _adotar_pastas(c, pastas):
+    """Passa a lista da conta para a configuração local (rel de cada pasta nesta máquina)."""
+    rels = []
+    for p in pastas:
+        local = _caminho_local(p)
+        try:
+            local.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        rel = os.path.relpath(local, HOME)
+        if not rel.startswith("..") and rel not in rels:
+            rels.append(rel)
+    c["pastas_personalizadas"] = rels
+    c["categorias"]["pastas"] = bool(rels)
+    # documentos/imagens viram pastas da lista (não vão mais no espelho de mão única)
+    c["categorias"]["documentos"] = False
+    c["categorias"]["imagens"] = False
+    c["pastas_excluidas"] = [x for x in c.get("pastas_excluidas", []) if x not in rels]
+    salvar_config(c)
+
+
+def combinar_lista_pastas(c):
+    """Lista de pastas da conta. 1ª vez nesta máquina: união da local com a da nuvem. Depois:
+    uma mudança feita aqui (marcada em `pastas_alteradas`) vai para a nuvem; senão vale a da nuvem."""
+    e = estado()
+    locais = pastas_locais_logicas(c)
+    remotas = _ler_pastas_remotas()
+    if not e.get("pastas_unidas") or remotas is None:
+        nomes = {p["nome"] for p in locais}
+        uniao = locais + [p for p in (remotas or []) if p.get("nome") not in nomes]
+        _gravar_pastas_remotas(uniao)
+        _adotar_pastas(c, uniao)
+        salvar_estado(pastas_unidas=True, pastas_alteradas=False)
+        return uniao
+    if e.get("pastas_alteradas"):
+        _gravar_pastas_remotas(locais)
+        salvar_estado(pastas_alteradas=False)
+        return locais
+    if [p.get("nome") for p in remotas] != [p["nome"] for p in locais]:
+        _adotar_pastas(c, remotas)
+        atualizar_pasta_local(c)
+    return remotas
+
+
+def _bisync(local, remoto, trabalho, resync, lixeira):
+    cmd = [rclone_bin(), "bisync", str(local), remoto, "--workdir", str(trabalho),
+           "--resilient", "--recover", "--max-lock", "2m",
+           "--conflict-resolve", "newer", "--conflict-loser", "num", "--conflict-suffix", "conflito",
+           "--suffix-keep-extension", "--compare", "size,modtime", "--create-empty-src-dirs",
+           # sem --fast-list/--tpslimit: com eles cada pasta levava ~40 s em vez de ~4 s
+           "--skip-links", "--max-size", str(MAX_ARQUIVO),
+           "--backup-dir2", lixeira,
+           "--exclude", ".~lock.*#", "--exclude", "*.part", "--exclude", "*.crdownload",
+           "--exclude", ".Trash-*/**", "--exclude", "**/.cache/**", "--exclude", "**/__pycache__/**",
+           "--exclude", "**/node_modules/**", "--exclude", "**/.git/**",
+           "--stats", "2s", "--stats-one-line", "-v"]
+    if resync:
+        # 1ª vez: mescla (o que só existe de um lado vai para o outro; igual dos dois lados
+        # fica o mais novo) — nunca apaga nada
+        cmd += ["--resync", "--resync-mode", "newer"]
+    return subprocess.Popen(cmd, stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
+
+
+def sincronizar_pastas(c, silencioso=True):
+    """Bisync de cada pasta da conta. Devolve (ok, mensagem de erro)."""
+    pastas = combinar_lista_pastas(c)
+    if not pastas:
+        return True, ""
+    dados = remoto_dados(c)
+    lixeira = f"{dados}/lixeira/{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}/pastas"
+    iniciadas = set(estado().get("bisync_iniciadas") or [])
+    erros = []
+    for p in pastas:
+        local = _caminho_local(p)
+        try:
+            local.mkdir(parents=True, exist_ok=True)
+            # o bisync se recusa a trabalhar com uma pasta totalmente vazia (proteção contra
+            # apagar tudo): um arquivo oculto garante que nunca fique vazia
+            marca = local / ".simba-conta"
+            if not marca.exists():
+                marca.write_text("Pasta sincronizada entre os computadores da conta (Simba OS).\n")
+        except OSError as ex:
+            erros.append(f"{p['nome']}: {ex}")
+            continue
+        # o estado do bisync é por par de pastas: muda junto se a pasta local mudar de lugar
+        chave = f"{p['nome']}|{local}"
+        trabalho = BISYNC_DIR / re.sub(r"[^\w.-]+", "_", chave)
+        trabalho.mkdir(parents=True, exist_ok=True)
+        remoto = f"{dados}/pastas/{p['nome']}"
+        rotulo = _t("Sincronizando %1", p["nome"])
+        salvar_estado(progresso=rotulo + "…")
+        primeira = chave not in iniciadas
+        if primeira:
+            rc("mkdir", remoto, check=False, timeout=60)
+        proc = _bisync(local, remoto, trabalho, primeira, lixeira)
+        saida = []
+
+        def ler(proc=proc):
+            for linha in proc.stderr:
+                saida.append(linha)
+                if "%" in linha and "ETA" in linha:
+                    salvar_estado(progresso=f"{rotulo}: {_legivel(linha.strip())}")
+            return proc.wait()
+        codigo = ler()
+        if codigo != 0 and not primeira and any("--resync" in l for l in saida):
+            # histórico do bisync perdido/corrompido: mescla de novo (seguro, não apaga nada)
+            proc = _bisync(local, remoto, trabalho, True, lixeira)
+            saida = []
+            codigo = ler(proc)
+        if codigo == 0:
+            iniciadas.add(chave)
+            salvar_estado(bisync_iniciadas=sorted(iniciadas))
+        else:
+            ultimo = next((l.strip() for l in reversed(saida) if "ERROR" in l or "error" in l.lower()), "")
+            if any("too many deletes" in l.lower() or "max-delete" in l.lower() for l in saida):
+                ultimo = _t("muitos arquivos apagados de uma vez em %1 — nada foi apagado; confira e sincronize de novo", p["nome"])
+            erros.append(f"{p['nome']}: {ultimo[-200:]}")
+    return (not erros), "; ".join(erros)
+
+
+def marcar_pastas_alteradas():
+    salvar_estado(pastas_alteradas=True)
 
 
 def cmd_abrir_pasta(_a):
@@ -1362,7 +1560,10 @@ def login_drive():
     (falso / "xdg-open").write_text("#!/bin/sh\nexit 0\n")
     (falso / "xdg-open").chmod(0o755)
     env = dict(os.environ, PATH=f"{falso}:{os.environ.get('PATH', '/usr/bin')}")
-    with open(log, "w") as f:
+    # o rclone escreve a configuração (com o token do Google) na saída: o log é só do dono
+    # e é apagado no fim — antes ficava legível por todos em ~/.cache/conta/login.log
+    log.unlink(missing_ok=True)
+    with open(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
         p = subprocess.Popen([rclone_bin(), "config", "create", NOME_REMOTO, "drive", "scope=drive.file",
                               "config_is_local=true"], stdout=f, stderr=subprocess.STDOUT, text=True, env=env)
     fim = time.time() + 600
@@ -1377,7 +1578,9 @@ def login_drive():
         time.sleep(0.15)
     if p.poll() is None:
         p.kill()
+        log.unlink(missing_ok=True)
         return 1
+    log.unlink(missing_ok=True)
     if p.returncode == 0:
         fechar_login()
     return p.returncode
@@ -1556,13 +1759,17 @@ def limpar_lixeira(dados):
 
 
 def publicar_ferramenta():
-    """Restaurador e a própria ferramenta, sem criptografia, na raiz da pasta."""
+    """Restaurador e a própria ferramenta, sem criptografia, na raiz da pasta (só quando mudam)."""
     base = FERRAMENTA.parent
+    marca = f"{_hash_arquivo(FERRAMENTA)}"
+    if estado().get("ferramenta_publicada") == marca:
+        return
     rc("copyto", str(base / "Restaurar-Simba.sh"), f"{remoto_base()}/Restaurar-Simba.sh")
     rc("copyto", str(FERRAMENTA), f"{remoto_base()}/ferramenta/conta.py")
     leia = base / _t("LEIA-ME.txt")
     if leia.exists():
         rc("copyto", str(leia), f"{remoto_base()}/LEIA-ME.txt")
+    salvar_estado(ferramenta_publicada=marca)
 
 
 def pode_enviar():
@@ -1829,23 +2036,20 @@ def fundo_enviar(c=None, inicio=False):
     combinado = ler_json(FUNDO_ESTADO, {})
     if combinado.get("hash") == h:
         return False                       # já é o que está na nuvem (enviado ou recebido)
-    try:
-        local_ts = max(FUNDO_LINK.lstat().st_mtime, img.stat().st_mtime)
-    except OSError:
-        local_ts = time.time()
-    # Verifica quem definiu por último antes de enviar
+    # A nuvem também mudou desde o último acordo (outra máquina trocou)? Então as duas
+    # trocaram: fica a troca mais recente.
     remoto_info = {}
     try:
         remoto_info = _fundo_remoto_info()
     except Exception:
         pass
-    if remoto_info and remoto_info.get("hash") and remoto_info.get("hash") != h:
+    rh = remoto_info.get("hash") if remoto_info else None
+    if rh and rh != h and rh != combinado.get("hash"):
         try:
             remoto_ts = datetime.datetime.fromisoformat(remoto_info.get("data", "")).timestamp()
         except Exception:
             remoto_ts = 0
-        if remoto_ts > local_ts:
-            # O papel remoto foi definido mais recentemente em outra máquina: adota ele
+        if remoto_ts > _fundo_mudou_em(img):
             fundo_puxar(c)
             return False
     tmp = CACHE / "fundo-envio"
@@ -1876,19 +2080,19 @@ def fundo_puxar(c=None):
         gravar_json(FUNDO_ESTADO, info)
         salvar_estado(base_fundo=h)
         return False
-    # Compara quem definiu por último: se a máquina local fez alteração mais recente, envia
-    try:
-        remota_ts = datetime.datetime.fromisoformat(info.get("data", "")).timestamp()
-    except (ValueError, TypeError):
-        remota_ts = 0
-    try:
-        local_ts = max(FUNDO_LINK.lstat().st_mtime, img_local.stat().st_mtime if img_local else 0)
-    except OSError:
-        local_ts = 0
-    if local and local_ts > remota_ts:
-        # Definição local mais recente: envia para as outras máquinas
-        fundo_enviar(c)
-        return False
+    # A nuvem mudou. Esta máquina só "ganha" se ELA TAMBÉM trocou desde o último acordo
+    # (papel local diferente do combinado) e trocou depois. Antes comparava a data do link
+    # do papel com a da nuvem: o link é recriado ao ligar/trocar tema, então a máquina
+    # parada achava o próprio papel "mais novo", tentava enviar, via que já tinha enviado,
+    # e nunca recebia a troca da outra.
+    if local and combinado.get("hash") and local != combinado.get("hash"):
+        try:
+            remota_ts = datetime.datetime.fromisoformat(info.get("data", "")).timestamp()
+        except (ValueError, TypeError):
+            remota_ts = 0
+        if _fundo_mudou_em(img_local) > remota_ts:
+            fundo_enviar(c)
+            return False
     alvo = None
     original = Path(info.get("original") or "")
     if original.name and original.is_file() and _hash_arquivo(original) == h:
@@ -1908,6 +2112,17 @@ def fundo_puxar(c=None):
     salvar_estado(base_fundo=h)
     _aplicar_fundo(alvo)
     return True
+
+
+def _fundo_mudou_em(img):
+    """Quando o papel desta máquina foi trocado (visto pelo vigia; senão, a data do link)."""
+    e = estado()
+    if e.get("fundo_mudou_em") and e.get("fundo_mudou_link") == _link_fundo():
+        return float(e["fundo_mudou_em"])
+    try:
+        return max(FUNDO_LINK.lstat().st_mtime, img.stat().st_mtime if img else 0)
+    except OSError:
+        return 0.0
 
 
 def _fundo_ativo(c):
@@ -1946,6 +2161,7 @@ def cmd_fundo(a):
                 if link != visto:
                     time.sleep(2)          # trocas seguidas: envia só a última
                     visto = _link_fundo()
+                    salvar_estado(fundo_mudou_em=time.time(), fundo_mudou_link=visto)
                     if conectado():
                         fundo_enviar(c)
                 if time.monotonic() >= proxima:
@@ -1967,6 +2183,23 @@ def cmd_fundo(a):
             print(_t("papel de parede: %1", str(exc)[-200:].replace("\n", " ")), file=sys.stderr, flush=True)
             proxima = time.monotonic() + espera_erro
         time.sleep(2)
+
+
+BACKUP_CONFIG_INTERVALO = 30 * 60
+
+
+def _atualizar_timer():
+    """Leva o intervalo novo para a cópia do timer em ~/.config (criada pelo `conta auto`)."""
+    t = HOME / ".config/systemd/user/conta-sync.timer"
+    if os.environ.get("CONTA_HOME") or not t.is_file():
+        return
+    try:
+        if t.read_text() != TIMER:
+            t.write_text(TIMER)
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, timeout=20)
+            subprocess.run(["systemctl", "--user", "restart", "conta-sync.timer"], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def cmd_sincronizar(a):
@@ -2030,10 +2263,27 @@ def cmd_sincronizar(a):
         msg = _t("Aguardando configuração de sincronização.")
         salvar_estado(resultado="erro", erro=msg)
         return 4
+    _atualizar_timer()
+    if not estado().get("entrando"):
+        (CACHE / "login.log").unlink(missing_ok=True)   # versões antigas deixavam o token nele
     with Trava():
         c = config()
         salvar_estado(progresso=_t("Preparando…"), erro="")
         try:
+            ok_pastas, erro_pastas = sincronizar_pastas(c, a.silencioso)
+            c = config()                      # a lista de pastas pode ter vindo da nuvem
+            # O backup das configurações (milhares de arquivos) é pesado e não precisa ser
+            # imediato: a cada 30 min, ou quando pedido à mão. As pastas vão a cada rodada.
+            try:
+                ultimo_cfg = datetime.datetime.fromisoformat(estado().get("ultimo_backup_config") or "").timestamp()
+            except ValueError:
+                ultimo_cfg = 0
+            if a.silencioso and time.time() - ultimo_cfg < BACKUP_CONFIG_INTERVALO:
+                if not ok_pastas:
+                    raise RuntimeError(_t("pastas: %1", erro_pastas))
+                agora = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+                salvar_estado(ultima=agora, resultado="ok", progresso="", erro="", falhas_seguidas=0)
+                return 0
             lista, total = listar_arquivos(c)
             meta = preparar_extras(c, lista)
             CACHE.mkdir(parents=True, exist_ok=True)
@@ -2058,7 +2308,10 @@ def cmd_sincronizar(a):
             rc("rcat", f"{remoto_base()}/meta.json", entrada=json.dumps(meta, ensure_ascii=False, indent=2))
             limpar_lixeira(dados)
             publicar_ferramenta()
+            if not ok_pastas:
+                raise RuntimeError(_t("pastas: %1", erro_pastas))
             agora = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
+            salvar_estado(ultimo_backup_config=agora)
             salvar_estado(ultima=agora, resultado="ok", tamanho=total, arquivos=len(lista), progresso="", remoto_meta=meta,
                           precisa_decidir=False, conflito=None, falhas_seguidas=0)
             marcar_base_enviada()
@@ -2371,9 +2624,9 @@ TIMER = """[Unit]
 Description=Sincronização e backup automático da conta no Google Drive
 
 [Timer]
-OnBootSec=3min
-OnUnitActiveSec=20min
-RandomizedDelaySec=2min
+OnBootSec=1min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
 
 [Install]
 WantedBy=timers.target
@@ -2403,6 +2656,8 @@ def cmd_categoria(a):
     c = config()
     c["categorias"][a.id] = a.modo == "liga"
     salvar_config(c)
+    if a.id in ("pastas", "documentos", "imagens"):
+        marcar_pastas_alteradas()
     if conectado():
         atualizar_pasta_local(c)
     return 0
@@ -2452,6 +2707,8 @@ def cmd_escolher(a):
         c["sincronizar_fundo"] = a.fundo == "liga"
     c["escolha_feita"] = True
     salvar_config(c)
+    if getattr(a, "pastas", None) is not None or a.categorias is not None:
+        marcar_pastas_alteradas()
     atualizar_pasta_local(c)
     if os.environ.get("CONTA_HOME"):
         return 0

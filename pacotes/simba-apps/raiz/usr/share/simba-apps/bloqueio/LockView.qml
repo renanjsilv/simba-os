@@ -166,7 +166,7 @@ Item {
 
       Column {
         id: relogio
-        anchors { left: parent.left; bottom: parent.bottom; leftMargin: Math.round(parent.width * 0.026); bottomMargin: Math.round(parent.height * 0.19) }   // acima da assinatura do papel de parede padrão
+        anchors { left: parent.left; bottom: parent.bottom; leftMargin: Math.round(parent.width * 0.026); bottomMargin: Math.round(parent.height * 0.1) }
         spacing: -Math.round(cortina.height * 0.005)
         Text {
           text: Qt.formatTime(root.agora, "HH:mm")

@@ -136,11 +136,13 @@ Item {
       visible: opacity > 0
       opacity: root.mostrarLogin ? 1 : 0
       Behavior on opacity { NumberAnimation { duration: 350; easing.type: Easing.OutCubic } }
+      // desfoque como o do Windows: a imagem continua reconhecível (cores e formas), sem
+      // escurecer — com o desfoque máximo e -12% de brilho um papel escuro virava preto
       blurEnabled: wallpaper.status === Image.Ready
-      blur: 1.0
-      blurMax: 64
-      blurMultiplier: 1.0
-      brightness: -0.12
+      blur: 0.55
+      blurMax: 48
+      blurMultiplier: 0.6
+      brightness: 0.04
     }
 
     MouseArea {

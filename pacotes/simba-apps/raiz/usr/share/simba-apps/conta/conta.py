@@ -1608,12 +1608,22 @@ def login_drive():
         time.sleep(0.15)
     if p.poll() is None:
         p.kill()
-        log.unlink(missing_ok=True)
-        return 1
+    if p.returncode != 0:
+        # Falhou (prazo, login cancelado, Google recusou): guarda o motivo, sem nada de token
+        # (só existe token quando dá certo), e fecha a janela — aberta, ela apontava para um
+        # 127.0.0.1 que já não respondia ("conexão recusada").
+        try:
+            linhas = [l for l in log.read_text(errors="replace").splitlines()
+                      if "token" not in l.lower() and "secret" not in l.lower()]
+            erro = CACHE / "login-erro.log"
+            erro.unlink(missing_ok=True)
+            with open(os.open(erro, os.O_WRONLY | os.O_CREAT, 0o600), "w") as f:
+                f.write("\n".join(linhas[-30:]) + "\n")
+        except OSError:
+            pass
     log.unlink(missing_ok=True)
-    if p.returncode == 0:
-        fechar_login()
-    return p.returncode
+    fechar_login()
+    return p.returncode if p.returncode is not None else 1
 
 
 def cmd_entrar(a):
@@ -1621,10 +1631,14 @@ def cmd_entrar(a):
         a.cripto = sys.stdin.readline().rstrip("\n")
     salvar_estado(entrando=True, erro="", link_login="")
     if not conectado():
-        # Login novo: pergunta o que sincronizar antes de enviar qualquer coisa.
-        c0 = config()
-        c0["escolha_feita"] = False
-        salvar_config(c0)
+        # Login novo: a pasta do Drive pode ser outra (outra conta, ou o acesso novo do Simba,
+        # que não enxerga a pasta criada pelo acesso antigo do rclone): mescla tudo de novo.
+        resetar_estado_nuvem()
+        if not getattr(a, "manter_escolha", False):
+            # Login novo: pergunta o que sincronizar antes de enviar qualquer coisa.
+            c0 = config()
+            c0["escolha_feita"] = False
+            salvar_config(c0)
     try:
         if not instalar_rclone():
             salvar_estado(entrando=False, erro=_t("Não foi possível instalar o rclone (senha cancelada?)."))
@@ -1679,6 +1693,30 @@ def cmd_entrar(a):
     except Exception as e:  # noqa: BLE001
         salvar_estado(entrando=False, erro=str(e)[-300:])
         return 1
+
+
+def resetar_estado_nuvem():
+    """Esquece o que foi combinado com a pasta do Drive anterior (bisync, lista de pastas,
+    papel de parede, ferramenta publicada): a próxima sincronização mescla do zero."""
+    shutil.rmtree(BISYNC_DIR, ignore_errors=True)
+    FUNDO_ESTADO.unlink(missing_ok=True)
+    salvar_estado(bisync_iniciadas=[], pastas_unidas=False, pastas_alteradas=False,
+                  ferramenta_publicada="", ultimo_backup_config="", base_fundo="",
+                  ultima_remota_aplicada="", remoto_meta={}, conflito=None, precisa_decidir=False)
+
+
+def cmd_reconectar(_a):
+    """Troca o acesso ao Google (ex.: do client_id do rclone para o do Simba) mantendo as
+    escolhas: esquece o login, abre o login de novo e sincroniza tudo na pasta nova."""
+    for n in (NOME_REMOTO, NOME_CRIPTO):
+        rc("config", "delete", n, check=False)
+    r = cmd_entrar(type("A", (), {"cripto": "", "manter_escolha": True})())
+    if r == 0 and conectado() and config().get("escolha_feita"):
+        if pode_enviar():
+            cmd_auto(type("A", (), {"modo": "liga"})())
+        subprocess.Popen(["/usr/bin/conta", "sincronizar", "--silencioso"], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return r
 
 
 def cmd_senha(a):
@@ -2794,6 +2832,7 @@ def main():
     p.add_argument("senha")
     p.set_defaults(f=cmd_senha)
     sub.add_parser("sair").set_defaults(f=cmd_sair)
+    sub.add_parser("reconectar", help="entra de novo mantendo as escolhas (troca do acesso ao Google)").set_defaults(f=cmd_reconectar)
     p = sub.add_parser("sincronizar")
     p.add_argument("--silencioso", action="store_true")
     p.add_argument("--substituir", action="store_true", help="envia mesmo havendo backup de outra máquina")

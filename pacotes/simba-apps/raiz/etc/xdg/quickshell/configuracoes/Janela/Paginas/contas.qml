@@ -471,6 +471,22 @@ Pagina {
     ]
   }
 
+  // Conta ligada pelo acesso antigo (client_id compartilhado do rclone, que o Google está
+  // desativando): pede para entrar de novo pelo acesso do Simba, mantendo as escolhas.
+  Aviso {
+    Layout.fillWidth: true
+    visible: pg.conectado && !!(pg.s && pg.s.reconectar)
+    tipo: "aviso"
+    glifo: Icones.alert
+    texto: I18n.t("Entre de novo na conta Google para continuar sincronizando: o acesso antigo está sendo desativado pelo Google. Suas pastas e escolhas ficam como estão.")
+    acoes: Botao {
+      texto: I18n.t("Reconectar")
+      tipo: "primario"
+      habilitado: !pg.entrando
+      onClicado: Sistema.rodar(["conta", "reconectar"], function() { pg.atualizar() })
+    }
+  }
+
   // Banner se houver favoritos pendentes para o Brave
   Aviso {
     Layout.fillWidth: true

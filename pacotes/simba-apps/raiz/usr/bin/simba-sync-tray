@@ -40,7 +40,9 @@ class SyncTray:
 
     def ler_status(self):
         try:
-            r = subprocess.run(["conta", "status"], capture_output=True, text=True, timeout=5)
+            # --rapido: sem varrer as pastas (a completa levava segundos e estourava o prazo,
+            # e o ícone sumia como "não conectado")
+            r = subprocess.run(["conta", "status", "--rapido"], capture_output=True, text=True, timeout=10)
             if r.returncode == 0:
                 return json.loads(r.stdout)
         except Exception:
@@ -48,8 +50,13 @@ class SyncTray:
         return {}
 
     def atualizar(self):
+        if getattr(self, "_lendo", False):
+            return True
+        self._lendo = True
+
         def worker():
             st = self.ler_status()
+            self._lendo = False
             GLib.idle_add(self.aplicar_status, st)
         threading.Thread(target=worker, daemon=True).start()
         return True
@@ -127,9 +134,8 @@ class SyncTray:
             self.indicator.set_secondary_activate_target(it_cfg)
 
     def abrir_pasta(self, _w):
-        doc = subprocess.run(["xdg-user-dir", "DOCUMENTS"], capture_output=True, text=True).stdout.strip()
-        alvo = doc if os.path.isdir(doc) else str(HOME)
-        subprocess.Popen(["xdg-open", alvo])
+        # ~/Simba Conta: atalhos para tudo o que é sincronizado (como a pasta do OneDrive)
+        subprocess.Popen(["conta", "abrir-pasta"], start_new_session=True)
 
     def abrir_drive(self, _w):
         subprocess.Popen(["xdg-open", "https://drive.google.com"])

@@ -1,0 +1,53 @@
+#!/bin/bash
+# Liga/desliga o desbloqueio do disco criptografado sem senha ao ligar o computador
+# (o mesmo que o instalador faz em "Entrar sem senha ao ligar" quando não há TPM).
+#   sudo simba-disco-sem-senha ligar      pede a senha atual do disco uma vez
+#   sudo simba-disco-sem-senha desligar   volta a pedir a senha ao ligar
+#   simba-disco-sem-senha estado
+# Com a chave no initramfs o disco abre sozinho: equivale a um disco sem criptografia.
+set -euo pipefail
+CHAVE=/etc/cryptsetup-keys.d/root.key
+CONF=/etc/mkinitcpio.conf.d/zz-chave-disco.conf
+
+disco() {
+  # partição LUKS por trás de /dev/mapper/root
+  local dev
+  dev=$(cryptsetup status root 2>/dev/null | awk '/device:/ {print $2}')
+  [[ -n $dev ]] || { echo "Disco criptografado 'root' não encontrado." >&2; exit 2; }
+  echo "$dev"
+}
+
+refazer_initramfs() {
+  if command -v limine-mkinitcpio >/dev/null; then limine-mkinitcpio >/dev/null; else mkinitcpio -P >/dev/null; fi
+}
+
+case ${1:-estado} in
+  estado)
+    if [[ -f $CONF ]]; then echo "ligado"; else echo "desligado"; fi ;;
+  ligar)
+    [[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+    dev=$(disco)
+    if [[ -f $CHAVE && -f $CONF ]] && cryptsetup open --test-passphrase --key-file="$CHAVE" "$dev" 2>/dev/null; then
+      echo "Já está ligado."; exit 0
+    fi
+    install -d -m 700 /etc/cryptsetup-keys.d
+    ( umask 077; head -c 64 /dev/urandom > "$CHAVE.novo" )
+    echo "Digite a senha atual do disco (a que aparece ao ligar o computador):"
+    cryptsetup luksAddKey "$dev" "$CHAVE.novo"
+    mv "$CHAVE.novo" "$CHAVE"
+    printf '%s\n' '# Desbloqueio do disco sem senha (simba-disco-sem-senha)' "FILES+=($CHAVE)" > "$CONF"
+    echo "Gerando a inicialização de novo…"
+    refazer_initramfs
+    echo "Pronto: no próximo boot o disco abre sem pedir a senha." ;;
+  desligar)
+    [[ $EUID -eq 0 ]] || exec sudo "$0" "$@"
+    dev=$(disco)
+    if [[ -f $CHAVE ]]; then
+      cryptsetup luksRemoveKey "$dev" "$CHAVE" 2>/dev/null || true
+      shred -u "$CHAVE" 2>/dev/null || rm -f "$CHAVE"
+    fi
+    rm -f "$CONF"
+    refazer_initramfs
+    echo "Pronto: a senha do disco volta a ser pedida ao ligar." ;;
+  *) sed -n '2,7p' "$0"; exit 1 ;;
+esac

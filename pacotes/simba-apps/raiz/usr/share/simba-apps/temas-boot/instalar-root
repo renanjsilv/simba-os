@@ -7,7 +7,7 @@ PATH=/usr/bin:/bin
 umask 022
 padrao=${1:?tema}
 case $padrao in
-  simba|simba-escuro|simba-claro|simba-vidro|simba-bloom|simba-aurora|simba-papel) ;;
+  simba|simba-os|simba-escuro|simba-claro|simba-vidro|simba-bloom|simba-aurora|simba-papel) ;;
   *) echo "tema inválido: $padrao" >&2; exit 2 ;;
 esac
 tmp=$(mktemp -d /var/tmp/temas-boot.XXXXXX)   # 0700, dono root

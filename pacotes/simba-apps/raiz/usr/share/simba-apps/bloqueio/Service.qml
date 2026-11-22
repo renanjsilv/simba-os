@@ -25,6 +25,7 @@ Item {
   property bool passwordPamConfigured: false
   property bool fingerprintConfigured: false
   property bool previewVisible: false
+  property bool previewLogin: false
   property string enteredPassword: ""
   property string pendingPassword: ""
   property string failureMessage: ""
@@ -310,6 +311,7 @@ Item {
 
     LockView {
       anchors.fill: parent
+      mostrarLogin: root.previewLogin
       backgroundPath: root.backgroundPath
       backgroundVersion: root.backgroundVersion
       fingerprintConfigured: root.fingerprintConfigured
@@ -324,7 +326,7 @@ Item {
     MouseArea {
       anchors.fill: parent
       acceptedButtons: Qt.LeftButton | Qt.RightButton
-      onClicked: root.previewVisible = false
+      onClicked: { root.previewVisible = false; root.previewLogin = false }
     }
   }
 
@@ -426,7 +428,7 @@ Item {
 
   Timer {
     id: idleBlankTimer
-    interval: 5000
+    interval: 60000
     repeat: false
     property double armedAt: 0
     onTriggered: {
@@ -556,7 +558,14 @@ Item {
       return "ok"
     }
 
+    // prévia já com a cortina levantada (foto, nome e senha) — para testes/capturas
+    function previewLogin(): string {
+      root.previewLogin = true
+      return preview()
+    }
+
     function hidePreview(): string {
+      root.previewLogin = false
       root.previewVisible = false
       return "ok"
     }

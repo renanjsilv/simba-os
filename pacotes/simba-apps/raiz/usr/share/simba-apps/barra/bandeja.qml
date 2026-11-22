@@ -112,14 +112,19 @@ Item {
     return 0
   }
 
+  // Painel aberto: status completo (arquivos recentes, cota). Fechado: o leve, só para o
+  // ícone e o estado (sem varrer as pastas a cada poucos segundos).
   function atualizarSync() {
-    procSyncStatus.running = false
+    if (procSyncStatus.running) return
+    procSyncStatus.command = painelSync.visible ? ["conta", "status"] : ["conta", "status", "--rapido"]
     procSyncStatus.running = true
   }
 
   Process {
     id: procSyncStatus
-    command: [Quickshell.env("HOME") + "/.local/bin/conta", "status"]
+    // `conta` do sistema (/usr/bin): ~/.local/bin/conta só existia nesta máquina de
+    // desenvolvimento, e numa instalação nova o painel ficava sempre "Não conectado".
+    command: ["conta", "status", "--rapido"]
     stdout: StdioCollector { id: syncCollector }
     onExited: function(code) {
       if (code === 0 && syncCollector.text) {
@@ -131,10 +136,16 @@ Item {
   }
 
   Timer {
-    interval: 4000
+    interval: painelSync.visible ? 4000 : 15000
     repeat: true
-    running: painelSync.visible
-    onTriggered: root.atualizarSync()
+    running: true
+    triggeredOnStart: true
+    onTriggered: {
+      // os arquivos podem não existir no 1º login: sem isso o FileView nunca os relê
+      if (fvConfig.loaded === false) fvConfig.reload()
+      if (fvEstado.loaded === false) fvEstado.reload()
+      root.atualizarSync()
+    }
   }
 
   // simba-shell simbasync alternarSync|abrirSync|fecharSync
@@ -802,8 +813,9 @@ Item {
 
     function abrir(anc) {
       medir(anc)
-      root.atualizarSync()
       visible = true
+      procSyncStatus.running = false   // troca a consulta leve em andamento pela completa
+      root.atualizarSync()
       teclasSync.forceActiveFocus()
     }
 
@@ -1036,7 +1048,7 @@ Item {
 
             Text {
               visible: root.syncData && root.syncData.recentes && root.syncData.recentes.length > 0
-              text: String(root.syncData.recentes.length) + " " + I18n.t("itens")
+              text: String(root.syncData && root.syncData.recentes ? root.syncData.recentes.length : 0) + " " + I18n.t("itens")
               color: "#6e6e76"
               font.family: root.fonte
               font.pixelSize: 11
@@ -1278,8 +1290,8 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  var docPath = Quickshell.env("HOME") + "/Documents"
-                  Quickshell.execDetached(["xdg-open", docPath])
+                  // ~/Simba Conta: atalhos para tudo o que é sincronizado (como a pasta do OneDrive)
+                  Quickshell.execDetached(["conta", "abrir-pasta"])
                   painelSync.fechar()
                 }
               }

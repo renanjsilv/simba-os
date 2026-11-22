@@ -178,6 +178,15 @@ def svg_wifi(fg, bg, ac):
             f"<circle cx=\"120\" cy=\"166\" r=\"9\" fill=\"{fg}\"/></svg>")
 
 
+def internet_ok_rapido():
+    """Há rede (sem esperar o teste de conectividade do NetworkManager)."""
+    try:
+        with open("/proc/net/route") as f:
+            return any(l.split()[1] == "00000000" for l in f.readlines()[1:] if len(l.split()) > 1)
+    except OSError:
+        return False
+
+
 def nmcli(*args, timeout=20):
     return subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=timeout)
 
@@ -475,7 +484,11 @@ class Janela(Adw.ApplicationWindow):
         topo.pack_start(self.pular)
         vista.add_top_bar(topo)
 
-        self.carrossel = Adw.Carousel(allow_scroll_wheel=False, spacing=0, hexpand=True, vexpand=True)
+        # Sem arrasto pelo mouse: o gesto de arrastar do carrossel disputava o clique com os
+        # interruptores e cartões da página da conta (o clique "não pegava" ou demorava).
+        # Toque na tela e as setas/botões continuam trocando de página.
+        self.carrossel = Adw.Carousel(allow_scroll_wheel=False, allow_mouse_drag=False, spacing=0,
+                                      hexpand=True, vexpand=True)
         self.carrossel.connect("page-changed", self.pagina_mudou)
         for montar in (self.p_inicio, self.p_wifi, self.p_conta, self.p_draco, self.p_agentes, self.p_aparencia,
                        self.p_loja, self.p_escritorio, self.p_atalhos, self.p_pronto):
@@ -830,6 +843,7 @@ class Janela(Adw.ApplicationWindow):
             card.add_controller(click)
 
             def on_toggle(check, c=card):
+                self._escolha_mudou()
                 if check.get_active():
                     c.add_css_class("ativo")
                 else:
@@ -872,6 +886,7 @@ class Janela(Adw.ApplicationWindow):
         self.escolha_fundo = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
         self.escolha_fundo.connect("notify::active", lambda *_: self.ao_alternar_fundo())
         self.card_fundo.append(self.escolha_fundo)
+        self._cartao_alterna(self.card_fundo, self.escolha_fundo)
         box.append(self.card_fundo)
 
         # Cartão 2: Programas e aplicativos
@@ -901,6 +916,7 @@ class Janela(Adw.ApplicationWindow):
         self.escolha_pacotes = Gtk.Switch(active=True, valign=Gtk.Align.CENTER)
         self.escolha_pacotes.connect("notify::active", lambda *_: self.ao_alternar_pacotes())
         self.card_pacotes.append(self.escolha_pacotes)
+        self._cartao_alterna(self.card_pacotes, self.escolha_pacotes, self.btn_escolher_pacotes)
         box.append(self.card_pacotes)
 
         # Barra de cota
@@ -926,6 +942,25 @@ class Janela(Adw.ApplicationWindow):
 
         return box
 
+    def _cartao_alterna(self, cartao, chave, *proprios):
+        """Clique no cartão (fora do interruptor e dos botões dele) alterna o interruptor."""
+        clique = Gtk.GestureClick()
+
+        def soltou(_g, _n, x, y):
+            alvo = cartao.pick(x, y, Gtk.PickFlags.DEFAULT)
+            while alvo is not None and alvo is not cartao:
+                if alvo is chave or alvo in proprios:
+                    return        # o próprio interruptor/botão já tratou o clique
+                alvo = alvo.get_parent()
+            chave.set_active(not chave.get_active())
+        clique.connect("released", soltou)
+        cartao.add_controller(clique)
+        cartao.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+
+    def _escolha_mudou(self, *_a):
+        if not getattr(self, "_preenchendo", False):
+            self._escolha_alterada = True
+
     def _montar_escolha(self):
         return Gtk.Box(visible=False)
 
@@ -936,6 +971,7 @@ class Janela(Adw.ApplicationWindow):
             self.conta_desconectada_box.set_visible(not mostrar)
 
     def ao_alternar_fundo(self):
+        self._escolha_mudou()
         ativo = self.escolha_fundo.get_active()
         if ativo:
             self.card_fundo.add_css_class("ativo")
@@ -944,6 +980,7 @@ class Janela(Adw.ApplicationWindow):
         self.atualizar_cota_estimada()
 
     def ao_alternar_pacotes(self):
+        self._escolha_mudou()
         ativo = self.escolha_pacotes.get_active()
         if ativo:
             self.card_pacotes.add_css_class("ativo")
@@ -1038,27 +1075,34 @@ class Janela(Adw.ApplicationWindow):
     def confirmar_escolha(self):
         pastas = [rel for rel, info in self.escolha_pastas.items() if info["cb"].get_active()]
         fundo = "liga" if self.escolha_fundo.get_active() else "desliga"
-        pacotes = "liga" if self.escolha_pacotes.get_active() else "desliga"
+        # As configurações dos apps (aparência, Brave, terminal, Draco) vão junto, como diz a
+        # página; antes o "escolher --pastas" desligava todas. Documentos/Imagens entram pelas
+        # pastas marcadas (categoria "pastas"), não pelas categorias fixas.
+        cats = ["config", "brave", "terminal", "draco"]
+        if self.escolha_pacotes.get_active():
+            cats.append("pacotes")
+        self._salvando_escolha = True
         self.proximo.set_sensitive(False)
+        self.proximo.set_label(_t("Salvando…"))
 
         def escolher():
-            rc1 = subprocess.run(["conta", "escolher", "--pastas", ",".join(pastas), "--fundo", fundo],
-                                 capture_output=True, timeout=60).returncode
-            subprocess.run(["conta", "categoria", "pacotes", pacotes],
-                           capture_output=True, timeout=10)
-            subprocess.run(["conta", "fundo", fundo],
-                           capture_output=True, timeout=10)
-            return rc1
+            # conta escolher já liga o backup automático, o papel de parede entre máquinas
+            # e dispara a 1ª sincronização (em segundo plano)
+            return subprocess.run(["conta", "escolher", "--categorias", ",".join(cats),
+                                   "--pastas", ",".join(pastas), "--fundo", fundo],
+                                  capture_output=True, timeout=90).returncode
 
         def pronto(rc):
+            self._salvando_escolha = False
             self.proximo.set_sensitive(True)
+            self.pagina_mudou(self.carrossel, round(self.carrossel.get_position()))
             if rc != 0:
-                self.toast(_t("Não foi possível salvar a escolha."))
+                self.toast(_t("Não foi possível salvar a escolha. Tente de novo."))
                 return
-            self._sincronizou_inicial = True
-            self.toast(_t("Sincronização iniciada") if pastas else _t("Configuração salva"))
-            rodar(["conta", "sincronizar", "--silencioso"])
-            self.atualizar_conta()
+            self._escolha_salva = True
+            self._escolha_alterada = False
+            self.toast(_t("Sincronizando — acompanhe pela nuvem na barra de tarefas") if pastas or cats
+                       else _t("Configuração salva"))
             self.ir(1)
 
         em_segundo_plano(escolher, pronto)
@@ -1252,8 +1296,11 @@ class Janela(Adw.ApplicationWindow):
         # um clique rápido "voltava"); fora dela, a partir da página REAL. Antes o destino valia
         # sempre: se a animação parava no meio (a lista do Wi-Fi mudando o tamanho da página),
         # um clique não avançava e o seguinte pulava duas páginas.
-        if passo > 0 and getattr(self, "destino", 0) == 2 and getattr(self, "conectado", False) and not getattr(self, "_sincronizou_inicial", False):
-            self.confirmar_escolha()
+        if (passo > 0 and getattr(self, "destino", 0) == 2 and getattr(self, "conectado", False)
+                and round(self.carrossel.get_position()) == 2
+                and (not getattr(self, "_escolha_salva", False) or getattr(self, "_escolha_alterada", False))):
+            if not getattr(self, "_salvando_escolha", False):
+                self.confirmar_escolha()
             return
         n = self.carrossel.get_n_pages()
         animando = time.monotonic() - getattr(self, "ultimo_ir", 0) < 0.5
@@ -1295,6 +1342,8 @@ class Janela(Adw.ApplicationWindow):
             self.wifi_atualizar()
         if indice == 2:
             self.atualizar_conta()
+        if indice in (1, 2) and internet_ok_rapido():
+            self.aquecer_navegador()
         if indice == 4:
             self.opencode_conferir()
         if indice == 7:
@@ -1332,23 +1381,69 @@ class Janela(Adw.ApplicationWindow):
         if getattr(self, "conectado", False) or not shutil.which("conta"):
             self.abrir(["configuracoes", "contas"])
             return
-        # Abre o login do Google direto no navegador (o próprio `conta entrar` faz isso)
+        # `conta entrar` abre o login do Google numa janela própria, flutuante e na frente
+        # (antes abria uma aba comum, escondida atrás desta janela).
         if not rodar(["conta", "entrar"]):
             self.toast(_t("Não foi possível abrir agora."))
             return
-        self.conta_estado.set_label(_t("Termine o login na janela do navegador…"))
+        self.conta_botao.set_sensitive(False)
+        self.conta_estado.set_label(_t("Abrindo o login do Google…"))
         self.conta_estado.set_visible(True)
-        # acompanha o login até terminar (até 2 minutos)
-        # o login (escolher conta, senha, verificação em 2 etapas) pode levar minutos: confere a
-        # cada 2 s por até 10 min (o mesmo prazo do `conta entrar`); ao voltar para a janela,
-        # confere na hora (ver _janela_ativa)
-        self.tentativas_conta = 300
+        GLib.timeout_add(4000, self._login_aberto)
+        # Confere o login a cada 1 s (consulta leve) por até 10 min, o mesmo prazo do
+        # `conta entrar`; ao voltar para esta janela confere na hora (ver _janela_ativa).
+        self.tentativas_conta = 600
         if not getattr(self, "vigia_conta_id", 0):
-            self.vigia_conta_id = GLib.timeout_add(2000, self._vigiar_conta)
+            self.vigia_conta_id = GLib.timeout_add(1000, self._vigiar_conta)
+
+    def _login_aberto(self):
+        if not getattr(self, "conectado", False):
+            self.conta_estado.set_label(_t("Termine o login na janela do Google…"))
+            self.conta_botao.set_sensitive(True)
+        return False
+
+    def aquecer_navegador(self):
+        """Deixa o navegador padrão já carregado (sem janela) enquanto a pessoa lê a página:
+        num sistema recém-instalado a 1ª abertura do navegador leva alguns segundos."""
+        if getattr(self, "_navegador_aquecido", False) or getattr(self, "conectado", False):
+            return
+        self._navegador_aquecido = True
+
+        def aquecer():
+            nav = subprocess.run(["simba-cmd-default-browser"], capture_output=True, text=True,
+                                 timeout=3).stdout.strip()
+            perfis = {"brave": "BraveSoftware/Brave-Browser", "chromium": "chromium",
+                      "google-chrome": "google-chrome", "microsoft-edge": "microsoft-edge"}
+            perfil = next((v for k, v in perfis.items() if nav.startswith(k)), None)
+            if not perfil:
+                return
+            sock = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+                                perfil, "SingletonSocket")
+            if os.path.exists(sock):
+                return    # já está aberto
+            exe = None
+            for base in (os.path.expanduser("~/.local/share/applications"), "/usr/share/applications"):
+                try:
+                    with open(os.path.join(base, nav)) as f:
+                        for linha in f:
+                            if linha.startswith("Exec="):
+                                exe = linha[5:].split()[0]
+                                break
+                except OSError:
+                    continue
+                if exe:
+                    break
+            if exe and shutil.which(exe):
+                subprocess.Popen(["systemd-run", "--user", "--quiet", "--collect",
+                                  f"--unit=simba-navegador-pronto-{int(time.time())}",
+                                  "--property=StandardOutput=null", "--property=StandardError=null",
+                                  "uwsm-app", "--", exe, "--no-startup-window"],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        em_segundo_plano(aquecer, lambda _r: None)
 
     def _vigiar_conta(self):
         self.tentativas_conta -= 1
-        self.atualizar_conta()
+        self.atualizar_conta(rapido=True)
         continua = self.tentativas_conta > 0 and not getattr(self, "conectado", False)
         if not continua:
             self.vigia_conta_id = 0
@@ -1357,71 +1452,105 @@ class Janela(Adw.ApplicationWindow):
     def _janela_ativa(self, *_a):
         # voltou do navegador para as boas-vindas: confere o login na hora
         if self.is_active() and getattr(self, "tentativas_conta", 0) > 0 and not getattr(self, "conectado", False):
-            self.atualizar_conta()
+            self.atualizar_conta(rapido=True)
 
-    def atualizar_conta(self):
+    def atualizar_conta(self, rapido=False):
         if not shutil.which("conta"):
             return
+        if getattr(self, "_lendo_conta", False):
+            return        # a consulta anterior ainda não voltou: não empilha outra
+        self._lendo_conta = True
 
         def ler():
-            r = subprocess.run(["conta", "status"], capture_output=True, text=True, timeout=15)
+            r = subprocess.run(["conta", "status", *(["--rapido"] if rapido else [])],
+                               capture_output=True, text=True, timeout=20)
             return json.loads(r.stdout) if r.returncode == 0 and r.stdout.strip() else None
 
         def pronto(st):
+            self._lendo_conta = False
             if not st:
                 return
+            estava = getattr(self, "conectado", False)
             self.conectado = bool(st.get("conectado"))
             if self.conectado:
                 quem = st.get("email") or st.get("nome") or _t("sua conta Google")
                 if hasattr(self, "lbl_conectado_email"):
-                    self.lbl_conectado_email.set_markup(f"Conectado como <b>{quem}</b>")
-                self.cota_total_bytes = st.get("cota_total") or 5497558138880
-                self.cota_usado_bytes = st.get("cota_usado") or 0
-                self.qtd_pacotes = st.get("qtd_pacotes_selecionados", st.get("qtd_pacotes", 215))
-
-                if hasattr(self, "lbl_pacotes_desc"):
+                    self.lbl_conectado_email.set_markup(
+                        _t("Conectado como") + f" <b>{GLib.markup_escape_text(quem)}</b>")
+                if st.get("cota_total"):
+                    self.cota_total_bytes = st["cota_total"]
+                    self.cota_usado_bytes = st.get("cota_usado") or 0
+                if st.get("qtd_pacotes"):
+                    self.qtd_pacotes = st.get("qtd_pacotes_selecionados") or st["qtd_pacotes"]
                     self.lbl_pacotes_desc.set_label(_t(f"{self.qtd_pacotes} programas instalados para backup · "))
 
-                if hasattr(self, "escolha_fundo"):
-                    self.escolha_fundo.set_active(st.get("sincronizar_fundo", True))
-                if hasattr(self, "escolha_pacotes"):
-                    self.escolha_pacotes.set_active(st.get("categorias", {}).get("pacotes", True))
+                # A escolha na tela vem do que está salvo UMA vez só: depois é da pessoa (antes
+                # cada atualização desfazia o interruptor que ela tinha acabado de mudar).
+                if not getattr(self, "_escolha_preenchida", False):
+                    self._escolha_preenchida = True
+                    self._preencher_escolha(st)
 
-                if hasattr(self, "conta_desconectada_box"):
-                    self.conta_desconectada_box.set_visible(False)
-                if hasattr(self, "conta_conectada_box"):
-                    self.conta_conectada_box.set_visible(True)
-
-                if getattr(self, "destino", 0) == 2:
+                self.conta_desconectada_box.set_visible(False)
+                self.conta_conectada_box.set_visible(True)
+                self.conta_botao.set_sensitive(True)
+                if round(self.carrossel.get_position()) == 2 and not getattr(self, "_salvando_escolha", False):
                     self.proximo.set_label(_t("Começar a sincronizar"))
 
-                self.atualizar_pastas_info(st.get("pastas_info", []))
+                if not getattr(self, "_stats_pastas", False):
+                    self._stats_pastas = True
+                    self.atualizar_pastas_info()
                 self.atualizar_cota_estimada()
+                if not estava:
+                    self.present()     # login concluído: volta para a frente
+                    if rapido:         # a leve não traz cota nem número de programas
+                        GLib.idle_add(lambda: (self.atualizar_conta(), False)[1])
 
-                if not getattr(self, "_sincronizou_inicial", False) and not st.get("precisa_escolher"):
-                    self._sincronizou_inicial = True
+                if not getattr(self, "_sync_auto", False) and not st.get("precisa_escolher"):
+                    # conta já configurada antes (outra máquina/rever a apresentação)
+                    self._sync_auto = True
+                    self._escolha_salva = True
+
                     def sincronizar_inicial():
                         subprocess.run(["systemctl", "--user", "enable", "--now", "conta-fundo.service"],
                                        capture_output=True, timeout=10)
-                        subprocess.run(["conta", "fundo", "puxar"], capture_output=True, timeout=30)
-                        subprocess.run(["conta", "fundo", "enviar"], capture_output=True, timeout=30)
-                        subprocess.run(["conta", "sincronizar", "--silencioso"], capture_output=True, timeout=120)
+                        subprocess.run(["conta", "sincronizar", "--silencioso"], capture_output=True, timeout=600)
                     em_segundo_plano(sincronizar_inicial, lambda _: None)
             else:
-                if hasattr(self, "conta_desconectada_box"):
-                    self.conta_desconectada_box.set_visible(True)
-                if hasattr(self, "conta_conectada_box"):
-                    self.conta_conectada_box.set_visible(False)
-                if getattr(self, "destino", 0) == 2:
+                self._escolha_preenchida = False
+                self.conta_desconectada_box.set_visible(True)
+                self.conta_conectada_box.set_visible(False)
+                if round(self.carrossel.get_position()) == 2:
                     self.proximo.set_label(_t("Próximo"))
                 if st.get("erro") and not st.get("entrando") and getattr(self, "tentativas_conta", 0):
                     self.conta_estado.set_label(st["erro"])
                     self.conta_estado.set_visible(True)
-                elif st.get("boas_vindas"):
+                    self.conta_botao.set_sensitive(True)
+                elif st.get("boas_vindas") and not getattr(self, "tentativas_conta", 0):
                     self.conta_estado.set_label(_t("Tem um backup no Drive? Entre para trazer tudo de volta."))
                     self.conta_estado.set_visible(True)
 
-        em_segundo_plano(ler, pronto)
+        def falhou_ou_pronto(st):
+            try:
+                pronto(st)
+            finally:
+                self._lendo_conta = False
+        em_segundo_plano(ler, falhou_ou_pronto)
+
+    def _preencher_escolha(self, st):
+        """Marca na tela o que já está salvo na conta (quando ela já foi configurada)."""
+        self._preenchendo = True
+        try:
+            self.escolha_fundo.set_active(st.get("sincronizar_fundo", True))
+            cats = st.get("categorias", {})
+            self.escolha_pacotes.set_active(cats.get("pacotes", True) if st.get("precisa_escolher") is False
+                                            else True)
+            if not st.get("precisa_escolher"):
+                salvas = set(st.get("pastas_sincronizadas") or [])
+                if salvas:
+                    for rel, info in self.escolha_pastas.items():
+                        info["cb"].set_active(rel in salvas)
+        finally:
+            self._preenchendo = False
 
     def trocar_tema(self, tema):
         if tema == tema_atual():

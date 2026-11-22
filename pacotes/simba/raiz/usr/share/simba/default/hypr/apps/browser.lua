@@ -10,3 +10,8 @@ o.window("(^.+-youtube\\.com__.*$|^.+-app\\.zoom\\.us__wc_home.*$)", { tag = "-d
 
 -- Hide screen sharing notification windows.
 o.window({ title = ".*is sharing.*" }, { workspace = "special silent" })
+
+-- Login do Google da Conta (`conta entrar`): janela de app do navegador para o 127.0.0.1 do
+-- rclone, flutuante e no centro — lado a lado ela abria escondida atrás das boas-vindas.
+o.window("^(brave|chrome|chromium|google-chrome|microsoft-edge|vivaldi|helium)-127\\.0\\.0\\.1__.*$", { tag = "-chromium-based-browser" })
+o.window("^(brave|chrome|chromium|google-chrome|microsoft-edge|vivaldi|helium)-127\\.0\\.0\\.1__.*$", { float = true, center = true, size = { 560, 690 } })

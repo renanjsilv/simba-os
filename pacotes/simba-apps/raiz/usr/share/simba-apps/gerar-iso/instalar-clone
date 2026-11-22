@@ -658,6 +658,23 @@ if [ "$AUTO_LOGIN" = s ]; then
 else
   rm -f "$T/etc/sddm.conf.d/autologin.conf"
 fi
+# "Entrar sem senha ao ligar" também vale para a senha do DISCO: sem o TPM (computador sem o
+# chip ou a pessoa disse não), o disco criptografado pedia a senha na tela preta mesmo com a
+# entrada automática. Uma chave de desbloqueio vai dentro do initramfs (o systemd-cryptsetup
+# acha /etc/cryptsetup-keys.d/root.key sozinho); a senha continua valendo como reserva.
+# Equivale a um disco sem criptografia (como o Windows sem BitLocker) — foi o escolhido.
+rm -f "$T/etc/cryptsetup-keys.d/root.key" "$T/etc/mkinitcpio.conf.d/zz-chave-disco.conf"
+if [ "$AUTO_LOGIN" = s ] && [ "${USE_TPM:-n}" != s ] && [ -n "${PASS1:-}" ]; then
+  install -d -m 700 "$T/etc/cryptsetup-keys.d"
+  ( umask 077; head -c 64 /dev/urandom > "$T/etc/cryptsetup-keys.d/root.key" )
+  if printf '%s' "$PASS1" | cryptsetup luksAddKey --key-file=- "$LUKS" "$T/etc/cryptsetup-keys.d/root.key" >> "$LOG" 2>&1; then
+    printf '%s\n' '# Desbloqueio do disco sem senha (instalador: "Entrar sem senha ao ligar" sem TPM)' \
+      'FILES+=(/etc/cryptsetup-keys.d/root.key)' > "$T/etc/mkinitcpio.conf.d/zz-chave-disco.conf"
+  else
+    echo "aviso: chave de desbloqueio do disco" >> "$LOG"
+    rm -f "$T/etc/cryptsetup-keys.d/root.key"
+  fi
+fi
 
 progresso 91 "$(t "Aplicando o idioma" "Setting the language")"
 if [ -x "$T/usr/bin/simba-idioma" ]; then

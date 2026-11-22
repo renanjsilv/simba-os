@@ -2940,5 +2940,13 @@
   "O Pequeno ocupa menos espaço na tela.": "Small takes up less screen space.",
   "Tema da central de notificações": "Notification center theme",
   "Visual da lista de notificações que abre ao clicar no relógio.": "Look of the notification list that opens when you click the clock.",
-  "Estilo dos avisos": "Alert style"
+  "Estilo dos avisos": "Alert style",
+  "Conectado como": "Signed in as",
+  "Salvando…": "Saving…",
+  "Abrindo o login do Google…": "Opening Google sign-in…",
+  "Termine o login na janela do Google…": "Finish signing in in the Google window…",
+  "Não foi possível salvar a escolha. Tente de novo.": "Couldn't save your choice. Please try again.",
+  "Sincronizando — acompanhe pela nuvem na barra de tarefas": "Syncing — follow it from the cloud icon on the taskbar",
+  "A senha está incorreta. Tente novamente.": "The password is incorrect. Try again.",
+  "Simba OS (padrão)": "Simba OS (default)"
 }

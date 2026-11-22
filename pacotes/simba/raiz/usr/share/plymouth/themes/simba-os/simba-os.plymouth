@@ -1,0 +1,11 @@
+[Plymouth Theme]
+Name=Simba OS
+Description=Tema de inicialização do Simba OS (marca), gerado por /usr/share/simba-apps/temas-boot.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/simba-os
+ScriptFile=/usr/share/plymouth/themes/simba-os/simba-os.script
+ConsoleLogBackgroundColor=0x000000
+MonospaceFont=Cantarell 11
+Font=Cantarell 11

@@ -33,6 +33,9 @@ Pagina {
 
   readonly property bool conectado: !!(s && s.conectado)
   readonly property bool ocupado: !!(s && (s.rodando || s.entrando))
+  // Escolhas (o que vai para o backup, pausar, pastas) valem para a PRÓXIMA sincronização:
+  // não travam enquanto um backup roda — antes ficavam apagadas quase o tempo todo.
+  readonly property bool entrando: !!(s && s.entrando)
   readonly property bool precisaSenha: !!(s && s.cripto && s.erro && /senha|password/i.test(s.erro))
   readonly property bool pausado: !!(s && s.pausado)
   readonly property bool sincronizando: !!(s && (s.rodando || s.sincronizando))
@@ -68,6 +71,17 @@ Pagina {
     return d.toLocaleDateString(Qt.locale(), I18n.t("dd/MM/yyyy")) + I18n.t(" às ") + d.toLocaleTimeString(Qt.locale(), "HH:mm")
   }
 
+  // Mostra a mudança na hora (o status completo pode levar alguns segundos) e grava.
+  function alternarCategoria(id, v) {
+    if (pg.s && pg.s.categorias) {
+      var n = Object.assign({}, pg.s)
+      n.categorias = Object.assign({}, pg.s.categorias)
+      n.categorias[id] = v
+      pg.s = n
+    }
+    Sistema.rodar(["conta", "categoria", id, v ? "liga" : "desliga"], function() { pg.atualizar() })
+  }
+
   function atualizar() {
     Sistema.json(["conta", "status"], function(v) {
       if (v) {
@@ -81,7 +95,7 @@ Pagina {
 
   // Atualização periódica: mais rápida durante operações
   Timer {
-    interval: pg.s && (pg.s.rodando || pg.s.entrando) ? 1000 : 4000
+    interval: pg.s && (pg.s.rodando || pg.s.entrando) ? 2000 : 5000
     running: true; repeat: true
     onTriggered: pg.atualizar()
   }
@@ -400,7 +414,7 @@ Pagina {
         glifo: pg.pausado ? Icones.sync : Icones.pause
         tipo: pg.pausado ? "primario" : "fantasma"
         compacto: true
-        habilitado: !pg.ocupado
+        habilitado: !pg.entrando
         Layout.alignment: Qt.AlignVCenter
         onClicado: {
           if (pg.pausado) {
@@ -580,7 +594,7 @@ Pagina {
                   visible: !rowPasta.modelData.padrao
                   glifo: Icones.deleteOutline
                   tipo: "fantasma"
-                  habilitado: !pg.ocupado
+                  habilitado: !pg.entrando
                   onClicado: Sistema.rodar(["conta", "pasta", "remover", rowPasta.modelData.id], function() { pg.atualizar() })
                 }
               }
@@ -799,9 +813,9 @@ Pagina {
             }
             Interruptor {
               ligado: !(pg.s && pg.s.categorias && pg.s.categorias.config === false)
-              habilitado: !pg.ocupado
+              habilitado: !pg.entrando
               Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-              onAlternado: function(v) { Sistema.rodar(["conta", "categoria", "config", v ? "liga" : "desliga"], function() { pg.atualizar() }) }
+              onAlternado: function(v) { pg.alternarCategoria("config", v) }
             }
           }
         }
@@ -825,9 +839,9 @@ Pagina {
             }
             Interruptor {
               ligado: !(pg.s && pg.s.categorias && (pg.s.categorias.brave === false || (pg.s.categorias.brave === undefined && pg.s.categorias.historico === false)))
-              habilitado: !pg.ocupado
+              habilitado: !pg.entrando
               Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-              onAlternado: function(v) { Sistema.rodar(["conta", "categoria", "brave", v ? "liga" : "desliga"], function() { pg.atualizar() }) }
+              onAlternado: function(v) { pg.alternarCategoria("brave", v) }
             }
           }
         }
@@ -851,9 +865,9 @@ Pagina {
             }
             Interruptor {
               ligado: !(pg.s && pg.s.categorias && (pg.s.categorias.terminal === false || (pg.s.categorias.terminal === undefined && pg.s.categorias.config === false)))
-              habilitado: !pg.ocupado
+              habilitado: !pg.entrando
               Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-              onAlternado: function(v) { Sistema.rodar(["conta", "categoria", "terminal", v ? "liga" : "desliga"], function() { pg.atualizar() }) }
+              onAlternado: function(v) { pg.alternarCategoria("terminal", v) }
             }
           }
         }
@@ -877,9 +891,9 @@ Pagina {
             }
             Interruptor {
               ligado: !(pg.s && pg.s.categorias && (pg.s.categorias.draco === false || (pg.s.categorias.draco === undefined && pg.s.categorias.config === false)))
-              habilitado: !pg.ocupado
+              habilitado: !pg.entrando
               Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-              onAlternado: function(v) { Sistema.rodar(["conta", "categoria", "draco", v ? "liga" : "desliga"], function() { pg.atualizar() }) }
+              onAlternado: function(v) { pg.alternarCategoria("draco", v) }
             }
           }
         }
@@ -945,9 +959,9 @@ Pagina {
 
             Interruptor {
               ligado: !(pg.s && pg.s.categorias && pg.s.categorias.pacotes === false)
-              habilitado: !pg.ocupado
+              habilitado: !pg.entrando
               Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-              onAlternado: function(v) { Sistema.rodar(["conta", "categoria", "pacotes", v ? "liga" : "desliga"], function() { pg.atualizar() }) }
+              onAlternado: function(v) { pg.alternarCategoria("pacotes", v) }
             }
           }
 
@@ -984,13 +998,13 @@ Pagina {
             }
             Interruptor {
               ligado: !!(pg.s && pg.s.cripto && pg.s.categorias && pg.s.categorias.segredos)
-              habilitado: !pg.ocupado
+              habilitado: !pg.entrando
               Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
               onAlternado: function(v) {
                 if (v && !(pg.s && pg.s.cripto)) {
                   pg.mostrarCriptoAviso = true
                 } else {
-                  Sistema.rodar(["conta", "categoria", "segredos", v ? "liga" : "desliga"], function() { pg.atualizar() })
+                  pg.alternarCategoria("segredos", v)
                 }
               }
             }

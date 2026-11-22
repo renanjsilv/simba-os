@@ -130,6 +130,11 @@ EXCLUIR = [
     # links internos e, restaurada, ficava por cima do tema bom e sumia com os ícones
     ".local/share/icons/Yaru-grey", ".local/share/icons/Yaru-gray",
 ]
+# Pasta "Simba Conta" na pasta pessoal (como a do OneDrive): atalhos para tudo o que vai
+# para o Drive. É o que o "Abrir pasta" da nuvem na barra abre. Só tem links: nunca entra
+# no backup nem guarda arquivos.
+PASTA_LOCAL = HOME / PASTA
+EXCLUIR.append(PASTA)
 LINKS = {}   # links simbólicos vistos no backup: rel → destino (vão em extra/links.json)
 MAX_ARQUIVO = 200 * 1024 * 1024  # arquivos maiores que isso ficam de fora
 
@@ -652,14 +657,92 @@ def cmd_pasta(a):
             print(_t("Pasta adicionada às exclusões: %1", p))
     elif acao == "listar":
         print(json.dumps({
+            "local": str(PASTA_LOCAL),
             "personalizadas": c.get("pastas_personalizadas", []),
             "excluidas": c.get("pastas_excluidas", [])
         }, ensure_ascii=False))
+        return 0
+    if conectado():
+        atualizar_pasta_local()
+    return 0
+
+
+def pastas_sincronizadas(c=None):
+    """Pastas da pasta pessoal que vão para o Drive (relativas), na ordem de exibição."""
+    c = c or config()
+    cats = c.get("categorias", {})
+    rel = []
+    if cats.get("documentos"):
+        rel += INCLUIR["documentos"]
+    if cats.get("imagens"):
+        rel += INCLUIR["imagens"]
+    if cats.get("pastas") or cats.get("documentos"):
+        rel += [x for x in c.get("pastas_personalizadas", []) if x]
+    vistos, saida = set(), []
+    for x in rel:
+        x = x.strip("/")
+        alvo = (HOME / x).resolve() if (HOME / x).exists() else None
+        if not alvo or not alvo.is_dir() or alvo in vistos or x == PASTA or x in c.get("pastas_excluidas", []):
+            continue
+        vistos.add(alvo)
+        saida.append(x)
+    return saida
+
+
+def atualizar_pasta_local(c=None):
+    """Mantém ~/Simba Conta com um atalho para cada pasta sincronizada. Mexe só em links."""
+    if os.environ.get("CONTA_HOME") and not os.environ.get("CONTA_PASTA_LOCAL"):
+        return None
+    c = c or config()
+    desejados = {}
+    for rel in pastas_sincronizadas(c):
+        desejados.setdefault(Path(rel).name, HOME / rel)
+    try:
+        PASTA_LOCAL.mkdir(exist_ok=True)
+        for item in PASTA_LOCAL.iterdir():
+            if item.is_symlink():
+                alvo = desejados.get(item.name)
+                if alvo is None or os.readlink(item) != str(alvo):
+                    item.unlink()
+        for nome, alvo in desejados.items():
+            link = PASTA_LOCAL / nome
+            if not link.exists() and not link.is_symlink():
+                link.symlink_to(alvo)
+        (PASTA_LOCAL / ".hidden").write_text("")   # deixa a pasta limpa no Explorador
+    except OSError:
+        return None
+    return PASTA_LOCAL
+
+
+def remover_pasta_local():
+    if not PASTA_LOCAL.is_dir() or PASTA_LOCAL.is_symlink():
+        return
+    for item in PASTA_LOCAL.iterdir():
+        if item.is_symlink():
+            item.unlink()
+    (PASTA_LOCAL / ".hidden").unlink(missing_ok=True)
+    try:
+        PASTA_LOCAL.rmdir()        # só se ficou vazia: arquivos da pessoa nunca saem
+    except OSError:
+        pass
+
+
+def cmd_abrir_pasta(_a):
+    """Abre ~/Simba Conta (atualizada) no gerenciador de arquivos."""
+    alvo = atualizar_pasta_local() if conectado() else None
+    if not alvo:
+        alvo = HOME
+    abrir = ["explorador", str(alvo)] if shutil.which("explorador") else ["xdg-open", str(alvo)]
+    subprocess.Popen(abrir, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return 0
 
 
 # ── comandos ─────────────────────────────────────────────────────────────────
 def cmd_status(_a):
+    # --rapido: sem varrer as pastas nem consultar o Drive (para quem pergunta a cada poucos
+    # segundos: bandeja, boas-vindas esperando o login). A versão completa demorava segundos
+    # em pastas grandes e as chamadas se acumulavam.
+    rapido = bool(getattr(_a, "rapido", False))
     c = config()
     e = estado()
     lig = conectado()
@@ -691,6 +774,8 @@ def cmd_status(_a):
     # Pacotes instalados no sistema
     qtd_pacotes = 0
     try:
+        if rapido:
+            raise OSError
         r = subprocess.run(["pacman", "-Qqe"], capture_output=True, text=True, timeout=2)
         qtd_pacotes = len([l for l in r.stdout.splitlines() if l.strip()])
     except Exception:
@@ -711,7 +796,7 @@ def cmd_status(_a):
         caminhos_vistos.add(p_item["id"])
         caminhos_vistos.add(p_item["nome"])
         tot, cnt = 0, 0
-        if alvo:
+        if alvo and not rapido:
             for root, dirs, files in os.walk(alvo):
                 for f in files:
                     try:
@@ -738,7 +823,7 @@ def cmd_status(_a):
             continue
         caminhos_vistos.add(caminho_str)
         tot, cnt = 0, 0
-        if alvo.exists():
+        if alvo.exists() and not rapido:
             for root, dirs, files in os.walk(alvo):
                 for f in files:
                     try:
@@ -766,7 +851,7 @@ def cmd_status(_a):
 
     candidatos = []
     agora_ts = time.time()
-    for pasta_dir in pastas_alvo:
+    for pasta_dir in ([] if rapido else pastas_alvo):
         if not pasta_dir.is_dir():
             continue
         nome_pasta = pasta_dir.name
@@ -847,7 +932,7 @@ def cmd_status(_a):
             "progresso_pct": 100
         })
 
-    cota = obter_cota_drive() if lig else {}
+    cota = obter_cota_drive(somente_cache=rapido) if lig else {}
     cota_total = int(cota.get("total") or 0)
     cota_usado = int(cota.get("used") or 0)
     cota_livre = int(cota.get("free") or 0)
@@ -898,6 +983,8 @@ def cmd_status(_a):
         "boas_vindas": BOAS_VINDAS.exists() and not SEM_BOAS_VINDAS.exists() and not lig,
         "boas_vindas_iso": not SEM_BOAS_VINDAS.exists(),
         "foto": str(FOTO) if lig and FOTO.exists() else "",
+        "pasta_local": str(PASTA_LOCAL) if lig and PASTA_LOCAL.is_dir() else "",
+        "pastas_sincronizadas": pastas_sincronizadas(c) if lig else [],
     }, ensure_ascii=False))
 
 
@@ -936,9 +1023,11 @@ def descobrir_usuario():
         return {}
 
 
-def obter_cota_drive(forcado=False):
+def obter_cota_drive(forcado=False, somente_cache=False):
     """Consulta cota real do Google Drive via rclone about com cache de 15 minutos."""
     agora = time.time()
+    if somente_cache:
+        return ler_json(COTA, {})
     if not forcado and COTA.exists():
         try:
             d = json.loads(COTA.read_text())
@@ -1169,23 +1258,128 @@ def ler_senha(valor):
     return sys.stdin.readline().rstrip("\n") if valor == "-" else valor
 
 
+# Janela do login do Google: app do navegador (--app) com a classe "<navegador>-127.0.0.1__…",
+# flutuante e no centro — antes abria uma aba lado a lado, escondida atrás da janela (flutuante)
+# das boas-vindas, e parecia que o navegador demorava a abrir. A regra também está em
+# /usr/share/simba/default/hypr/apps/browser.lua; aqui vale para sessões abertas antes dela.
+CLASSE_LOGIN = r"^(brave|chrome|chromium|google-chrome|microsoft-edge|vivaldi|helium)-127\.0\.0\.1__.*$"
+REGRA_LOGIN = ('hl.window_rule({ match = { class = "%s" }, float = true, center = true, '
+               'size = { 560, 690 }, tag = "-chromium-based-browser" })' % CLASSE_LOGIN.replace("\\", "\\\\"))
+
+
+def _hypr(*args, timeout=3):
+    if not os.environ.get("HYPRLAND_INSTANCE_SIGNATURE") or not shutil.which("hyprctl"):
+        return None
+    try:
+        return subprocess.run(["hyprctl", *args], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _janela_login():
+    r = _hypr("clients", "-j")
+    try:
+        for cl in json.loads(r.stdout) if r else []:
+            if re.match(CLASSE_LOGIN, cl.get("class") or ""):
+                return cl.get("address")
+    except ValueError:
+        pass
+    return None
+
+
+def _navegador_chromium():
+    """Executável do navegador padrão, se for da família Chromium (aceita --app=)."""
+    d = ""
+    # simba-cmd-default-browser resolve o simba-browser.desktop (o padrão do xdg) no navegador real
+    for cmd in (["simba-cmd-default-browser"], ["xdg-settings", "get", "default-web-browser"]):
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            d = subprocess.run(cmd, capture_output=True, text=True, timeout=3).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            d = ""
+        if d:
+            break
+    if not re.match(r"(brave|chromium|google-chrome|microsoft-edge|vivaldi|helium)", d):
+        return None
+    for base in (HOME / ".local/share/applications", Path("/usr/share/applications")):
+        f = base / d
+        if f.is_file():
+            m = re.search(r"^Exec=(\S+)", f.read_text(errors="replace"), re.M)
+            if m and shutil.which(m.group(1)):
+                return m.group(1)
+    return None
+
+
+def abrir_login(url):
+    """Abre o login do Google numa janela própria, na frente, e a deixa em foco."""
+    _hypr("eval", REGRA_LOGIN)
+    nav = _navegador_chromium()
+    try:
+        if nav and shutil.which("simba-launch-webapp"):
+            subprocess.Popen(["simba-launch-webapp", url], start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            cmd = ["simba-launch-browser", url] if shutil.which("simba-launch-browser") else ["/usr/bin/xdg-open", url]
+            subprocess.Popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return
+
+    def focar():
+        for _ in range(60):          # até 30 s (navegador ainda fechado demora a subir)
+            end = _janela_login()
+            if end:
+                _hypr("dispatch", f'hl.dsp.focus({{ window = "address:{end}" }})')
+                return
+            time.sleep(0.5)
+    import threading
+    threading.Thread(target=focar, daemon=True).start()
+
+
+def fechar_login():
+    """Login concluído: fecha a janela do login e devolve o foco às boas-vindas/Configurações."""
+    end = _janela_login()
+    if end:
+        _hypr("dispatch", f'hl.dsp.window.close({{ window = "address:{end}" }})')
+    r = _hypr("clients", "-j")
+    try:
+        for cl in json.loads(r.stdout) if r else []:
+            if cl.get("class") in ("com.simba.BoasVindas", "com.simba.Configuracoes", "configuracoes"):
+                _hypr("dispatch", f'hl.dsp.focus({{ window = "address:{cl.get("address")}" }})')
+                break
+    except ValueError:
+        pass
+
+
 def login_drive():
-    """rclone abre o navegador; o link também fica no estado (botão na interface)."""
-    import re
+    """rclone espera a autorização; quem abre a página é o abrir_login (o rclone chamaria o
+    xdg-open, que abre uma aba comum). O link também fica no estado (botão na interface)."""
     log = CACHE / "login.log"
     CACHE.mkdir(parents=True, exist_ok=True)
+    # xdg-open falso só para o rclone: a página é aberta aqui, assim que o link aparece
+    falso = CACHE / "sem-navegador"
+    falso.mkdir(parents=True, exist_ok=True)
+    (falso / "xdg-open").write_text("#!/bin/sh\nexit 0\n")
+    (falso / "xdg-open").chmod(0o755)
+    env = dict(os.environ, PATH=f"{falso}:{os.environ.get('PATH', '/usr/bin')}")
     with open(log, "w") as f:
         p = subprocess.Popen([rclone_bin(), "config", "create", NOME_REMOTO, "drive", "scope=drive.file",
-                              "config_is_local=true"], stdout=f, stderr=subprocess.STDOUT, text=True)
+                              "config_is_local=true"], stdout=f, stderr=subprocess.STDOUT, text=True, env=env)
     fim = time.time() + 600
+    aberto = False
     while p.poll() is None and time.time() < fim:
         m = re.search(r"(http://127\.0\.0\.1:53682/auth\?state=\S+)", log.read_text(errors="replace"))
         if m and estado().get("link_login") != m.group(1):
             salvar_estado(link_login=m.group(1))
-        time.sleep(0.5)
+        if m and not aberto:
+            aberto = True
+            abrir_login(m.group(1))
+        time.sleep(0.15)
     if p.poll() is None:
         p.kill()
         return 1
+    if p.returncode == 0:
+        fechar_login()
     return p.returncode
 
 
@@ -1289,6 +1483,7 @@ def cmd_sair(_a):
     c["escolha_feita"] = False
     salvar_config(c)
     apagar_foto()
+    remover_pasta_local()
     if COTA.exists():
         try:
             COTA.unlink()
@@ -1788,6 +1983,8 @@ def cmd_sincronizar(a):
             print(_t("Nenhum item escolhido para o backup."), file=sys.stderr)
         return 0
 
+    atualizar_pasta_local()
+
     # Modo Viagem (pausa temporária)
     pausado, ate = esta_pausado()
     if pausado and not getattr(a, "forcar", False) and not getattr(a, "substituir", False):
@@ -2206,6 +2403,8 @@ def cmd_categoria(a):
     c = config()
     c["categorias"][a.id] = a.modo == "liga"
     salvar_config(c)
+    if conectado():
+        atualizar_pasta_local(c)
     return 0
 
 
@@ -2253,6 +2452,7 @@ def cmd_escolher(a):
         c["sincronizar_fundo"] = a.fundo == "liga"
     c["escolha_feita"] = True
     salvar_config(c)
+    atualizar_pasta_local(c)
     if os.environ.get("CONTA_HOME"):
         return 0
     algum = any(c["categorias"].values())
@@ -2297,7 +2497,9 @@ def main():
     import argparse
     ap = argparse.ArgumentParser(prog="conta", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("status").set_defaults(f=cmd_status)
+    p = sub.add_parser("status")
+    p.add_argument("--rapido", action="store_true", help="sem varrer pastas nem consultar o Drive")
+    p.set_defaults(f=cmd_status)
     p = sub.add_parser("entrar")
     p.add_argument("--cripto", default="", help="senha do backup; '-' lê da entrada padrão")
     p.set_defaults(f=cmd_entrar)
@@ -2352,6 +2554,7 @@ def main():
     p.add_argument("acao", choices=["adicionar", "incluir", "remover", "excluir", "listar"])
     p.add_argument("caminho", nargs="?", default="")
     p.set_defaults(f=cmd_pasta)
+    sub.add_parser("abrir-pasta", help="abre ~/Simba Conta (atalhos para tudo o que é sincronizado)").set_defaults(f=cmd_abrir_pasta)
     p = sub.add_parser("boas-vindas", help="tela da primeira inicialização (mostrar: código 0 se deve aparecer)")
     p.add_argument("acao", choices=["mostrar", "marcar", "fechar", "liga", "desliga"],
                    help="liga/desliga: oferecer o login no 1º boot das instalações pela ISO")

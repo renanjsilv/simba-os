@@ -178,6 +178,25 @@ def svg_wifi(fg, bg, ac):
             f"<circle cx=\"120\" cy=\"166\" r=\"9\" fill=\"{fg}\"/></svg>")
 
 
+def svg_remoto(fg, bg, ac):
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 200">'
+        f'<circle cx="120" cy="100" r="96" fill="{fg}" fill-opacity=".06"/>'
+        f'<rect x="28" y="44" width="112" height="74" rx="8" fill="{bg}" stroke="{fg}" stroke-width="4" stroke-opacity=".85"/>'
+        f'<rect x="36" y="52" width="96" height="58" rx="4" fill="{fg}" fill-opacity=".08"/>'
+        f'<path d="M72 118v16M56 134h56" stroke="{fg}" stroke-width="4" stroke-linecap="round" stroke-opacity=".85"/>'
+        f'<rect x="156" y="68" width="56" height="92" rx="10" fill="{bg}" stroke="{fg}" stroke-width="4" stroke-opacity=".95"/>'
+        f'<rect x="162" y="78" width="44" height="68" rx="4" fill="{fg}" fill-opacity=".08"/>'
+        f'<circle cx="184" cy="152" r="3" fill="{fg}" fill-opacity=".6"/>'
+        f'<path d="M128 72a22 22 0 0 1 20 12" fill="none" stroke="{ac}" stroke-width="3.5" stroke-linecap="round"/>'
+        f'<path d="M124 84a12 12 0 0 1 14 8" fill="none" stroke="{ac}" stroke-width="3" stroke-linecap="round"/>'
+        f'<circle cx="140" cy="116" r="14" fill="{ac}"/>'
+        f'<path d="M136 116v-3a4 4 0 0 1 8 0v3m-5 4v2" fill="none" stroke="{bg}" stroke-width="2.5" stroke-linecap="round"/>'
+        f'<rect x="134" y="116" width="12" height="9" rx="2" fill="{bg}"/>'
+        f'</svg>'
+    )
+
+
 def internet_ok_rapido():
     """Há rede (sem esperar o teste de conectividade do NetworkManager)."""
     try:
@@ -490,8 +509,8 @@ class Janela(Adw.ApplicationWindow):
         self.carrossel = Adw.Carousel(allow_scroll_wheel=False, allow_mouse_drag=False, spacing=0,
                                       hexpand=True, vexpand=True)
         self.carrossel.connect("page-changed", self.pagina_mudou)
-        for montar in (self.p_inicio, self.p_wifi, self.p_conta, self.p_draco, self.p_agentes, self.p_aparencia,
-                       self.p_loja, self.p_escritorio, self.p_atalhos, self.p_pronto):
+        for montar in (self.p_inicio, self.p_wifi, self.p_conta, self.p_draco, self.p_agentes, self.p_remoto,
+                       self.p_aparencia, self.p_loja, self.p_escritorio, self.p_atalhos, self.p_pronto):
             self.carrossel.append(montar())
         vista.set_content(self.carrossel)
 
@@ -1194,6 +1213,58 @@ class Janela(Adw.ApplicationWindow):
             return False
         em_segundo_plano(atualizar, pronto)
 
+    def p_remoto(self):
+        caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, halign=Gtk.Align.CENTER)
+
+        dicas = Gtk.Box(spacing=10, halign=Gtk.Align.CENTER)
+        for rotulo in (_t("Multiplataforma: Linux · Windows · Android"),
+                       _t("Criptografia de ponta a ponta"),
+                       _t("Conexão direta P2P")):
+            c = Gtk.Label(label=rotulo)
+            c.add_css_class("chip")
+            dicas.append(c)
+        caixa.append(dicas)
+
+        cartao = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=24, halign=Gtk.Align.CENTER)
+        cartao.add_css_class("cartao-remoto")
+
+        # QR Code para baixar o APK no celular Android
+        url_apk = "https://github.com/renanjsilv/simba-os/releases/download/simba-remoto-v1.7/Simba-Remoto.apk"
+        qr_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, halign=Gtk.Align.CENTER)
+        try:
+            r = subprocess.run(["qrencode", "-s", "4", "-m", "2", "-o", "-", url_apk],
+                               capture_output=True, check=True)
+            tex = Gdk.Texture.new_from_bytes(GLib.Bytes.new(r.stdout))
+            pic = Gtk.Picture.new_for_paintable(tex)
+            pic.set_size_request(130, 130)
+            pic.add_css_class("qr-code-img")
+            qr_frame = Gtk.Box(halign=Gtk.Align.CENTER)
+            qr_frame.append(pic)
+            qr_box.append(qr_frame)
+        except Exception:
+            pass
+        lbl_qr = Gtk.Label(label=_t("Escaneie para baixar o app Android"),
+                           justify=Gtk.Justification.CENTER)
+        lbl_qr.add_css_class("dim-label")
+        qr_box.append(lbl_qr)
+        cartao.append(qr_box)
+
+        acoes_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, valign=Gtk.Align.CENTER)
+        b_abrir = self.botao(_t("Abrir o Simba Remoto"), lambda: self.abrir(["simba-remoto"]), True,
+                             "network-workgroup-symbolic")
+        b_win = self.botao(_t("Baixar para Windows (EXE)"),
+                           lambda: self.abrir(["xdg-open", "https://github.com/renanjsilv/simba-os/releases/download/simba-remoto-v1.7/SimbaRemoto.exe"]),
+                           False, "folder-download-symbolic")
+        acoes_box.append(b_abrir)
+        acoes_box.append(b_win)
+        cartao.append(acoes_box)
+        caixa.append(cartao)
+
+        return self.pagina(_t("Simba Remoto: acesse de onde estiver"),
+                           _t("Conecte-se e controle seu computador ou outros PCs à distância com rapidez "
+                              "e segurança. Já vem pronto no Simba OS e também funciona no Android e Windows."),
+                           svg_remoto, caixa, tamanho=150)
+
     def p_aparencia(self):
         linha = Gtk.Box(spacing=22, halign=Gtk.Align.CENTER)
         for tema, rotulo, claro in (("black", _t("Escuro"), False), ("white", _t("Claro"), True)):
@@ -1684,6 +1755,17 @@ class Janela(Adw.ApplicationWindow):
           .badge-pacman {{ background-color: {mix(realce, fundo, 0.8)}; color: {realce}; }}
           .badge-aur {{ background-color: {mix("#f5a623", fundo, 0.8)}; color: #f5a623; }}
           .badge-flatpak {{ background-color: {mix("#26a69a", fundo, 0.8)}; color: #26a69a; }}
+          .cartao-remoto {{
+            background-color: {superficie};
+            border: 1px solid {linha};
+            border-radius: 14px;
+            padding: 16px 20px;
+          }}
+          .qr-code-img {{
+            border-radius: 8px;
+            background-color: #ffffff;
+            padding: 6px;
+          }}
         """)
         self.mascote.set_from_file("/usr/share/simba-apps/marca-pixel/retrato-1152.png")  # retrato em pixel art (claro e escuro)
         for img, func in self.ilustracoes:

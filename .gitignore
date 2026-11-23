@@ -21,3 +21,4 @@ pacotes/*/pkg/
 **/wake-train/
 **/recordings/
 pacotes/simba/raiz/etc/skel/.local/share/nvim/lazy/
+pacotes/simba-apps/raiz/usr/share/simba-apps/conta/google-oauth.json

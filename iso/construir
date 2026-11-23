@@ -58,6 +58,7 @@ cat > "$WORK/pacman.conf" <<'EOF'
 HoldPkg = pacman glibc
 Architecture = auto
 ParallelDownloads = 5
+CacheDir = /var/cache/pacman/pkg
 SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
 

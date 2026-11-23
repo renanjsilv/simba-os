@@ -19,7 +19,7 @@ barra de tarefas, Menu Iniciar, Configurações e aplicativos próprios, em port
 </p>
 
 <p>
-<a href="https://sourceforge.net/projects/simba-os/files/0.2.0/"><img alt="Baixar o Simba OS 0.2.0" src="https://img.shields.io/badge/Baixar_ISO-0.2.0_%C2%B7_4%2C5_GB-2ea44f?style=for-the-badge&logo=linux&logoColor=white"></a>
+<a href="https://sourceforge.net/projects/simba-os/files/1.0.0/"><img alt="Baixar o Simba OS 1.0" src="https://img.shields.io/badge/Baixar_ISO-1.0_%C2%B7_4%2C5_GB-2ea44f?style=for-the-badge&logo=linux&logoColor=white"></a>
 </p>
 
 <p>
@@ -49,9 +49,9 @@ Todo o sistema está em português do Brasil, com inglês como segunda opção. 
 um pacote pacman comum, com atualizações assinadas.
 
 > [!NOTE]
-> **Versão 0.2.0 (beta).** A ISO está disponível para
-> [download](https://sourceforge.net/projects/simba-os/files/0.2.0/) e o passo a passo está em
-> [docs/INSTALAR.md](docs/INSTALAR.md). Foi testada em máquina virtual e em poucos computadores:
+> **Versão 1.0.** A primeira versão estável. A ISO está disponível para
+> [download](https://sourceforge.net/projects/simba-os/files/1.0.0/), o passo a passo está em
+> [docs/INSTALAR.md](docs/INSTALAR.md) e o que mudou em cada versão, em [docs/CHANGELOG.md](docs/CHANGELOG.md).
 > relatos de problemas nas [Issues](https://github.com/renanjsilv/simba-os/issues) ajudam muito.
 
 ## O que vem no sistema
@@ -132,16 +132,16 @@ O sistema vem com papéis de parede próprios em pixel art moderna e fotografias
 
 ### Pela ISO
 
-**[Baixar o Simba OS 0.2.0](https://sourceforge.net/projects/simba-os/files/0.2.0/)** (4,5 GB, x86_64, UEFI)
+**[Baixar o Simba OS 1.0](https://sourceforge.net/projects/simba-os/files/1.0.0/)** (4,5 GB, x86_64, UEFI)
 
 O passo a passo completo, do download ao primeiro uso, está em **[docs/INSTALAR.md](docs/INSTALAR.md)**:
 conferir o download, gravar o pendrive, dar boot, as perguntas do instalador e problemas comuns.
 
 | | |
 |---|---|
-| Arquivo | `simba-os-0.2.0-x86_64.iso` |
+| Arquivo | `simba-os-1.0.0-x86_64.iso` |
 | Tamanho | 4,5 GB |
-| SHA-256 | `1b69eb72148bd7ff5f9fbff33cdad9513456496f732349440011d2bea6fef993` |
+| SHA-256 | `2a3dd39c155395824715bd83f8ca7e7e52b37da63361be577cfb629fac607aae` |
 | Requisitos | x86_64, UEFI (Secure Boot pode ficar ligado), disco de 25 GB ou mais (todo apagado) |
 
 ### Num Arch Linux já instalado

@@ -1229,7 +1229,7 @@ class Janela(Adw.ApplicationWindow):
         cartao.add_css_class("cartao-remoto")
 
         # QR Code para baixar o APK no celular Android
-        url_apk = "https://github.com/renanjsilv/simba-os/releases/download/simba-remoto-v1.7/Simba-Remoto.apk"
+        url_apk = "https://github.com/renanjsilv/simba-os/releases/download/simba-remoto-v1.8/Simba-Remoto.apk"
         qr_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, halign=Gtk.Align.CENTER)
         try:
             r = subprocess.run(["qrencode", "-s", "4", "-m", "2", "-o", "-", url_apk],
@@ -1253,7 +1253,7 @@ class Janela(Adw.ApplicationWindow):
         b_abrir = self.botao(_t("Abrir o Simba Remoto"), lambda: self.abrir(["simba-remoto"]), True,
                              "network-workgroup-symbolic")
         b_win = self.botao(_t("Baixar para Windows (EXE)"),
-                           lambda: self.abrir(["xdg-open", "https://github.com/renanjsilv/simba-os/releases/download/simba-remoto-v1.7/SimbaRemoto.exe"]),
+                           lambda: self.abrir(["xdg-open", "https://github.com/renanjsilv/simba-os/releases/download/simba-remoto-v1.8/SimbaRemoto.exe"]),
                            False, "folder-download-symbolic")
         acoes_box.append(b_abrir)
         acoes_box.append(b_win)

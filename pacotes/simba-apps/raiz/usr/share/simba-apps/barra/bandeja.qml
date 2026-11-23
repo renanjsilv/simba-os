@@ -136,7 +136,7 @@ Item {
   }
 
   Timer {
-    interval: painelSync.visible ? 4000 : 15000
+    interval: painelSync.visible ? (root.syncRodando ? 1500 : 4000) : 15000
     repeat: true
     running: true
     triggeredOnStart: true
@@ -1032,7 +1032,7 @@ Item {
             width: parent.width
 
             Text {
-              text: I18n.t("Arquivos recentes")
+              text: (root.syncData && root.syncData.envio && root.syncData.envio.ativo) ? I18n.t("Sincronizando agora") : I18n.t("Arquivos recentes")
               color: "#a7a7ad"
               font.family: root.fonte
               font.pixelSize: 12
@@ -1047,8 +1047,13 @@ Item {
             }
 
             Text {
-              visible: root.syncData && root.syncData.recentes && root.syncData.recentes.length > 0
-              text: String(root.syncData && root.syncData.recentes ? root.syncData.recentes.length : 0) + " " + I18n.t("itens")
+              visible: !!(root.syncData && ((root.syncData.envio && root.syncData.envio.ativo) || (root.syncData.recentes && root.syncData.recentes.length > 0)))
+              text: {
+                var e = root.syncData && root.syncData.envio
+                if (e && e.ativo && e.total_arquivos > 0)
+                  return e.arquivos + "/" + e.total_arquivos + (e.fila > 0 ? " · " + e.fila + " " + I18n.t("na fila") : "")
+                return String(root.syncData && root.syncData.recentes ? root.syncData.recentes.length : 0) + " " + I18n.t("itens")
+              }
               color: "#6e6e76"
               font.family: root.fonte
               font.pixelSize: 11
@@ -1161,7 +1166,9 @@ Item {
                       text: {
                         var p = itemRecente.modelData.pasta || ""
                         if (itemRecente.modelData.status === "sincronizando") {
-                          return (p ? p + " · " : "") + I18n.t("Enviando alterações…")
+                          var t = itemRecente.modelData.tamanho || 0
+                          var tam = t >= 1048576 ? Math.round(t / 1048576) + " MB" : (t >= 1024 ? Math.round(t / 1024) + " KB" : t + " B")
+                          return (p ? p + " · " : "") + tam
                         }
                         return p
                       }
@@ -1186,7 +1193,7 @@ Item {
                           height: parent.height
                           radius: 1.5
                           color: "#4285F4"
-                          width: Math.max(8, parent.width * Math.min(1.0, (itemRecente.modelData.progresso_pct || 65) / 100))
+                          width: Math.max(8, parent.width * Math.min(1.0, (itemRecente.modelData.progresso_pct || 0) / 100))
                           Behavior on width { NumberAnimation { duration: 250 } }
                         }
                       }

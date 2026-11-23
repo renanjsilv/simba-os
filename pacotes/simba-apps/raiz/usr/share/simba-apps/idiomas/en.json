@@ -2954,5 +2954,20 @@
   "Sincronizando %1": "Syncing %1",
   "pastas: %1": "folders: %1",
   "muitos arquivos apagados de uma vez em %1 — nada foi apagado; confira e sincronize de novo": "too many files deleted at once in %1 — nothing was deleted; check and sync again",
-  "Entre de novo na conta Google para continuar sincronizando: o acesso antigo está sendo desativado pelo Google. Suas pastas e escolhas ficam como estão.": "Sign in to your Google account again to keep syncing: the old access is being retired by Google. Your folders and choices stay as they are."
+  "Entre de novo na conta Google para continuar sincronizando: o acesso antigo está sendo desativado pelo Google. Suas pastas e escolhas ficam como estão.": "Sign in to your Google account again to keep syncing: the old access is being retired by Google. Your folders and choices stay as they are.",
+  "Enviando configurações": "Uploading settings",
+  "Enviando histórico e programas": "Uploading history and programs",
+  "%1 de %2 arquivos": "%1 of %2 files",
+  "de": "of",
+  "há %1 min": "%1 min ago",
+  "há %1 h": "%1 h ago",
+  "há %1 dias": "%1 days ago",
+  "Recebendo… (%1%)": "Downloading… (%1%)",
+  "Enviando… (%1%)": "Uploading… (%1%)",
+  "Apagado %1": "Deleted %1",
+  "Atualizado %1": "Updated %1",
+  "Sincronizado %1": "Synced %1",
+  "Sincronizando agora": "Syncing now",
+  "na fila": "queued",
+  "Terminal": "Terminal"
 }

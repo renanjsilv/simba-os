@@ -729,6 +729,152 @@ def remover_pasta_local():
         pass
 
 
+# ── acompanhamento real do envio (painel da nuvem) ───────────────────────────
+# O rclone roda com --use-json-log: as estatísticas de cada segundo trazem os arquivos sendo
+# transferidos AGORA (com o percentual de cada um) e cada arquivo concluído vem numa linha.
+# Tudo vai para envio.json (arquivo próprio, escrito ~1×/s): o painel lista o que está subindo
+# de verdade e o histórico do que já foi. Antes a lista era montada pela data dos arquivos no
+# disco, e os dois primeiros apareciam "Enviando" com o percentual geral.
+ENVIO = HOME / ".local/state/conta/envio.json"
+ENVIO_MAX_HISTORICO = 300
+_ACOES_FEITAS = {"Copied (new)": "novo", "Copied (replaced existing)": "alterado", "Updated modification time in destination": "alterado",
+                 "Copied (server-side copy)": "novo", "Moved (server-side)": "movido", "Deleted": "apagado"}
+_NOMES_PASTAS = {".config": _t("Configurações"), ".local": _t("Configurações"), ".bashrc": _t("Terminal"),
+                 ".bash_history": _t("Terminal"), ".bash_profile": _t("Terminal"), ".XCompose": _t("Configurações"),
+                 ".gitconfig": _t("Configurações")}
+
+
+class Acompanhamento:
+    def __init__(self, rotulo, pasta="", local_raiz=None, remoto=""):
+        self.rotulo, self.pasta = rotulo, pasta
+        self.local_raiz = str(local_raiz) if local_raiz else ""
+        self.remoto = remoto
+        self.ultimo = 0.0
+        self.saida = []                    # linhas cruas (para achar erros)
+        anterior = ler_json(ENVIO, {})
+        self.concluidos = list(anterior.get("concluidos") or [])[-ENVIO_MAX_HISTORICO:]
+        self.dados = {"ativo": True, "fase": rotulo, "bytes": 0, "total_bytes": 0, "arquivos": 0,
+                      "total_arquivos": 0, "pct": 0, "velocidade": 0, "eta": None, "transferindo": [],
+                      "fila": 0, "concluidos": self.concluidos}
+        self._gravar(forcar=True)
+
+    def _pasta_de(self, nome):
+        if self.pasta:
+            return self.pasta
+        primeiro = nome.split("/", 1)[0]
+        return _NOMES_PASTAS.get(primeiro, primeiro)
+
+    def _direcao(self, src):
+        # bisync transfere nos dois sentidos: srcFs local = enviando; remoto = recebendo
+        return "recebendo" if src and not str(src).startswith("/") else "enviando"
+
+    def linha(self, linha):
+        self.saida.append(linha)
+        if len(self.saida) > 400:
+            del self.saida[:100]
+        try:
+            ev = json.loads(linha)
+        except ValueError:
+            return
+        st = ev.get("stats")
+        if isinstance(st, dict):
+            self._stats(st)
+            return
+        acao = _ACOES_FEITAS.get(ev.get("msg", ""))
+        obj = ev.get("object")
+        if acao and obj and not str(obj).endswith(".simba-conta"):
+            nome = str(obj)
+            self.concluidos.append({
+                "nome": os.path.basename(nome), "rel": nome, "pasta": self._pasta_de(nome), "acao": acao,
+                "tamanho": ev.get("size") or 0, "quando": time.time(),
+                "caminho": str(Path(self.local_raiz) / nome) if self.local_raiz else "",
+            })
+            del self.concluidos[:-ENVIO_MAX_HISTORICO]
+            self._gravar()
+
+    def _stats(self, st):
+        total_b = int(st.get("totalBytes") or 0)
+        feitos_b = int(st.get("bytes") or 0)
+        total_a = int(st.get("totalTransfers") or 0)
+        feitos_a = int(st.get("transfers") or 0)
+        transf = []
+        for t in st.get("transferring") or []:
+            nome = str(t.get("name") or "")
+            if nome.endswith(".simba-conta"):
+                continue
+            transf.append({"nome": os.path.basename(nome), "rel": nome, "pasta": self._pasta_de(nome),
+                           "pct": int(t.get("percentage") or 0), "tamanho": int(t.get("size") or 0),
+                           "enviado": int(t.get("bytes") or 0), "velocidade": float(t.get("speed") or 0),
+                           "direcao": self._direcao(t.get("srcFs"))})
+        self.dados.update({
+            "bytes": feitos_b, "total_bytes": total_b, "arquivos": feitos_a, "total_arquivos": total_a,
+            "pct": int(feitos_b * 100 / total_b) if total_b else (100 if total_a and feitos_a >= total_a else 0),
+            "velocidade": float(st.get("speed") or 0), "eta": st.get("eta"), "transferindo": transf,
+            "fila": max(0, total_a - feitos_a - len(transf)),
+        })
+        if total_a:
+            salvar_estado(progresso=f"{self.rotulo}: " + _t("%1 de %2 arquivos", feitos_a, total_a)
+                          + f" · {_mb(feitos_b)} " + _t("de") + f" {_mb(total_b)} ({self.dados['pct']}%)")
+        self._gravar()
+
+    def _gravar(self, forcar=False):
+        if not forcar and time.time() - self.ultimo < 1:
+            return
+        self.ultimo = time.time()
+        self.dados["concluidos"] = self.concluidos
+        try:
+            gravar_json(ENVIO, self.dados)
+        except OSError:
+            pass
+
+    def acompanhar(self, proc):
+        for linha in proc.stderr:
+            self.linha(linha.strip())
+        codigo = proc.wait()
+        self.dados["transferindo"] = []
+        self._gravar(forcar=True)
+        return codigo
+
+    def erro(self):
+        for l in reversed(self.saida):
+            try:
+                ev = json.loads(l)
+            except ValueError:
+                if "ERROR" in l:
+                    return l
+                continue
+            if ev.get("level") in ("error", "critical") and ev.get("msg"):
+                return ev["msg"]
+        return ""
+
+
+def encerrar_envio():
+    # outra sincronização em andamento (ex.: o timer disparou durante uma manual): não mexe
+    try:
+        with open(TRAVA, "a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(f, fcntl.LOCK_UN)
+    except BlockingIOError:
+        return
+    except OSError:
+        pass
+    d = ler_json(ENVIO, {})
+    if d:
+        d.update({"ativo": False, "transferindo": [], "fila": 0})
+        try:
+            gravar_json(ENVIO, d)
+        except OSError:
+            pass
+
+
+def _mb(b):
+    b = float(b or 0)
+    for u, n in (("GB", 1 << 30), ("MB", 1 << 20), ("KB", 1 << 10)):
+        if b >= n:
+            return f"{b / n:.1f} {u}".replace(".", _DEC) if u == "GB" else f"{b / n:.0f} {u}"
+    return f"{int(b)} B"
+
+
 # ── pastas sincronizadas entre as máquinas (bidirecional) ────────────────────
 # As pastas escolhidas (Documentos, Imagens, Área de trabalho, extras) ficam IGUAIS em todas
 # as máquinas da conta: `rclone bisync` entre cada pasta e dados/pastas/<nome> no Drive.
@@ -856,7 +1002,7 @@ def _bisync(local, remoto, trabalho, resync, lixeira):
            "--exclude", ".~lock.*#", "--exclude", "*.part", "--exclude", "*.crdownload",
            "--exclude", ".Trash-*/**", "--exclude", "**/.cache/**", "--exclude", "**/__pycache__/**",
            "--exclude", "**/node_modules/**", "--exclude", "**/.git/**",
-           "--stats", "2s", "--stats-one-line", "-v"]
+           "--stats", "1s", "--use-json-log", "-v"]
     if resync:
         # 1ª vez: mescla (o que só existe de um lado vai para o outro; igual dos dois lados
         # fica o mais novo) — nunca apaga nada
@@ -895,26 +1041,19 @@ def sincronizar_pastas(c, silencioso=True):
         primeira = chave not in iniciadas
         if primeira:
             rc("mkdir", remoto, check=False, timeout=60)
-        proc = _bisync(local, remoto, trabalho, primeira, lixeira)
-        saida = []
-
-        def ler(proc=proc):
-            for linha in proc.stderr:
-                saida.append(linha)
-                if "%" in linha and "ETA" in linha:
-                    salvar_estado(progresso=f"{rotulo}: {_legivel(linha.strip())}")
-            return proc.wait()
-        codigo = ler()
+        acomp = Acompanhamento(rotulo, p["nome"], local, remoto)
+        codigo = acomp.acompanhar(_bisync(local, remoto, trabalho, primeira, lixeira))
+        saida = acomp.saida
         if codigo != 0 and not primeira and any("--resync" in l for l in saida):
             # histórico do bisync perdido/corrompido: mescla de novo (seguro, não apaga nada)
-            proc = _bisync(local, remoto, trabalho, True, lixeira)
-            saida = []
-            codigo = ler(proc)
+            acomp = Acompanhamento(rotulo, p["nome"], local, remoto)
+            codigo = acomp.acompanhar(_bisync(local, remoto, trabalho, True, lixeira))
+            saida = acomp.saida
         if codigo == 0:
             iniciadas.add(chave)
             salvar_estado(bisync_iniciadas=sorted(iniciadas))
         else:
-            ultimo = next((l.strip() for l in reversed(saida) if "ERROR" in l or "error" in l.lower()), "")
+            ultimo = acomp.erro()
             if any("too many deletes" in l.lower() or "max-delete" in l.lower() for l in saida):
                 ultimo = _t("muitos arquivos apagados de uma vez em %1 — nada foi apagado; confira e sincronize de novo", p["nome"])
             erros.append(f"{p['nome']}: {ultimo[-200:]}")
@@ -1039,96 +1178,56 @@ def cmd_status(_a):
             "padrao": False,
         })
 
-    # Arquivos recentes para o painel estilo OneDrive
-    recentes = []
-    pastas_alvo = [HOME / "Documents", HOME / "Documentos", HOME / "Pictures", HOME / "Imagens", HOME / "Desktop", HOME / "Área de trabalho"]
-    for p_str in c.get("pastas_personalizadas", []):
-        alvo = HOME / p_str if not os.path.isabs(p_str) else Path(p_str)
-        if alvo.is_dir() and alvo not in pastas_alvo:
-            pastas_alvo.append(alvo)
-
-    candidatos = []
+    # Painel da nuvem: o que está subindo/descendo AGORA (percentual real de cada arquivo, do
+    # rclone) e o histórico do que já foi sincronizado (envio.json, ver Acompanhamento).
+    envio = ler_json(ENVIO, {})
+    em_andamento = bool(envio.get("ativo") and (rodando or e.get("sincronizando")))
     agora_ts = time.time()
-    for pasta_dir in ([] if rapido else pastas_alvo):
-        if not pasta_dir.is_dir():
-            continue
-        nome_pasta = pasta_dir.name
-        try:
-            for root, dirs, files in os.walk(pasta_dir):
-                dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("Cache", "cache", "build")]
-                for f in files:
-                    if f.startswith("."):
-                        continue
-                    fp = Path(root) / f
-                    try:
-                        st = fp.stat()
-                        candidatos.append((st.st_mtime, f, nome_pasta, st.st_size, str(fp)))
-                    except OSError:
-                        pass
-        except OSError:
-            pass
 
-    candidatos.sort(key=lambda x: x[0], reverse=True)
-    for idx, (mtime, nome_arq, pasta_nome, tamanho, caminho_completo) in enumerate(candidatos[:35]):
-        dt_seg = max(0, int(agora_ts - mtime))
-        is_uploading = (rodando or e.get("sincronizando")) and (idx == 0 or dt_seg < 120)
+    def _ha(seg):
+        seg = max(0, int(seg))
+        if seg < 60:
+            return _t("agora")
+        if seg < 3600:
+            return _t("há %1 min", seg // 60)
+        if seg < 86400:
+            return _t("há %1 h", seg // 3600)
+        return _t("há %1 dias", seg // 86400)
 
-        if is_uploading:
-            status_item = "sincronizando"
-            pct = 65
-            if e.get("progresso"):
-                m_pct = re.search(r"(\d+)%", e.get("progresso", ""))
-                if m_pct:
-                    pct = int(m_pct.group(1))
-            progresso_pct = pct
-            tempo_txt = _t("Enviando… (%1%)", pct)
-        elif pausado:
-            status_item = "pausado"
-            progresso_pct = 0
-            tempo_txt = _t("Pausado")
-        elif e.get("resultado") == "erro" and dt_seg < 300:
-            status_item = "erro"
-            progresso_pct = 0
-            tempo_txt = _t("Erro")
-        elif dt_seg < 60:
-            status_item = "ok"
-            progresso_pct = 100
-            tempo_txt = _t("Enviado agora")
-        elif dt_seg < 3600:
-            status_item = "ok"
-            progresso_pct = 100
-            tempo_txt = _t("Salvo há %1 min", dt_seg // 60)
-        elif dt_seg < 86400:
-            status_item = "ok"
-            progresso_pct = 100
-            tempo_txt = _t("Salvo há %1 h", dt_seg // 3600)
-        else:
-            status_item = "ok"
-            progresso_pct = 100
-            tempo_txt = _t("Salvo há %1 dias", dt_seg // 86400)
-
-        recentes.append({
-            "nome": nome_arq,
-            "pasta": pasta_nome,
-            "tamanho": tamanho,
-            "caminho": caminho_completo,
-            "mtime": mtime,
-            "estado": tempo_txt,
-            "status": status_item,
-            "progresso_pct": progresso_pct
-        })
-
-    if e.get("ultima"):
-        recentes.append({
-            "nome": _t("Papel de parede e tema"),
-            "pasta": _t("Configurações"),
-            "tamanho": 0,
-            "caminho": str(HOME / ".config"),
-            "mtime": agora_ts,
-            "estado": _t("Salvo há 10 min"),
-            "status": "ok",
-            "progresso_pct": 100
-        })
+    recentes = []
+    if em_andamento:
+        for t in envio.get("transferindo") or []:
+            recebendo = t.get("direcao") == "recebendo"
+            recentes.append({
+                "nome": t.get("nome", ""), "pasta": t.get("pasta", ""), "tamanho": t.get("tamanho", 0),
+                "caminho": "", "mtime": agora_ts, "status": "sincronizando", "direcao": t.get("direcao", "enviando"),
+                "progresso_pct": t.get("pct", 0),
+                "estado": (_t("Recebendo… (%1%)", t.get("pct", 0)) if recebendo else _t("Enviando… (%1%)", t.get("pct", 0))),
+            })
+    if not rapido:
+        for item in reversed(envio.get("concluidos") or []):
+            acao = item.get("acao")
+            quando = _ha(agora_ts - float(item.get("quando") or agora_ts))
+            if acao == "apagado":
+                txt = _t("Apagado %1", quando)
+            elif acao == "alterado":
+                txt = _t("Atualizado %1", quando)
+            else:
+                txt = _t("Sincronizado %1", quando)
+            recentes.append({
+                "nome": item.get("nome", ""), "pasta": item.get("pasta", ""), "tamanho": item.get("tamanho", 0),
+                "caminho": item.get("caminho", "") if acao != "apagado" else "", "mtime": item.get("quando", 0),
+                "status": "pausado" if pausado else "ok", "progresso_pct": 100, "estado": txt,
+            })
+            if len(recentes) >= 200:
+                break
+    resumo_envio = {
+        "ativo": em_andamento, "fase": envio.get("fase", ""), "arquivos": envio.get("arquivos", 0),
+        "total_arquivos": envio.get("total_arquivos", 0), "bytes": envio.get("bytes", 0),
+        "total_bytes": envio.get("total_bytes", 0), "pct": envio.get("pct", 0),
+        "velocidade": envio.get("velocidade", 0), "fila": envio.get("fila", 0) if em_andamento else 0,
+        "transferindo": len(envio.get("transferindo") or []) if em_andamento else 0,
+    }
 
     cota = obter_cota_drive(somente_cache=rapido) if lig else {}
     cota_total = int(cota.get("total") or 0)
@@ -1166,6 +1265,7 @@ def cmd_status(_a):
         "pastas_excluidas": c.get("pastas_excluidas", []),
         "pastas_info": pastas_info,
         "recentes": recentes,
+        "envio": resumo_envio,
         "cota_total": cota_total,
         "cota_usado": cota_usado,
         "cota_livre": cota_livre,
@@ -2271,6 +2371,13 @@ def _atualizar_timer():
 
 
 def cmd_sincronizar(a):
+    try:
+        return _sincronizar(a)
+    finally:
+        encerrar_envio()
+
+
+def _sincronizar(a):
     if not conectado():
         print(_t("não conectado"), file=sys.stderr)
         return 0 if a.silencioso else 1  # timer de um clone ainda sem login: não é falha
@@ -2359,7 +2466,7 @@ def cmd_sincronizar(a):
             arq_lista.write_text("\n".join(lista) + "\n")
             # --fast-list: lista a pasta do Drive em poucas chamadas (antes, uma por pasta:
             # centenas a cada 20 min, o que estourava o limite de uso do Google).
-            comuns = ["--skip-links", "--stats", "2s", "--stats-one-line", "-v", "--transfers", "4",
+            comuns = ["--skip-links", "--stats", "1s", "--use-json-log", "-v", "--transfers", "4",
                       "--fast-list", "--tpslimit", "8", "--retries", "3", "--low-level-retries", "10"]
             dados = remoto_dados(c)
             # O que for apagado ou substituído no Drive vai para lixeira/<data> (30 dias).
@@ -2367,11 +2474,11 @@ def cmd_sincronizar(a):
             p = subprocess.Popen([rclone_bin(), "sync", str(HOME), f"{dados}/home", "--files-from", str(arq_lista),
                                   "--delete-excluded", "--backup-dir", lixeira, *comuns],
                                  stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
-            if _progresso(p, _t("Enviando arquivos")) != 0:
+            if Acompanhamento(_t("Enviando configurações"), "", HOME).acompanhar(p) != 0:
                 raise RuntimeError(_t("falha ao enviar os arquivos (veja a conexão)"))
             p = subprocess.Popen([rclone_bin(), "sync", str(EXTRA), f"{dados}/extra", *comuns],
                                  stderr=subprocess.PIPE, stdout=subprocess.DEVNULL, text=True)
-            if _progresso(p, _t("Enviando extras")) != 0:
+            if Acompanhamento(_t("Enviando histórico e programas"), _t("Configurações")).acompanhar(p) != 0:
                 raise RuntimeError(_t("falha ao enviar histórico e lista de programas"))
             rc("rcat", f"{remoto_base()}/meta.json", entrada=json.dumps(meta, ensure_ascii=False, indent=2))
             limpar_lixeira(dados)

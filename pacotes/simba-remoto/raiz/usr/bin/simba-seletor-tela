@@ -1,0 +1,14 @@
+#!/bin/sh
+# Seletor de compartilhamento de tela do xdg-desktop-portal-hyprland (xdph.conf: custom_picker_binary).
+# Se o Simba Remoto acabou de pedir a tela (acesso remoto sem ninguém no PC), escolhe o monitor
+# sozinho; em qualquer outro caso abre o seletor normal.
+pedido="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/simba-remoto/escolher-tela"
+if [ -f "$pedido" ] && [ $(( $(date +%s) - $(stat -c %Y "$pedido") )) -le 30 ]; then
+  monitor=$(head -n1 "$pedido")
+  rm -f "$pedido"
+  if [ -n "$monitor" ]; then
+    echo "[SELECTION]r/screen:$monitor"
+    exit 0
+  fi
+fi
+exec hyprland-preview-share-picker "$@"

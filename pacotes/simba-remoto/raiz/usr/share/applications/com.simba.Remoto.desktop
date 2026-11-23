@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Simba Remoto
+Comment=Acesso remoto P2P sem servidor
+Exec=simba-remoto
+Icon=com.simba.Remoto
+Terminal=false
+Type=Application
+Categories=Network;RemoteAccess;
+Keywords=anydesk;remoto;acesso;rdp;vnc;simba;
+StartupWMClass=com.simba.Remoto

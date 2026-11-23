@@ -1,0 +1,16 @@
+# Simba OS — Simba Remoto: acesso remoto P2P sem servidor (DHT BEP 44 + WebRTC)
+pkgname=simba-remoto
+pkgver=1.8.0
+pkgrel=1
+pkgdesc="Simba OS: acesso remoto P2P sem servidor (cliente e servidor)"
+arch=('x86_64')
+url="https://github.com/SIMBA_GH_USER/simba-os"
+license=('MIT')
+options=('!debug' '!strip')
+depends=('python>=3.12' 'python-gobject' 'gtk4' 'libadwaita' 'python-av' 'python-numpy' 'python-cryptography' 'python-cffi' 'python-evdev' 'python-pyee' 'python-dnspython' 'python-pyopenssl' 'python-ifaddr' 'libsrtp' 'wtype' 'hyprland')
+install=simba-remoto.install
+
+package() {
+  cp -a "$startdir/raiz/." "$pkgdir/"
+  install -Dm644 "$startdir/../../LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

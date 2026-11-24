@@ -43,7 +43,7 @@ var REGRAS = [
   [/hydra|heroic|lutris|bottles/, "controle"], [/duckstation|retroarch|pcsx|dolphin-emu|ppsspp|emulat/, "controle2"],
   [/transcrever|voxtype|audacity|recorder/, "microfone"],
   [/gerar-iso|iso|brasero/, "disco"], [/disk usage|baobab|gnome-disks|gparted|discos/, "dados"],
-  [/virt-manager|qemu|virtualbox|boxes|remmina/, "monitor"], [/anydesk|rustdesk|teamviewer/, "remoto"],
+  [/virt-manager|qemu|virtualbox|boxes|remmina/, "monitor"], [/simba-remoto|remoto|anydesk|rustdesk|teamviewer/, "remoto"],
   [/calculator|calculadora|qalculate/, "calculadora"], [/text-editor|gedit|kate|mousepad|editor de texto/, "editar"],
   [/btop|htop|system monitor|monitor do sistema|resources|mission center/, "grafico"],
   [/pdf|evince|papers|okular|zathura/, "pdf"], [/1password|keepass|bitwarden|seahorse|senhas/, "cadeado"],

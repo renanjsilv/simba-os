@@ -310,7 +310,7 @@ class Janela(Adw.ApplicationWindow):
             fora = [(_t("Tudo o que identifica você"), _t("Arquivos pessoais, históricos, senhas e logins, sua senha, nome do "
                                                   "computador, Git, favoritos, foto da conta, outros usuários deste PC"))]
         fora.append((_t("Histórico do Claude Code"), _t("Nunca vai, em nenhum tipo de ISO")))
-        fora.append((_t("Identidade desta máquina"), _t("ID do AnyDesk, chaves do SSH do sistema, TPM, machine-id")))
+        fora.append((_t("Identidade desta máquina"), _t("Chaves do SSH do sistema, TPM, machine-id")))
         for g, itens, ic in ((self.grupo_vai, vai, "emblem-ok-symbolic"), (self.grupo_fora, fora, "action-unavailable-symbolic")):
             for t, sub in itens:
                 r = Adw.ActionRow(title=t, subtitle=sub)

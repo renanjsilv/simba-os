@@ -31,7 +31,6 @@ MAPA = [
     (f"{H}/.local/share/transcrever", APPS, "usr/share/simba-apps/transcrever"),
     (f"{H}/.local/share/boas-vindas", APPS, "usr/share/simba-apps/boas-vindas"),
     (f"{H}/.local/share/janelas-nativo", APPS, "usr/share/simba-apps/janelas-nativo"),
-    (f"{H}/.local/share/anydesk-bridge", APPS, "usr/share/simba-apps/anydesk-bridge"),
     (f"{H}/.local/share/simba/idiomas", APPS, "usr/share/simba-apps/idiomas"),
     (f"{H}/.local/share/simba/sistema", APPS, "usr/share/simba-apps/sistema"),
     (f"{H}/.local/share/simba/simba-simbolo.svg", APPS, "usr/share/simba-apps/simba-simbolo.svg"),
@@ -68,7 +67,7 @@ MAPA += [(f"{H}/.local/share/applications/{d}.desktop", APPS, f"usr/share/applic
 MAPA += [(f"{H}/.local/share/applications/com.simba.Draco.desktop", DRACO, "usr/share/applications/com.simba.Draco.desktop")]
 
 UNIDADES = ["botoes-janela.service", "conta-sync.service", "conta-sync.timer", "explorador-nuvem@.service",
-            "simba-atualizar-avisar.service", "simba-atualizar-avisar.timer", "anydesk-bridge.service"]
+            "simba-atualizar-avisar.service", "simba-atualizar-avisar.timer"]
 MAPA += [(f"{H}/.config/systemd/user/{u}", APPS, f"usr/lib/systemd/user/{u}") for u in UNIDADES]
 MAPA += [(f"{H}/.config/systemd/user/{u}", DRACO, f"usr/lib/systemd/user/{u}")
          for u in ("draco-wake.service", "draco-aquecer.service", "draco-limpar-historico.service", "draco-limpar-historico.timer")]

@@ -40,7 +40,6 @@ done
 # 1ª tentativa (antes desta anotação existir) desligou sem anotar: as que costumam ficar ligadas
 [[ -s $ANOT ]] || printf '%s\n' simba-menu-volta.service simba-craft-atualizar.timer simba-flatpak-atualizar.timer | sudo tee "$ANOT" >/dev/null
 mapfile -t ATIVAS < <(sort -u "$ANOT")
-guardar /etc/systemd/system/anydesk.service.d/hyprland-bridge.conf /etc/systemd/system/anydesk.service.d/simba-ordem.conf
 
 passo "4/6  Instalando os pacotes"
 sudo pacman -U --noconfirm --needed \

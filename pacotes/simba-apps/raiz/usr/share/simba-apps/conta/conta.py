@@ -87,7 +87,7 @@ INCLUIR = {
         ".config", ".local/bin", ".local/state/simba",
         ".local/share/applications", ".local/share/icons", ".local/share/fonts",
         ".local/share/gerenciador-tarefas", ".local/share/temas-boot", ".local/share/transcrever",
-        ".local/share/conta", ".local/share/gerar-iso", ".local/share/anydesk-bridge",
+        ".local/share/conta", ".local/share/gerar-iso",
         ".local/share/simba-idioma", ".local/share/nautilus-python", ".local/share/aether",
         ".XCompose", ".gitconfig",
     ],

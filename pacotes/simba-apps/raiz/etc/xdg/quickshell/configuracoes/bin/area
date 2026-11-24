@@ -552,7 +552,7 @@ def desinstalar_atalho(caminho):
             return {}
     o = origem(app_id)
     if not o.get("tipo"):
-        # o atalho da área de trabalho pode ter outro nome (AnyDesk.desktop × anydesk.desktop):
+        # o atalho da área de trabalho pode ter outro nome (maiúsculas × minúsculas):
         # acha o app instalado com o mesmo comando ou o mesmo nome
         exe = ent.get("Desktop Entry", "Exec", fallback="") if ent.has_section("Desktop Entry") else ""
         # comando COMPLETO (sem %u/%f…): só o programa não basta — um jogo aberto pelo Hydra

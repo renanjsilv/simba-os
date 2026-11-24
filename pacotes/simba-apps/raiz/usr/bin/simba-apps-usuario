@@ -38,7 +38,7 @@ echo "== cópias antigas que esconderiam as do sistema"
 for a in configuracoes botoes-janela draco draco-config; do
   [[ -d /etc/xdg/quickshell/$a ]] && guardar "$HOME/.config/quickshell/$a"
 done
-for a in explorador gerar-iso gerenciador-tarefas transcrever boas-vindas janelas-nativo anydesk-bridge; do
+for a in explorador gerar-iso gerenciador-tarefas transcrever boas-vindas janelas-nativo; do
   [[ -d /usr/share/simba-apps/$a ]] && guardar "$HOME/.local/share/$a"
 done
 # Conta: só o código (a pasta também guarda dados da restauração)

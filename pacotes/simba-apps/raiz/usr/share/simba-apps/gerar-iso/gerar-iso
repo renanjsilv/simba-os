@@ -13,7 +13,7 @@ Cria uma ISO instalável com este sistema exatamente como está:
 pacotes, tradução, atalhos, ajustes e configurações.
 
 Fica de fora: arquivos pessoais, senhas e logins salvos, Wi-Fi,
-histórico do Claude Code, ID do AnyDesk.
+histórico do Claude Code.
 
 A ISO é salva em /mnt/dados/gerar-iso/ (~9–11 GB, 20–60 min).
 EOF

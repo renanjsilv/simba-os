@@ -14,9 +14,6 @@ var/lib/libvirt/secrets/secrets-encryption-key
 etc/ssh/ssh_host_*
 var/lib/NetworkManager/secret_key
 
-# Identidade do AnyDesk (cada máquina precisa de um ID próprio)
-etc/anydesk/*
-
 # root
 root/.ssh
 root/.bash_history
@@ -48,8 +45,7 @@ var/lib/simba/migracao-pacotes-*
 etc/pacman.d/gnupg/private-keys-v1.d/*
 etc/pacman.d/gnupg/openpgp-revocs.d/*
 
-# root: identidade do AnyDesk e caches
-root/.anydesk
+# root: caches
 root/.npm
 
 # NetworkManager: concessões de IP, redes vistas e horários (refeitos sozinhos)

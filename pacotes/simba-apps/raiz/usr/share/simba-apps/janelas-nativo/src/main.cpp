@@ -6,7 +6,7 @@
 //      pediu (ou aceitou) "servidor". (O Hyprland responde "servidor" a todos — ver abaixo.)
 //    - org_kde_kwin_server_decoration (GTK3): idem.
 //    - nenhum dos dois (GTK4/libadwaita): o app desenha os próprios botões; sem barra.
-//    - X11: sem barra se _MOTIF_WM_HINTS pede sem bordas (Steam, Chrome X11, AnyDesk).
+//    - X11: sem barra se _MOTIF_WM_HINTS pede sem bordas (Steam, Chrome X11).
 //    Resultado: toda janela tem exatamente um conjunto de botões.
 // 2. Pedidos do próprio app (botões nativos, duplo clique no título, atalhos do app):
 //    xdg_toplevel.set_minimized / set_maximized / unset_maximized e os equivalentes X11
@@ -470,7 +470,7 @@ static void hkOnGetDecoration(CXDGDecorationProtocol* thisptr, CZxdgDecorationMa
 }
 
 // GTK3 decide se desenha a própria barra (CSD) pelo "default_mode" do protocolo KDE: o
-// Hyprland anuncia "servidor" e aí o GTK3 sem headerbar (xournal++, virt-manager, AnyDesk,
+// Hyprland anuncia "servidor" e aí o GTK3 sem headerbar (xournal++, virt-manager,
 // LocalSend...) fica sem botões próprios e ganha a barra do compositor. GTK_CSD=1 não vale no
 // Wayland. Aqui o anúncio passa a ser "cliente" (como no GNOME) e o pedido de cada janela é
 // honrado; exceções na regra "servidor" (nome do processo, /proc/<pid>/comm).

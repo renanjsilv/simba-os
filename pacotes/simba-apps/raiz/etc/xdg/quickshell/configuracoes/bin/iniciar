@@ -176,13 +176,12 @@ def arquivos(termo, n=6):
     return res
 
 # Pacotes que seguram o sistema: o menu não oferece desinstalar.
-PROTEGIDOS = {"simba", "simba-apps", "simba-draco", "simba-keyring", "hyprland", "quickshell",
+PROTEGIDOS = {"simba", "simba-apps", "simba-draco", "simba-keyring", "simba-remoto", "hyprland", "quickshell",
               "uwsm", "systemd", "pacman", "linux", "linux-firmware", "base", "sudo", "polkit",
               "networkmanager", "pipewire", "wireplumber", "sddm", "xdg-desktop-portal-hyprland",
               "bazaar", "flatpak", "gtk4", "libadwaita", "python"}
 # Apps que algum componente do Simba usa por baixo (desinstalar quebraria o recurso).
-PONTE = "Usado pela ponte do AnyDesk (acesso remoto)"
-USADO_POR = {"tigervnc": PONTE, "wayvnc": PONTE, "xorg-server-xvfb": PONTE}
+USADO_POR = {}
 
 
 def _pastas_apps():

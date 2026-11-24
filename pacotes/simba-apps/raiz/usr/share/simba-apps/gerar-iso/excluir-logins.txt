@@ -8,7 +8,6 @@
 .config/gh
 .local/share/keyrings
 .local/share/pki
-.anydesk
 .codex/auth.json
 .codex/installation_id
 .local/share/opencode/auth.json
